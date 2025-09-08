@@ -1,10 +1,11 @@
 import sys
 import math
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit
 from PyQt5.QtOpenGL import QGLWidget
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import glutInit
+from PyQt5.QtCore import pyqtSignal
 
 glutInit()
 
@@ -13,10 +14,14 @@ class CylinderWidget(QGLWidget):
         super().__init__()
         self.height = 1.0
         self.angle = 0.0
+        self.rover_orientation = 0.0  # degrees
         self.cylinder_diameter = 6.5  # meters (default)
         self.cylinder_radius = self.cylinder_diameter / 2.0
         self.cylinder_height = 5.0  # meters (fixed)
-        self.box_size = 0.25  # meters, rover size
+        # Rover dimensions (meters)
+        self.rover_width = 0.2 #rover width
+        self.rover_height = 0.30 #rover radial
+        self.rover_length = 0.20 #rover vertical
         self.ur3e_joints = [0, 0, 0, 0, 0, 0]
         self.point = None
         self.last_mouse_pos = None
@@ -24,14 +29,28 @@ class CylinderWidget(QGLWidget):
         self.camera_elevation = 20.0
         self.camera_distance = 8  # Initial camera distance
 
-    def set_point(self, height, angle, ur3e_joints=None, diameter=None):
+    def set_point(self, height, angle, ur3e_joints=None, diameter=None, rover_orientation=None):
         self.height = height
         self.angle = angle
+        if rover_orientation is not None:
+            self.rover_orientation = rover_orientation
         if diameter is not None:
             self.cylinder_diameter = diameter
             self.cylinder_radius = diameter / 2.0
         if ur3e_joints is not None:
-            self.ur3e_joints = ur3e_joints
+            # Joint limits: Joints 4,5: ±360, Joint 6: infinite, others (example: ±360)
+            limited_joints = []
+            for i, val in enumerate(ur3e_joints):
+                if i in [3, 4]:
+                    # Joints 4, 5: clamp to ±360
+                    limited_joints.append(max(-360, min(360, val)))
+                elif i == 5:
+                    # Joint 6: infinite rotation
+                    limited_joints.append(val)
+                else:
+                    # Other joints: clamp to ±360 (can adjust if needed)
+                    limited_joints.append(max(-360, min(360, val)))
+            self.ur3e_joints = limited_joints
         self.update()
 
     def initializeGL(self):
@@ -118,39 +137,42 @@ class CylinderWidget(QGLWidget):
         gluCylinder(quad, radius, radius, height, slices, 1)
         glPopMatrix()
 
-    def draw_cube(self, size):
-        hs = size / 2.0
+    def draw_cube(self, size=None):
+        # Draw box with custom width, height, length
+        w = self.rover_width / 2.0
+        h = self.rover_height / 2.0
+        l = self.rover_length / 2.0
         glBegin(GL_QUADS)
         # Bottom face
-        glVertex3f(-hs, -hs, -hs)
-        glVertex3f(hs, -hs, -hs)
-        glVertex3f(hs, hs, -hs)
-        glVertex3f(-hs, hs, -hs)
+        glVertex3f(-w, -l, -h)
+        glVertex3f(w, -l, -h)
+        glVertex3f(w, l, -h)
+        glVertex3f(-w, l, -h)
         # Top face
-        glVertex3f(-hs, -hs, hs)
-        glVertex3f(hs, -hs, hs)
-        glVertex3f(hs, hs, hs)
-        glVertex3f(-hs, hs, hs)
+        glVertex3f(-w, -l, h)
+        glVertex3f(w, -l, h)
+        glVertex3f(w, l, h)
+        glVertex3f(-w, l, h)
         # Front face
-        glVertex3f(-hs, -hs, -hs)
-        glVertex3f(hs, -hs, -hs)
-        glVertex3f(hs, -hs, hs)
-        glVertex3f(-hs, -hs, hs)
+        glVertex3f(-w, -l, -h)
+        glVertex3f(w, -l, -h)
+        glVertex3f(w, -l, h)
+        glVertex3f(-w, -l, h)
         # Back face
-        glVertex3f(-hs, hs, -hs)
-        glVertex3f(hs, hs, -hs)
-        glVertex3f(hs, hs, hs)
-        glVertex3f(-hs, hs, hs)
+        glVertex3f(-w, l, -h)
+        glVertex3f(w, l, -h)
+        glVertex3f(w, l, h)
+        glVertex3f(-w, l, h)
         # Left face
-        glVertex3f(-hs, -hs, -hs)
-        glVertex3f(-hs, hs, -hs)
-        glVertex3f(-hs, hs, hs)
-        glVertex3f(-hs, -hs, hs)
+        glVertex3f(-w, -l, -h)
+        glVertex3f(-w, l, -h)
+        glVertex3f(-w, l, h)
+        glVertex3f(-w, -l, h)
         # Right face
-        glVertex3f(hs, -hs, -hs)
-        glVertex3f(hs, hs, -hs)
-        glVertex3f(hs, hs, hs)
-        glVertex3f(hs, -hs, hs)
+        glVertex3f(w, -l, -h)
+        glVertex3f(w, l, -h)
+        glVertex3f(w, l, h)
+        glVertex3f(w, -l, h)
         glEnd()
 
     def draw_point(self, height, angle):
@@ -163,14 +185,15 @@ class CylinderWidget(QGLWidget):
             glPushMatrix()
             glTranslatef(x, y, z)
             glRotatef(angle, 0, 0, 1)
-            # Draw box (rover) with correct size
+            glRotatef(90, 0, 1, 0)
+            glRotatef(self.rover_orientation, 0, 0, 1)
+            # Draw rover centered at origin
             glPushMatrix()
             glColor3f(0.6, 0.4, 0.2)
-            self.draw_cube(self.box_size)
+            self.draw_cube()
             glPopMatrix()
-            # Move to radial face of box (outward from cylinder)
-            glTranslatef(self.box_size/2, 0, 0)
-            glRotatef(90, 0, 1, 0)
+            # Move arm to top face (radial direction) and up to top surface
+            glTranslatef(0, 0, self.rover_length/2+0.06)
             # Draw UR3e arm
             self.draw_ur3e(self.ur3e_joints)
             glPopMatrix()
@@ -215,7 +238,28 @@ class CylinderWidget(QGLWidget):
                 glColor3f(0.2, 0.8, 0.2)
                 self.draw_cylinder_segment(0.02, params['d'])
             glTranslatef(0, 0, params['d'])
+        # Draw end effector coordinate system, rotated by last joint
+        glRotatef(joints[-1], 0, 0, 1)
+        self.draw_axes(0.15)
         glPopMatrix()
+
+    def draw_axes(self, length=0.15):
+        glLineWidth(3)
+        glBegin(GL_LINES)
+        # X axis (red)
+        glColor3f(1, 0, 0)
+        glVertex3f(0, 0, 0)
+        glVertex3f(length, 0, 0)
+        # Y axis (green)
+        glColor3f(0, 1, 0)
+        glVertex3f(0, 0, 0)
+        glVertex3f(0, length, 0)
+        # Z axis (blue)
+        glColor3f(0, 0, 1)
+        glVertex3f(0, 0, 0)
+        glVertex3f(0, 0, length)
+        glEnd()
+        glLineWidth(1)
 
     def draw_cylinder_segment(self, radius, height, axis='z', direction=1):
         quad = gluNewQuadric()
@@ -229,6 +273,34 @@ class CylinderWidget(QGLWidget):
         quad = gluNewQuadric()
         gluSphere(quad, radius, 20, 20)
 
+class DraggableLineEdit(QLineEdit):
+    valueChanged = pyqtSignal()
+    def __init__(self, *args, step=1.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.step = step
+        self._dragging = False
+        self._last_x = None
+    def mousePressEvent(self, event):
+        if event.button() == 1:
+            self._dragging = True
+            self._last_x = event.x()
+        super().mousePressEvent(event)
+    def mouseMoveEvent(self, event):
+        if self._dragging:
+            dx = event.x() - self._last_x
+            self._last_x = event.x()
+            try:
+                val = float(self.text())
+            except ValueError:
+                val = 0.0
+            val += dx * self.step * 0.05
+            self.setText(str(round(val, 4)))
+            self.valueChanged.emit()
+        super().mouseMoveEvent(event)
+    def mouseReleaseEvent(self, event):
+        self._dragging = False
+        super().mouseReleaseEvent(event)
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -237,29 +309,41 @@ class MainWindow(QWidget):
         layout = QVBoxLayout()
         self.cylinder_widget = CylinderWidget()
         layout.addWidget(self.cylinder_widget)
-        # First row: diameter, height, angle
+        # First row: diameter, height, angle, rover orientation
         input_row1 = QHBoxLayout()
-        self.diameter_input = QLineEdit()
-        self.height_input = QLineEdit()
-        self.angle_input = QLineEdit()
+        self.diameter_input = DraggableLineEdit(step=0.1)
+        self.height_input = DraggableLineEdit(step=0.05)
+        self.angle_input = DraggableLineEdit(step=4.0)
+        self.rover_orientation_input = DraggableLineEdit(step=4.0)
         input_row1.addWidget(QLabel('Diameter (m):'))
         input_row1.addWidget(self.diameter_input)
         input_row1.addWidget(QLabel('Height (m):'))
         input_row1.addWidget(self.height_input)
         input_row1.addWidget(QLabel('Angle (deg):'))
         input_row1.addWidget(self.angle_input)
+        input_row1.addWidget(QLabel('Rover Orientation (deg):'))
+        input_row1.addWidget(self.rover_orientation_input)
         layout.addLayout(input_row1)
         # Second row: arm joints
         input_row2 = QHBoxLayout()
-        self.ur3e_joint_inputs = [QLineEdit() for _ in range(6)]
+        self.ur3e_joint_inputs = [DraggableLineEdit(step=3.0) for _ in range(6)]
         for i, joint_input in enumerate(self.ur3e_joint_inputs):
             input_row2.addWidget(QLabel(f'Joint {i+1} (deg):'))
             input_row2.addWidget(joint_input)
-        self.set_btn = QPushButton('Set Point')
-        self.set_btn.clicked.connect(self.set_point)
-        input_row2.addWidget(self.set_btn)
         layout.addLayout(input_row2)
         self.setLayout(layout)
+        # Connect signals for instant update
+        self.diameter_input.textChanged.connect(self.set_point)
+        self.height_input.textChanged.connect(self.set_point)
+        self.angle_input.textChanged.connect(self.set_point)
+        self.rover_orientation_input.textChanged.connect(self.set_point)
+        self.diameter_input.valueChanged.connect(self.set_point)
+        self.height_input.valueChanged.connect(self.set_point)
+        self.angle_input.valueChanged.connect(self.set_point)
+        self.rover_orientation_input.valueChanged.connect(self.set_point)
+        for joint_input in self.ur3e_joint_inputs:
+            joint_input.textChanged.connect(self.set_point)
+            joint_input.valueChanged.connect(self.set_point)
 
     def set_point(self):
         try:
@@ -267,6 +351,7 @@ class MainWindow(QWidget):
             diameter_val = float(self.diameter_input.text()) if self.diameter_input.text().strip() else self.cylinder_widget.cylinder_diameter
             height_val = float(self.height_input.text()) if self.height_input.text().strip() else self.cylinder_widget.height
             angle_val = float(self.angle_input.text()) if self.angle_input.text().strip() else self.cylinder_widget.angle
+            rover_orientation_val = float(self.rover_orientation_input.text()) if self.rover_orientation_input.text().strip() else self.cylinder_widget.rover_orientation
             joints = []
             for i, j in enumerate(self.ur3e_joint_inputs):
                 text = j.text()
@@ -274,7 +359,7 @@ class MainWindow(QWidget):
                     joints.append(self.cylinder_widget.ur3e_joints[i])
                 else:
                     joints.append(float(text))
-            self.cylinder_widget.set_point(height_val, angle_val, joints, diameter_val)
+            self.cylinder_widget.set_point(height_val, angle_val, joints, diameter_val, rover_orientation_val)
         except ValueError:
             pass
 
