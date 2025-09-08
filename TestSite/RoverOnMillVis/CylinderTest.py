@@ -19,7 +19,7 @@ class CylinderWidget(QGLWidget):
         self.cylinder_radius = self.cylinder_diameter / 2.0
         self.cylinder_height = 5.0  # meters (fixed)
         # Rover dimensions (meters)
-        self.rover_width = 0.2 #rover width
+        self.rover_width = 0.4 #rover width
         self.rover_height = 0.30 #rover radial
         self.rover_length = 0.20 #rover vertical
         self.ur3e_joints = [0, 0, 0, 0, 0, 0]
