@@ -3,11 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 
-Test=True
+Test=False
 start_time = time.time()
-image_path = 'realsense_capture_20251020_123815_color.png'
-depth = np.load('realsense_capture_20251020_123815_depth.npy')
-image = cv.imread(image_path, cv.IMREAD_GRAYSCALE)
+image_path = 'Vision\TestData\Blob_1_color.png'
+depth = np.load('Vision\TestData\Blob_1_depth.npy')
+image = cv.imread(image_path)
 
 if image is None:
     raise ValueError("Image not found or unable to load.")
@@ -16,7 +16,7 @@ kernel = np.ones((5, 5), np.uint8)
 F = 1.93
 PixelSize = 0.003
 F_ideal = F / PixelSize
-h, w = image.shape
+h, w, _ = image.shape
 fx, fy = F_ideal, F_ideal
 cx = w / 2
 cy = h / 2
@@ -49,7 +49,22 @@ def plot_and_print_results(scatter_data, depth_values, xyz_data):
 THIS IS THE MAIN CODE
 '''
 
+def threshold_corrosion(image):
+    hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
+    h, s, v = cv.split(hsv)
+
+    _, thresh_h = cv.threshold(h, 250, 255, cv.THRESH_BINARY)
+    _, thresh_s = cv.threshold(s, 75, 255, cv.THRESH_BINARY)
+    _, thresh_v = cv.threshold(v, 25, 255, cv.THRESH_BINARY)
+
+    thresh_hsv = cv.merge([thresh_h, thresh_s, thresh_v])
+    thresh_hsv = cv.cvtColor(thresh_hsv, cv.COLOR_HSV2BGR)
+    return thresh_hsv
+
+
 def clean_image(image):
+    #Split image into red, green, blue channels and theshold red channel
+
     img_erode = cv.erode(image, kernel, iterations=1)
     img_dilate = cv.dilate(img_erode, kernel, iterations=3)
     img_final_erode = cv.erode(img_dilate, kernel, iterations=3)
@@ -58,7 +73,7 @@ def clean_image(image):
     return img_final_erode
 
 def edge_to_scatter_plot(image, threshold1=100, threshold2=200):
-    img_final_erode = clean_image(image)
+    img_final_erode = cv.cvtColor(clean_image(threshold_corrosion(image)), cv.COLOR_BGR2GRAY)
 
     edges = cv.Canny(img_final_erode, threshold1, threshold2)
     contours, _ = cv.findContours(edges, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
@@ -83,7 +98,6 @@ def combine_and_transform(scatter_data, depth, fx, fy, cx, cy):
 
     return xyz_data
 
-# Save scatterplot data and corresponding depth values and transform into mm
 xyz_data = combine_and_transform(edge_to_scatter_plot(image), depth, fx, fy, cx, cy)
 end_time = time.time()
 print(f"Total execution time: {end_time - start_time:.2f} seconds")
