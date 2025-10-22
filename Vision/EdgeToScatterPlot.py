@@ -2,8 +2,12 @@ import cv2 as cv
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import pyrealsense2 as rs
+import open3d as o3d
+
 
 Test=False
+VideoTest=True
 start_time = time.time()
 image_path = 'Vision\TestData\Blob_1_color.png'
 depth = np.load('Vision\TestData\Blob_1_depth.npy')
@@ -13,6 +17,8 @@ if image is None:
     raise ValueError("Image not found or unable to load.")
 
 kernel = np.ones((5, 5), np.uint8)
+
+# For mm transformation
 F = 1.93
 PixelSize = 0.003
 F_ideal = F / PixelSize
@@ -20,6 +26,21 @@ h, w, _ = image.shape
 fx, fy = F_ideal, F_ideal
 cx = w / 2
 cy = h / 2
+
+# Realtime setup of RealSense
+pipeline = rs.pipeline()
+config = rs.config()
+config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+pipeline.start(config)
+
+# Open3D visualizer setup
+vis = o3d.visualization.Visualizer()
+vis.create_window()
+pcd = o3d.geometry.PointCloud()
+first_frame = True
+
+
 
 '''
 THIS IS JUST FOR TESTING PURPOSES
@@ -98,7 +119,38 @@ def combine_and_transform(scatter_data, depth, fx, fy, cx, cy):
 
     return xyz_data
 
-xyz_data = combine_and_transform(edge_to_scatter_plot(image), depth, fx, fy, cx, cy)
+
+
+try:
+    while True:
+        frames = pipeline.wait_for_frames()
+        color_frame = frames.get_color_frame()
+        depth_frame = frames.get_depth_frame()
+        
+        color_image = np.asanyarray(color_frame.get_data())
+        depth_image = np.asanyarray(depth_frame.get_data())
+        
+        xyz_data = combine_and_transform(edge_to_scatter_plot(color_image), depth_image, fx, fy, cx, cy)
+
+        pcd.points = o3d.utility.Vector3dVector(xyz_data[::2])  # Show every 2nd point
+        
+        if VideoTest:
+            cv.imshow('Color', color_image)
+            cv.imshow('Depth', depth_image)
+            if first_frame:
+                vis.add_geometry(pcd)
+                first_frame = False
+            else:
+                vis.update_geometry(pcd)
+            vis.poll_events()
+            vis.update_renderer()
+
+        if cv.waitKey(1) & 0xFF == ord('q'):
+            break
+finally:
+    pipeline.stop()
+    cv.destroyAllWindows()
+
 end_time = time.time()
 print(f"Total execution time: {end_time - start_time:.2f} seconds")
 
