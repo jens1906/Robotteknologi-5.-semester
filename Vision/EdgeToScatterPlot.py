@@ -4,10 +4,18 @@ import matplotlib.pyplot as plt
 import time
 import pyrealsense2 as rs
 import open3d as o3d
+from robodk.robolink import *      
+from robodk.robomath import *     
+from scipy.interpolate import splprep, splev
 
+
+# Start the RoboDK API:
+RDK = Robolink()
 
 Test=False
-VideoTest=True
+VideoTest=False
+Video = False
+
 start_time = time.time()
 image_path = 'Vision\TestData\Blob_1_color.png'
 depth = np.load('Vision\TestData\Blob_1_depth.npy')
@@ -34,11 +42,12 @@ config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
 config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
 pipeline.start(config)
 
-# Open3D visualizer setup
-vis = o3d.visualization.Visualizer()
-vis.create_window()
-pcd = o3d.geometry.PointCloud()
-first_frame = True
+if VideoTest:
+    # Open3D visualizer setup
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    pcd = o3d.geometry.PointCloud()
+    first_frame = True
 
 
 
@@ -119,37 +128,56 @@ def combine_and_transform(scatter_data, depth, fx, fy, cx, cy):
 
     return xyz_data
 
+def import_object_to_robodk(object_name, xyz_data):
+    existing = RDK.Item(object_name)
+    if existing.Valid():
+        existing.Delete()
+
+    # Add as object (points or curve)
+    obj = RDK.AddPoints(xyz_data.tolist(), True)  # True = add as curve
+    obj.setName(object_name)
+
+if Video:
+    try:
+        while True:
+            frames = pipeline.wait_for_frames()
+            color_frame = frames.get_color_frame()
+            depth_frame = frames.get_depth_frame()
+            
+            color_image = np.asanyarray(color_frame.get_data())
+            depth_image = np.asanyarray(depth_frame.get_data())
+            
+            xyz_data = combine_and_transform(edge_to_scatter_plot(color_image), depth_image, fx, fy, cx, cy)
+
+            pcd.points = o3d.utility.Vector3dVector(xyz_data[::2])  # Show every 2nd point
+            
+            if VideoTest:
+                cv.imshow('Color', color_image)
+                cv.imshow('Depth', depth_image)
+                if first_frame:
+                    vis.add_geometry(pcd)
+                    first_frame = False
+                else:
+                    vis.update_geometry(pcd)
+                vis.poll_events()
+                vis.update_renderer()
+
+            if cv.waitKey(1) & 0xFF == ord('q'):
+                break
+    finally:
+        pipeline.stop()
+        cv.destroyAllWindows()
+else:
+    xyz_data = combine_and_transform(edge_to_scatter_plot(image), depth, fx, fy, cx, cy)
+    import_object_to_robodk("Corrosion_Object", xyz_data)
+    xyz_list = xyz_data[::5].tolist()  # Downsample
+    curve = RDK.AddCurve(xyz_list)
+    curve.setName("SplinePath")
+
+    # Optional: make it smooth
+    curve.setParam("Smooth", 1)  # Smoothing level
 
 
-try:
-    while True:
-        frames = pipeline.wait_for_frames()
-        color_frame = frames.get_color_frame()
-        depth_frame = frames.get_depth_frame()
-        
-        color_image = np.asanyarray(color_frame.get_data())
-        depth_image = np.asanyarray(depth_frame.get_data())
-        
-        xyz_data = combine_and_transform(edge_to_scatter_plot(color_image), depth_image, fx, fy, cx, cy)
-
-        pcd.points = o3d.utility.Vector3dVector(xyz_data[::2])  # Show every 2nd point
-        
-        if VideoTest:
-            cv.imshow('Color', color_image)
-            cv.imshow('Depth', depth_image)
-            if first_frame:
-                vis.add_geometry(pcd)
-                first_frame = False
-            else:
-                vis.update_geometry(pcd)
-            vis.poll_events()
-            vis.update_renderer()
-
-        if cv.waitKey(1) & 0xFF == ord('q'):
-            break
-finally:
-    pipeline.stop()
-    cv.destroyAllWindows()
 
 end_time = time.time()
 print(f"Total execution time: {end_time - start_time:.2f} seconds")
