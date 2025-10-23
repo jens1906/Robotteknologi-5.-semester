@@ -19,6 +19,7 @@ CameraTestVisuals=False
 PictureTest=False
 PictureTestVisuals=True
 CaptionTest = True
+
 Format = [640, 480]
 kernel = np.ones((5, 5), np.uint8)
 
@@ -139,9 +140,10 @@ def combine_and_transform(scatter_data, depth, depthFiles=None):
             depth = np.load(depth_file)
             cleaned_depth_image = clean_depth(scatter_data, depth)
             all_Depths.append(cleaned_depth_image)
-        depth = np.median(all_Depths, axis=0)
+            
+        cleaned_depth_image = np.mean(all_Depths, axis=0)
         if PictureTestVisuals:
-            plt.imshow(depth, cmap='gray')
+            plt.imshow(cleaned_depth_image, cmap='gray')
             plt.title('Averaged Cleaned Depth Image')
     else:
         cleaned_depth_image = clean_depth(scatter_data, depth)
@@ -161,7 +163,8 @@ def import_object_to_robodk(object_name, xyz_data):
         existing.Delete()
 
     # Add as object (points or curve)
-    obj = RDK.AddPoints(xyz_data.tolist(), True)  # True = add as curve
+    #obj = RDK.AddPoints(xyz_data.tolist(), True)  # True = add as curve
+    obj = RDK.AddCurve(xyz_data.tolist(), None, [1, 0, 0])
     obj.setName(object_name)
 
 def RealsenseLiveFeed():
@@ -201,7 +204,14 @@ def FrameTest(image, depth, depthFiles=None):
     #xyz_list = xyz_data[::5].tolist() 
     #curve = RDK.AddCurve(xyz_list)
     #curve.setName("SplinePath")
-    #curve.setParam("Smooth", 1)    
+    #curve.setParam("Smooth", 1)
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(xyz_data)
+    o3d.io.write_point_cloud("point_cloud.pcd", pcd)  
+    o3d.io.write_point_cloud("point_cloud.ply", pcd)
+    np.savetxt('point_cloud.txt', xyz_data, delimiter=' ', fmt='%.6f')
+
+     
     
 
 
@@ -219,8 +229,8 @@ def main():
         FrameTest(image, depth)
     elif CaptionTest:
         #Make list of all images in a folder and a list of all depth files
-        image_folder = 'Vision\ImageTestData\ImageNormalDistance'
-        depth_folder = 'Vision\ImageTestData\ImageNormalDistance'
+        image_folder = 'Vision\ImageTestData\ImageCurve3'
+        depth_folder = 'Vision\ImageTestData\ImageCurve3'
         image_files = glob.glob(os.path.join(image_folder, '*.png'))
         depth_files = glob.glob(os.path.join(depth_folder, '*.npy'))
 
