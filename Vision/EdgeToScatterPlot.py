@@ -17,8 +17,9 @@ RDK = Robolink()
 CameraTest=False
 CameraTestVisuals=False
 PictureTest=False
-PictureTestVisuals=True
+PictureTestVisuals=False
 CaptionTest = True
+SavePointCloud=True
 
 Format = [640, 480]
 kernel = np.ones((5, 5), np.uint8)
@@ -205,11 +206,13 @@ def FrameTest(image, depth, depthFiles=None):
     #curve = RDK.AddCurve(xyz_list)
     #curve.setName("SplinePath")
     #curve.setParam("Smooth", 1)
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(xyz_data)
-    o3d.io.write_point_cloud("point_cloud.pcd", pcd)  
-    o3d.io.write_point_cloud("point_cloud.ply", pcd)
-    np.savetxt('point_cloud.txt', xyz_data, delimiter=' ', fmt='%.6f')
+    if SavePointCloud:
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(xyz_data)
+        o3d.io.write_point_cloud("point_cloud.pcd", pcd)  
+        o3d.io.write_point_cloud("point_cloud.ply", pcd)
+        np.savetxt('point_cloud.txt', xyz_data, delimiter=' ', fmt='%.6f')
+        np.savetxt('point_cloud_xyz_mm.csv', xyz_data, delimiter=',', header='X,Y,Z', comments='', fmt='%.6f')
 
      
     
@@ -229,8 +232,8 @@ def main():
         FrameTest(image, depth)
     elif CaptionTest:
         #Make list of all images in a folder and a list of all depth files
-        image_folder = 'Vision\ImageTestData\ImageCurve3'
-        depth_folder = 'Vision\ImageTestData\ImageCurve3'
+        image_folder = 'Vision\ImageTestData\ImageCurveBad'
+        depth_folder = 'Vision\ImageTestData\ImageCurveBad'
         image_files = glob.glob(os.path.join(image_folder, '*.png'))
         depth_files = glob.glob(os.path.join(depth_folder, '*.npy'))
 
@@ -241,6 +244,7 @@ def main():
         FrameTest(image, None, depth_files)
 
     pass
+
 
 
 main()
