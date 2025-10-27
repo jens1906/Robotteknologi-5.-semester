@@ -215,6 +215,8 @@ class SurfaceParameterization:
         
         grid_uvw = grid_uvw.reshape(y_samples, x_samples, 3)
         grid_xy_reshaped = grid_xy.reshape(y_samples, x_samples, 2)
+        # store last generated grid for optional interactive visualization
+        self.last_grid_uvw = grid_uvw
         
         return grid_uvw, grid_xy_reshaped
     
@@ -294,6 +296,72 @@ class SurfaceParameterization:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f" Visualization saved to: {save_path}")
         plt.close(fig)
+
+    def visualize_interactive(self, path_3d=None, show_mesh=True, point_color=(0.6, 0.6, 0.6)):
+        """Open an interactive Open3D viewer showing the point cloud and optional path.
+
+        - path_3d: optional Nx3 array of waypoints to draw as a red line
+        - show_mesh: if a grid was previously generated (self.last_grid_uvw), try to show it as a mesh
+        """
+        try:
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(self.points)
+            colors = np.tile(np.array(point_color, dtype=float), (len(self.points), 1))
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+
+            geometries = [pcd]
+
+            if path_3d is not None:
+                path_pts = np.asarray(path_3d)
+                if len(path_pts) >= 2:
+                    lines = [[i, i+1] for i in range(len(path_pts)-1)]
+                    line_set = o3d.geometry.LineSet()
+                    line_set.points = o3d.utility.Vector3dVector(path_pts)
+                    line_set.lines = o3d.utility.Vector2iVector(lines)
+                    line_set.colors = o3d.utility.Vector3dVector([[1.0, 0.0, 0.0] for _ in lines])
+                    geometries.append(line_set)
+
+                    # start / end markers
+                    bbox_size = np.linalg.norm(np.max(self.points, axis=0) - np.min(self.points, axis=0))
+                    sphere_r = max(1e-4, 0.01 * bbox_size)
+                    start_s = o3d.geometry.TriangleMesh.create_sphere(radius=sphere_r)
+                    start_s.translate(path_pts[0])
+                    start_s.paint_uniform_color([0.0, 1.0, 0.0])
+                    end_s = o3d.geometry.TriangleMesh.create_sphere(radius=sphere_r)
+                    end_s.translate(path_pts[-1])
+                    end_s.paint_uniform_color([1.0, 0.0, 0.0])
+                    geometries.extend([start_s, end_s])
+
+            # optionally add mesh built from last grid
+            if show_mesh and hasattr(self, 'last_grid_uvw'):
+                try:
+                    grid = self.last_grid_uvw
+                    ny, nx, _ = grid.shape
+                    vertices = grid.reshape(-1, 3)
+                    triangles = []
+                    for iy in range(ny - 1):
+                        for ix in range(nx - 1):
+                            i0 = iy * nx + ix
+                            i1 = i0 + 1
+                            i2 = i0 + nx
+                            i3 = i2 + 1
+                            triangles.append([i0, i2, i1])
+                            triangles.append([i1, i2, i3])
+                    mesh = o3d.geometry.TriangleMesh()
+                    mesh.vertices = o3d.utility.Vector3dVector(vertices)
+                    mesh.triangles = o3d.utility.Vector3iVector(triangles)
+                    mesh.compute_vertex_normals()
+                    mesh.paint_uniform_color([0.8, 0.8, 0.9])
+                    geometries.insert(0, mesh)
+                except Exception:
+                    # don't fail visualization for mesh build errors
+                    pass
+
+            # Launch interactive viewer
+            o3d.visualization.draw_geometries(geometries, window_name='Surface Viewer', width=1024, height=768)
+        except Exception as e:
+            print(f"Interactive Open3D visualization failed: {e}")
+            print("Make sure you have a GUI available and Open3D installed with GUI support. Falling back to static images.")
 
 
 def main():
@@ -405,45 +473,53 @@ def main():
     
     # Step 9: Visualize
     surf.visualize(save_path=os.path.join(script_dir, 'surface_visualization.png'), grid_samples=30)
-    
-    # Create path visualization
-    print("\n Generating path visualization...")
-    fig = plt.figure(figsize=(12, 5))
-    
-    ax1 = fig.add_subplot(121, projection='3d')
-    ax1.scatter(surf.points[:, 0], surf.points[:, 1], surf.points[:, 2],
-               c='lightblue', s=1, alpha=0.2)
-    ax1.plot(path_3d[:, 0], path_3d[:, 1], path_3d[:, 2],
-            'r-', linewidth=2, label='Path')
-    ax1.scatter(path_3d[0, 0], path_3d[0, 1], path_3d[0, 2],
-               c='green', s=100, marker='o', label='Start')
-    ax1.scatter(path_3d[-1, 0], path_3d[-1, 1], path_3d[-1, 2],
-               c='red', s=100, marker='s', label='End')
-    ax1.set_xlabel('U')
-    ax1.set_ylabel('V')
-    ax1.set_zlabel('W')
-    ax1.set_title('3D Scanning Path')
-    ax1.legend()
-    
-    ax2 = fig.add_subplot(122)
-    ax2.scatter(surf.xy_params[:, 0], surf.xy_params[:, 1],
-               c='lightblue', s=5, alpha=0.5)
-    ax2.plot(path_xy[:, 0], path_xy[:, 1], 'r-', linewidth=2, label='Path')
-    ax2.scatter(path_xy[0, 0], path_xy[0, 1],
-               c='green', s=100, marker='o', label='Start')
-    ax2.scatter(path_xy[-1, 0], path_xy[-1, 1],
-               c='red', s=100, marker='s', label='End')
-    ax2.set_xlabel('x (parameter)')
-    ax2.set_ylabel('y (parameter)')
-    ax2.set_title('Parameter Space Path')
-    ax2.set_aspect('equal')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(script_dir, 'scanning_path_visualization.png'), dpi=150, bbox_inches='tight')
-    print(f"✓ Path visualization saved to: scanning_path_visualization.png")
-    plt.close(fig)
+    # Try interactive Open3D viewer first (allows moving/rotating/zooming)
+    try:
+        print("\n Opening interactive 3D viewer (rotate/zoom/translate)...")
+        # store grid so interactive mesh can be built if desired
+        surf.last_grid_uvw = grid_uvw
+        surf.visualize_interactive(path_3d=path_3d)
+        print("Interactive viewer closed.")
+    except Exception as e:
+        print(f"Interactive viewer failed: {e}\nFalling back to static matplotlib visualization.")
+        # Create path visualization (static fallback)
+        print("\n Generating path visualization...")
+        fig = plt.figure(figsize=(12, 5))
+
+        ax1 = fig.add_subplot(121, projection='3d')
+        ax1.scatter(surf.points[:, 0], surf.points[:, 1], surf.points[:, 2],
+                   c='lightblue', s=1, alpha=0.2)
+        ax1.plot(path_3d[:, 0], path_3d[:, 1], path_3d[:, 2],
+                'r-', linewidth=2, label='Path')
+        ax1.scatter(path_3d[0, 0], path_3d[0, 1], path_3d[0, 2],
+                   c='green', s=100, marker='o', label='Start')
+        ax1.scatter(path_3d[-1, 0], path_3d[-1, 1], path_3d[-1, 2],
+                   c='red', s=100, marker='s', label='End')
+        ax1.set_xlabel('U')
+        ax1.set_ylabel('V')
+        ax1.set_zlabel('W')
+        ax1.set_title('3D Scanning Path')
+        ax1.legend()
+
+        ax2 = fig.add_subplot(122)
+        ax2.scatter(surf.xy_params[:, 0], surf.xy_params[:, 1],
+                   c='lightblue', s=5, alpha=0.5)
+        ax2.plot(path_xy[:, 0], path_xy[:, 1], 'r-', linewidth=2, label='Path')
+        ax2.scatter(path_xy[0, 0], path_xy[0, 1],
+                   c='green', s=100, marker='o', label='Start')
+        ax2.scatter(path_xy[-1, 0], path_xy[-1, 1],
+                   c='red', s=100, marker='s', label='End')
+        ax2.set_xlabel('x (parameter)')
+        ax2.set_ylabel('y (parameter)')
+        ax2.set_title('Parameter Space Path')
+        ax2.set_aspect('equal')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(script_dir, 'scanning_path_visualization.png'), dpi=150, bbox_inches='tight')
+        print(f"✓ Path visualization saved to: scanning_path_visualization.png")
+        plt.close(fig)
     
     # Final summary
     print("\n" + "=" * 70)
