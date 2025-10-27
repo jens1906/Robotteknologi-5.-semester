@@ -6,8 +6,8 @@ This implementation performs surface parameterization of point clouds
 using inverse interpolation for robotic applications.
 
 Notation:
-    (x, y) = 2D parameter space
-    (u, v, w) = 3D Cartesian space
+    (u, v) = 2D parameter space
+    (x, y, z) = 3D Cartesian space
 """
 
 import numpy as np
@@ -25,7 +25,7 @@ import os
 class SurfaceParameterization:
     """
     Surface parameterization using inverse interpolation approach.
-    Maps 3D Cartesian points (u,v,w) to 2D parameter space (x,y).
+    Maps 3D Cartesian points (x,y,z) to 2D parameter space (u,v).
     """
     
     def __init__(self, point_cloud_path=None, points=None):
@@ -37,10 +37,10 @@ class SurfaceParameterization:
         else:
             raise ValueError("Either point_cloud_path or points must be provided")
         
-        self.xy_params = None
-        self.interpolator_u = None
-        self.interpolator_v = None
-        self.interpolator_w = None
+        self.uv_params = None
+        self.interpolator_x = None
+        self.interpolator_y = None
+        self.interpolator_z = None
         self.principal_axes = None
         
     def load_point_cloud(self, path):
@@ -64,66 +64,66 @@ class SurfaceParameterization:
         print("Local coordinate frame computed")
         return self.principal_axes, centroid
     
-    def compute_xy_parameterization(self, method='projection'):
+    def compute_uv_parameterization(self, method='projection'):
         """
-        Compute XY parameterization mapping (u,v,w) → (x,y).
+        Compute UV parameterization mapping (x,y,z) → (u,v).
         """
         if not hasattr(self, 'points_local'):
             self.compute_local_frame()
         
         if method == 'projection':
-            xy = self.points_local[:, :2]
+            uv = self.points_local[:, :2]
         elif method == 'distance':
             idx = np.argsort(self.points_local[:, 0])
             sorted_points = self.points_local[idx]
             
-            x = np.zeros(len(sorted_points))
+            u = np.zeros(len(sorted_points))
             for i in range(1, len(sorted_points)):
-                x[i] = x[i-1] + np.linalg.norm(sorted_points[i] - sorted_points[i-1])
+                u[i] = u[i-1] + np.linalg.norm(sorted_points[i] - sorted_points[i-1])
             
-            x = x / x[-1] if x[-1] > 0 else x
-            x_orig = np.zeros_like(x)
-            x_orig[idx] = x
-            y = self.points_local[:, 1]
-            xy = np.column_stack([x_orig, y])
+            u = u / u[-1] if u[-1] > 0 else u
+            u_orig = np.zeros_like(u)
+            u_orig[idx] = u
+            v = self.points_local[:, 1]
+            uv = np.column_stack([u_orig, v])
         else:
-            xy = self.points_local[:, :2]
+            uv = self.points_local[:, :2]
         
-        xy_min = np.min(xy, axis=0)
-        xy_max = np.max(xy, axis=0)
-        xy_range = xy_max - xy_min
-        xy_range[xy_range == 0] = 1
+        uv_min = np.min(uv, axis=0)
+        uv_max = np.max(uv, axis=0)
+        uv_range = uv_max - uv_min
+        uv_range[uv_range == 0] = 1
         
-        self.xy_params = (xy - xy_min) / xy_range
+        self.uv_params = (uv - uv_min) / uv_range
         
-        print(f"XY parameterization computed using {method} method")
-        return self.xy_params
+        print(f"UV parameterization computed using {method} method")
+        return self.uv_params
     
     def build_inverse_interpolation(self, method='rbf', neighbors=None):
         """
-        Build inverse interpolation from (x,y) → (u,v,w).
+        Build inverse interpolation from (u,v) → (x,y,z).
         """
-        if self.xy_params is None:
-            self.compute_xy_parameterization()
+        if self.uv_params is None:
+            self.compute_uv_parameterization()
         
         if method == 'rbf':
             kernel = 'thin_plate_spline'
             
             if neighbors is not None:
                 self.interpolation_method = 'rbf_local'
-                self.kdtree_xy = cKDTree(self.xy_params)
+                self.kdtree_uv = cKDTree(self.uv_params)
                 self.neighbors = neighbors
                 self.stored_points = self.points.copy()
             else:
                 print("  Building RBF interpolators (may take a moment)...")
-                self.interpolator_u = RBFInterpolator(
-                    self.xy_params, self.points[:, 0], kernel=kernel
+                self.interpolator_x = RBFInterpolator(
+                    self.uv_params, self.points[:, 0], kernel=kernel
                 )
-                self.interpolator_v = RBFInterpolator(
-                    self.xy_params, self.points[:, 1], kernel=kernel
+                self.interpolator_y = RBFInterpolator(
+                    self.uv_params, self.points[:, 1], kernel=kernel
                 )
-                self.interpolator_w = RBFInterpolator(
-                    self.xy_params, self.points[:, 2], kernel=kernel
+                self.interpolator_z = RBFInterpolator(
+                    self.uv_params, self.points[:, 2], kernel=kernel
                 )
                 self.interpolation_method = 'rbf_global'
         else:
@@ -131,71 +131,71 @@ class SurfaceParameterization:
         
         print(f" Inverse interpolation built using {method} method")
     
-    def interpolate(self, xy_query):
+    def interpolate(self, uv_query):
         """
         Interpolate Cartesian coordinates from parameter space.
-        Maps (x,y) → (u,v,w).
+        Maps (u,v) → (x,y,z).
         """
-        xy_query = np.atleast_2d(xy_query)
+        uv_query = np.atleast_2d(uv_query)
         
         if self.interpolation_method == 'rbf_global':
-            u = self.interpolator_u(xy_query)
-            v = self.interpolator_v(xy_query)
-            w = self.interpolator_w(xy_query)
-            uvw = np.column_stack([u, v, w])
+            x = self.interpolator_x(uv_query)
+            y = self.interpolator_y(uv_query)
+            z = self.interpolator_z(uv_query)
+            xyz = np.column_stack([x, y, z])
             
         elif self.interpolation_method == 'rbf_local':
-            uvw = np.zeros((len(xy_query), 3))
+            xyz = np.zeros((len(uv_query), 3))
             
-            if len(xy_query) > 100:
-                for i, xy in enumerate(xy_query):
-                    distances, indices = self.kdtree_xy.query(xy, k=min(self.neighbors, 10))
+            if len(uv_query) > 100:
+                for i, uv in enumerate(uv_query):
+                    distances, indices = self.kdtree_uv.query(uv, k=min(self.neighbors, 10))
                     
                     if distances[0] < 1e-10:
-                        uvw[i] = self.stored_points[indices[0]]
+                        xyz[i] = self.stored_points[indices[0]]
                     else:
                         weights = 1.0 / (distances + 1e-10)
                         weights = weights / weights.sum()
-                        uvw[i] = (self.stored_points[indices].T @ weights).T
+                        xyz[i] = (self.stored_points[indices].T @ weights).T
             else:
-                for i, xy in enumerate(xy_query):
-                    distances, indices = self.kdtree_xy.query(xy, k=self.neighbors)
-                    local_xy = self.xy_params[indices]
-                    local_uvw = self.stored_points[indices]
+                for i, uv in enumerate(uv_query):
+                    distances, indices = self.kdtree_uv.query(uv, k=self.neighbors)
+                    local_uv = self.uv_params[indices]
+                    local_xyz = self.stored_points[indices]
                     
                     try:
                         interp = RBFInterpolator(
-                            local_xy, local_uvw, kernel='thin_plate_spline'
+                            local_uv, local_xyz, kernel='thin_plate_spline'
                         )
-                        uvw[i] = interp(xy.reshape(1, -1))[0]
+                        xyz[i] = interp(uv.reshape(1, -1))[0]
                     except:
-                        uvw[i] = local_uvw[0]
+                        xyz[i] = local_xyz[0]
         else:
-            uvw = griddata(
-                self.xy_params, self.points, xy_query, 
+            xyz = griddata(
+                self.uv_params, self.points, uv_query, 
                 method=self.interpolation_method
             )
         
-        return uvw
+        return xyz
     
-    def compute_surface_normals(self, xy_query):
+    def compute_surface_normals(self, uv_query):
         """Compute surface normals at parameter space coordinates."""
-        xy_query = np.atleast_2d(xy_query)
-        normals = np.zeros((len(xy_query), 3))
+        uv_query = np.atleast_2d(uv_query)
+        normals = np.zeros((len(uv_query), 3))
         epsilon = 1e-5
         
-        for i, xy in enumerate(xy_query):
-            x, y = xy
+        for i, uv in enumerate(uv_query):
+            u, v = uv
             
-            xy_dx = np.array([[x + epsilon, y]])
-            p_dx = self.interpolate(xy_dx)[0] - self.interpolate(xy.reshape(1, -1))[0]
-            p_dx = p_dx / epsilon
+            uv_du = np.array([[u + epsilon, v]])
+            p_du = self.interpolate(uv_du)[0] - self.interpolate(uv.reshape(1, -1))[0]
+            p_du = p_du / epsilon
             
-            xy_dy = np.array([[x, y + epsilon]])
-            p_dy = self.interpolate(xy_dy)[0] - self.interpolate(xy.reshape(1, -1))[0]
-            p_dy = p_dy / epsilon
+            uv_dv = np.array([[u, v + epsilon]])
+            p_dv = self.interpolate(uv_dv)[0] - self.interpolate(uv.reshape(1, -1))[0]
+            p_dv = p_dv / epsilon
             
-            normal = np.cross(p_dx, p_dy)
+            normal = np.cross(p_du, p_dv)
             norm = np.linalg.norm(normal)
             if norm > 0:
                 normals[i] = normal / norm
@@ -204,21 +204,21 @@ class SurfaceParameterization:
         
         return normals
     
-    def create_regular_grid(self, x_samples=50, y_samples=50):
+    def create_regular_grid(self, u_samples=50, v_samples=50):
         """Create a regular grid in parameter space."""
-        x = np.linspace(0, 1, x_samples)
-        y = np.linspace(0, 1, y_samples)
-        x_grid, y_grid = np.meshgrid(x, y)
+        u = np.linspace(0, 1, u_samples)
+        v = np.linspace(0, 1, v_samples)
+        u_grid, v_grid = np.meshgrid(u, v)
         
-        grid_xy = np.column_stack([x_grid.ravel(), y_grid.ravel()])
-        grid_uvw = self.interpolate(grid_xy)
+        grid_uv = np.column_stack([u_grid.ravel(), v_grid.ravel()])
+        grid_xyz = self.interpolate(grid_uv)
         
-        grid_uvw = grid_uvw.reshape(y_samples, x_samples, 3)
-        grid_xy_reshaped = grid_xy.reshape(y_samples, x_samples, 2)
+        grid_xyz = grid_xyz.reshape(v_samples, u_samples, 3)
+        grid_uv_reshaped = grid_uv.reshape(v_samples, u_samples, 2)
         # store last generated grid for optional interactive visualization
-        self.last_grid_uvw = grid_uvw
+        self.last_grid_xyz = grid_xyz
         
-        return grid_uvw, grid_xy_reshaped
+        return grid_xyz, grid_uv_reshaped
     
     def evaluate_quality(self, sample_size=1000):
         """Evaluate parameterization quality."""
@@ -226,13 +226,13 @@ class SurfaceParameterization:
         if n_points > sample_size:
             print(f"  Sampling {sample_size} points from {n_points} for quality evaluation...")
             indices = np.random.choice(n_points, sample_size, replace=False)
-            sample_xy = self.xy_params[indices]
+            sample_uv = self.uv_params[indices]
             sample_points = self.points[indices]
         else:
-            sample_xy = self.xy_params
+            sample_uv = self.uv_params
             sample_points = self.points
         
-        reconstructed = self.interpolate(sample_xy)
+        reconstructed = self.interpolate(sample_uv)
         errors = np.linalg.norm(sample_points - reconstructed, axis=1)
         
         metrics = {
@@ -263,34 +263,34 @@ class SurfaceParameterization:
         ax1.scatter(self.points[:, 0], self.points[:, 1], self.points[:, 2], 
                    c='blue', s=1, alpha=0.5, label='Original points')
         
-        grid_uvw, _ = self.create_regular_grid(grid_samples, grid_samples)
-        ax1.plot_surface(grid_uvw[:, :, 0], grid_uvw[:, :, 1], grid_uvw[:, :, 2],
+        grid_xyz, _ = self.create_regular_grid(grid_samples, grid_samples)
+        ax1.plot_surface(grid_xyz[:, :, 0], grid_xyz[:, :, 1], grid_xyz[:, :, 2],
                        alpha=0.7, cmap='viridis', edgecolor='none')
         
-        ax1.set_xlabel('U')
-        ax1.set_ylabel('V')
-        ax1.set_zlabel('W')
-        ax1.set_title('3D Cartesian Surface (u,v,w)')
+        ax1.set_xlabel('X')
+        ax1.set_ylabel('Y')
+        ax1.set_zlabel('Z')
+        ax1.set_title('3D Cartesian Surface (x,y,z)')
         ax1.legend()
         
         # Parameter space
         ax2 = fig.add_subplot(132)
-        scatter = ax2.scatter(self.xy_params[:, 0], self.xy_params[:, 1], 
+        scatter = ax2.scatter(self.uv_params[:, 0], self.uv_params[:, 1], 
                             c=self.points[:, 2], s=5, cmap='viridis')
-        ax2.set_xlabel('x (parameter)')
-        ax2.set_ylabel('y (parameter)')
-        ax2.set_title('Parameter Space (x,y) - colored by W')
-        plt.colorbar(scatter, ax=ax2, label='W coordinate')
+        ax2.set_xlabel('u (parameter)')
+        ax2.set_ylabel('v (parameter)')
+        ax2.set_title('Parameter Space (u,v) - colored by Z')
+        plt.colorbar(scatter, ax=ax2, label='Z coordinate')
         ax2.set_aspect('equal')
         
         # Height map
         ax3 = fig.add_subplot(133, projection='3d')
-        ax3.scatter(self.xy_params[:, 0], self.xy_params[:, 1], self.points[:, 2],
+        ax3.scatter(self.uv_params[:, 0], self.uv_params[:, 1], self.points[:, 2],
                    c=self.points[:, 2], s=5, cmap='viridis')
-        ax3.set_xlabel('x (parameter)')
-        ax3.set_ylabel('y (parameter)')
-        ax3.set_zlabel('W')
-        ax3.set_title('Height Map (x,y,W)')
+        ax3.set_xlabel('u (parameter)')
+        ax3.set_ylabel('v (parameter)')
+        ax3.set_zlabel('Z')
+        ax3.set_title('Height Map (u,v,Z)')
         
         plt.tight_layout()
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -301,7 +301,7 @@ class SurfaceParameterization:
         """Open an interactive Open3D viewer showing the point cloud and optional path.
 
         - path_3d: optional Nx3 array of waypoints to draw as a red line
-        - show_mesh: if a grid was previously generated (self.last_grid_uvw), try to show it as a mesh
+        - show_mesh: if a grid was previously generated (self.last_grid_xyz), try to show it as a mesh
         """
         try:
             pcd = o3d.geometry.PointCloud()
@@ -333,9 +333,9 @@ class SurfaceParameterization:
                     geometries.extend([start_s, end_s])
 
             # optionally add mesh built from last grid
-            if show_mesh and hasattr(self, 'last_grid_uvw'):
+            if show_mesh and hasattr(self, 'last_grid_xyz'):
                 try:
-                    grid = self.last_grid_uvw
+                    grid = self.last_grid_xyz
                     ny, nx, _ = grid.shape
                     vertices = grid.reshape(-1, 3)
                     triangles = []
@@ -370,7 +370,7 @@ def main():
     """
     print("=" * 70)
     print("  SURFACE PARAMETERIZATION - Inverse Interpolation Approach")
-    print("  Notation: (x,y) = parameter space | (u,v,w) = Cartesian space")
+    print("  Notation: (u,v) = parameter space | (x,y,z) = Cartesian space")
     print("=" * 70)
     
     # Configuration
@@ -394,8 +394,8 @@ def main():
     surf.compute_local_frame()
     
     # Step 3: Compute parameterization
-    print("\n Computing XY parameterization...")
-    surf.compute_xy_parameterization(method='projection')
+    print("\n Computing UV parameterization...")
+    surf.compute_uv_parameterization(method='projection')
     
     # Step 4: Build interpolation
     print("\n Building inverse interpolation...")
@@ -410,20 +410,20 @@ def main():
     print("  TESTING INVERSE INTERPOLATION")
     print("=" * 70)
     
-    test_xy = np.array([
+    test_uv = np.array([
         [0.5, 0.5],   # Center
         [0.0, 0.0],   # Corner
         [1.0, 1.0],   # Opposite corner
         [0.25, 0.75]  # Random point
     ])
     
-    interpolated = surf.interpolate(test_xy)
-    normals = surf.compute_surface_normals(test_xy)
+    interpolated = surf.interpolate(test_uv)
+    normals = surf.compute_surface_normals(test_uv)
     
-    for i, (xy, uvw, normal) in enumerate(zip(test_xy, interpolated, normals)):
+    for i, (uv, xyz, normal) in enumerate(zip(test_uv, interpolated, normals)):
         print(f"\n  Point {i+1}:")
-        print(f"    Parameter (x,y): ({xy[0]:.3f}, {xy[1]:.3f})")
-        print(f"    Cartesian (u,v,w): ({uvw[0]:.1f}, {uvw[1]:.1f}, {uvw[2]:.1f})")
+        print(f"    Parameter (u,v): ({uv[0]:.3f}, {uv[1]:.3f})")
+        print(f"    Cartesian (x,y,z): ({xyz[0]:.1f}, {xyz[1]:.1f}, {xyz[2]:.1f})")
         print(f"    Normal: ({normal[0]:.3f}, {normal[1]:.3f}, {normal[2]:.3f})")
     
     # Step 7: Generate path example
@@ -433,18 +433,18 @@ def main():
     
     num_passes = 10
     points_per_pass = 20
-    path_xy = []
+    path_uv = []
     
     for i in range(num_passes):
-        y = i / (num_passes - 1)
-        x_line = np.linspace(0, 1, points_per_pass)
+        v = i / (num_passes - 1)
+        u_line = np.linspace(0, 1, points_per_pass)
         if i % 2 == 1:
-            x_line = x_line[::-1]
-        for x in x_line:
-            path_xy.append([x, y])
+            u_line = u_line[::-1]
+        for u in u_line:
+            path_uv.append([u, v])
     
-    path_xy = np.array(path_xy)
-    path_3d = surf.interpolate(path_xy)
+    path_uv = np.array(path_uv)
+    path_3d = surf.interpolate(path_uv)
     path_length = np.sum(np.linalg.norm(np.diff(path_3d, axis=0), axis=1))
     
     print(f"\nGenerated scanning path:")
@@ -456,20 +456,20 @@ def main():
     print("  CREATING REGULAR GRID FOR PATH PLANNING")
     print("=" * 70)
     
-    grid_uvw, grid_xy = surf.create_regular_grid(x_samples=50, y_samples=50)
+    grid_xyz, grid_uv = surf.create_regular_grid(u_samples=50, v_samples=50)
     
     # Save files in the same directory as the script
-    np.save(os.path.join(script_dir, 'surface_grid_uvw.npy'), grid_uvw)
-    np.save(os.path.join(script_dir, 'surface_grid_xy.npy'), grid_xy)
-    np.save(os.path.join(script_dir, 'scanning_path_uvw.npy'), path_3d)
-    np.save(os.path.join(script_dir, 'scanning_path_xy.npy'), path_xy)
+    np.save(os.path.join(script_dir, 'surface_grid_xyz.npy'), grid_xyz)
+    np.save(os.path.join(script_dir, 'surface_grid_uv.npy'), grid_uv)
+    np.save(os.path.join(script_dir, 'scanning_path_xyz.npy'), path_3d)
+    np.save(os.path.join(script_dir, 'scanning_path_uv.npy'), path_uv)
     
-    print(f"\nGrid created: {grid_uvw.shape}")
+    print(f"\nGrid created: {grid_xyz.shape}")
     print(f"Saved files:")
-    print(f"  - surface_grid_uvw.npy (Cartesian grid)")
-    print(f"  - surface_grid_xy.npy (Parameter grid)")
-    print(f"  - scanning_path_uvw.npy (3D path)")
-    print(f"  - scanning_path_xy.npy (2D path)")
+    print(f"  - surface_grid_xyz.npy (Cartesian grid)")
+    print(f"  - surface_grid_uv.npy (Parameter grid)")
+    print(f"  - scanning_path_xyz.npy (3D path)")
+    print(f"  - scanning_path_uv.npy (2D path)")
     
     # Step 9: Visualize
     surf.visualize(save_path=os.path.join(script_dir, 'surface_visualization.png'), grid_samples=30)
@@ -477,7 +477,7 @@ def main():
     try:
         print("\n Opening interactive 3D viewer (rotate/zoom/translate)...")
         # store grid so interactive mesh can be built if desired
-        surf.last_grid_uvw = grid_uvw
+        surf.last_grid_xyz = grid_xyz
         surf.visualize_interactive(path_3d=path_3d)
         print("Interactive viewer closed.")
     except Exception as e:
@@ -495,22 +495,22 @@ def main():
                    c='green', s=100, marker='o', label='Start')
         ax1.scatter(path_3d[-1, 0], path_3d[-1, 1], path_3d[-1, 2],
                    c='red', s=100, marker='s', label='End')
-        ax1.set_xlabel('U')
-        ax1.set_ylabel('V')
-        ax1.set_zlabel('W')
+        ax1.set_xlabel('X')
+        ax1.set_ylabel('Y')
+        ax1.set_zlabel('Z')
         ax1.set_title('3D Scanning Path')
         ax1.legend()
 
         ax2 = fig.add_subplot(122)
-        ax2.scatter(surf.xy_params[:, 0], surf.xy_params[:, 1],
+        ax2.scatter(surf.uv_params[:, 0], surf.uv_params[:, 1],
                    c='lightblue', s=5, alpha=0.5)
-        ax2.plot(path_xy[:, 0], path_xy[:, 1], 'r-', linewidth=2, label='Path')
-        ax2.scatter(path_xy[0, 0], path_xy[0, 1],
+        ax2.plot(path_uv[:, 0], path_uv[:, 1], 'r-', linewidth=2, label='Path')
+        ax2.scatter(path_uv[0, 0], path_uv[0, 1],
                    c='green', s=100, marker='o', label='Start')
-        ax2.scatter(path_xy[-1, 0], path_xy[-1, 1],
+        ax2.scatter(path_uv[-1, 0], path_uv[-1, 1],
                    c='red', s=100, marker='s', label='End')
-        ax2.set_xlabel('x (parameter)')
-        ax2.set_ylabel('y (parameter)')
+        ax2.set_xlabel('u (parameter)')
+        ax2.set_ylabel('v (parameter)')
         ax2.set_title('Parameter Space Path')
         ax2.set_aspect('equal')
         ax2.legend()
@@ -528,14 +528,14 @@ def main():
     print("\n Generated files:")
     print("  1. surface_visualization.png - 3D surface visualization")
     print("  2. scanning_path_visualization.png - Path visualization")
-    print("  3. surface_grid_uvw.npy - Regular grid (Cartesian)")
-    print("  4. surface_grid_xy.npy - Regular grid (Parameter)")
-    print("  5. scanning_path_uvw.npy - Example scanning path (3D)")
-    print("  6. scanning_path_xy.npy - Example scanning path (2D)")
+    print("  3. surface_grid_xyz.npy - Regular grid (Cartesian)")
+    print("  4. surface_grid_uv.npy - Regular grid (Parameter)")
+    print("  5. scanning_path_xyz.npy - Example scanning path (3D)")
+    print("  6. scanning_path_uv.npy - Example scanning path (2D)")
     
     print("\n Usage:")
-    print("  To load grids: grid_uvw = np.load('surface_grid_uvw.npy')")
-    print("  To load path: path = np.load('scanning_path_uvw.npy')")
+    print("  To load grids: grid_xyz = np.load('surface_grid_xyz.npy')")
+    print("  To load path: path = np.load('scanning_path_xyz.npy')")
     
     print("\n All done! Check the PNG files for visualizations.")
     print("=" * 70)
