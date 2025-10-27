@@ -47,7 +47,7 @@ class SurfaceParameterization:
         """Load point cloud from PLY file."""
         pcd = o3d.io.read_point_cloud(path)
         self.points = np.asarray(pcd.points)
-        print(f"✓ Loaded {len(self.points)} points from {path}")
+        print(f"Loaded {len(self.points)} points from {path}")
         
     def compute_local_frame(self):
         """Compute local coordinate frame using PCA."""
@@ -473,6 +473,7 @@ def main():
     
     # Step 9: Visualize
     surf.visualize(save_path=os.path.join(script_dir, 'surface_visualization.png'), grid_samples=30)
+<<<<<<< HEAD
     # Try interactive Open3D viewer first (allows moving/rotating/zooming)
     try:
         print("\n Opening interactive 3D viewer (rotate/zoom/translate)...")
@@ -520,6 +521,47 @@ def main():
         plt.savefig(os.path.join(script_dir, 'scanning_path_visualization.png'), dpi=150, bbox_inches='tight')
         print(f"✓ Path visualization saved to: scanning_path_visualization.png")
         plt.close(fig)
+=======
+    
+    # Create path visualization
+    print("\n Generating path visualization...")
+    fig = plt.figure(figsize=(12, 5))
+    
+    ax1 = fig.add_subplot(121, projection='3d')
+    ax1.scatter(surf.points[:, 0], surf.points[:, 1], surf.points[:, 2],
+               c='lightblue', s=1, alpha=0.2)
+    ax1.plot(path_3d[:, 0], path_3d[:, 1], path_3d[:, 2],
+            'r-', linewidth=2, label='Path')
+    ax1.scatter(path_3d[0, 0], path_3d[0, 1], path_3d[0, 2],
+               c='green', s=100, marker='o', label='Start')
+    ax1.scatter(path_3d[-1, 0], path_3d[-1, 1], path_3d[-1, 2],
+               c='red', s=100, marker='s', label='End')
+    ax1.set_xlabel('U')
+    ax1.set_ylabel('V')
+    ax1.set_zlabel('W')
+    ax1.set_title('3D Scanning Path')
+    ax1.legend()
+    
+    ax2 = fig.add_subplot(122)
+    ax2.scatter(surf.xy_params[:, 0], surf.xy_params[:, 1],
+               c='lightblue', s=5, alpha=0.5)
+    ax2.plot(path_xy[:, 0], path_xy[:, 1], 'r-', linewidth=2, label='Path')
+    ax2.scatter(path_xy[0, 0], path_xy[0, 1],
+               c='green', s=100, marker='o', label='Start')
+    ax2.scatter(path_xy[-1, 0], path_xy[-1, 1],
+               c='red', s=100, marker='s', label='End')
+    ax2.set_xlabel('x (parameter)')
+    ax2.set_ylabel('y (parameter)')
+    ax2.set_title('Parameter Space Path')
+    ax2.set_aspect('equal')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(script_dir, 'scanning_path_visualization.png'), dpi=150, bbox_inches='tight')
+    print(f"Path visualization saved to: scanning_path_visualization.png")
+    plt.close(fig)
+>>>>>>> b913a706d752b9ca1f872c89fd5cbc838e0f95d4
     
     # Final summary
     print("\n" + "=" * 70)
