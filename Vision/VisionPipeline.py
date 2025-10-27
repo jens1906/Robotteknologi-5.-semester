@@ -150,6 +150,12 @@ def main():
     cv2.circle(result_with_contour, (cx, cy), 5, (255, 0, 0), -1)
     show_image("10. Final Result with Boundaries", result_with_contour, wait=False)
     
+    # Save the final image
+    output_dir = os.path.dirname(OUTPUT_PATH)
+    final_result_path = os.path.join(output_dir, "final_result_with_boundaries.jpg")
+    cv2.imwrite(final_result_path, result_with_contour)
+    print(f"Saved final result to {final_result_path}")
+    
     # Create summary grids
     steps = [
         original,
@@ -166,6 +172,16 @@ def main():
     
     grid_with_contour = create_grid_visualization(steps)
     grid_without_contour = create_grid_visualization(steps[:-1] + [np.zeros_like(steps[-1])])
+    
+    # Save the grid image
+    grid_path = os.path.join(output_dir, "processing_steps_grid.jpg")
+    cv2.imwrite(grid_path, grid_with_contour)
+    print(f"Saved processing steps grid to {grid_path}")
+
+    # Save the grid image without contour
+    grid_without_contour_path = os.path.join(output_dir, "processing_steps_grid_without_contour.jpg")
+    cv2.imwrite(grid_without_contour_path, grid_without_contour)
+    print(f"Saved processing steps grid without contour to {grid_without_contour_path}")
     
     show_image("All Processing Steps (WITH Contour)", grid_with_contour, wait=False)
     show_image("All Processing Steps (WITHOUT Contour)", grid_without_contour, wait=False)
