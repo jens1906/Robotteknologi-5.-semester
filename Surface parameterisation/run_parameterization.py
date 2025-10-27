@@ -61,7 +61,7 @@ class SurfaceParameterization:
         self.centroid = centroid
         self.points_local = centered_points @ self.principal_axes.T
         
-        print("✓ Local coordinate frame computed")
+        print("Local coordinate frame computed")
         return self.principal_axes, centroid
     
     def compute_xy_parameterization(self, method='projection'):
@@ -96,7 +96,7 @@ class SurfaceParameterization:
         
         self.xy_params = (xy - xy_min) / xy_range
         
-        print(f"✓ XY parameterization computed using {method} method")
+        print(f"XY parameterization computed using {method} method")
         return self.xy_params
     
     def build_inverse_interpolation(self, method='rbf', neighbors=None):
@@ -129,7 +129,7 @@ class SurfaceParameterization:
         else:
             self.interpolation_method = method
         
-        print(f"✓ Inverse interpolation built using {method} method")
+        print(f" Inverse interpolation built using {method} method")
     
     def interpolate(self, xy_query):
         """
@@ -241,7 +241,7 @@ class SurfaceParameterization:
             'sample_size': len(sample_points)
         }
         
-        print("\n📊 Parameterization Quality Metrics:")
+        print("\n Parameterization Quality Metrics:")
         print(f"  Sample size: {metrics['sample_size']}/{n_points} points")
         print(f"  Mean error: {metrics['mean_error']:.6f}")
         print(f"  Max error: {metrics['max_error']:.6f}")
@@ -252,7 +252,7 @@ class SurfaceParameterization:
     
     def visualize(self, save_path='surface_visualization.png', grid_samples=30):
         """Visualize the parameterized surface and save to file."""
-        print(f"\n📊 Generating visualization...")
+        print(f"\n Generating visualization...")
         
         fig = plt.figure(figsize=(15, 5))
         
@@ -292,7 +292,7 @@ class SurfaceParameterization:
         
         plt.tight_layout()
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"✓ Visualization saved to: {save_path}")
+        print(f" Visualization saved to: {save_path}")
         plt.close(fig)
 
 
@@ -306,33 +306,35 @@ def main():
     print("=" * 70)
     
     # Configuration
-    POINT_CLOUD_FILE = "point_cloud.ply"
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    POINT_CLOUD_FILE = os.path.join(script_dir, "point_cloud.ply")
     
     # Check if file exists
     if not os.path.exists(POINT_CLOUD_FILE):
-        print(f"\n❌ Error: '{POINT_CLOUD_FILE}' not found!")
-        print(f"   Please ensure the PLY file is in: {os.getcwd()}")
+        print(f"\n Error: '{os.path.basename(POINT_CLOUD_FILE)}' not found!")
+        print(f"   Please ensure the PLY file is in: {script_dir}")
         return
     
-    print(f"\n📂 Loading point cloud: {POINT_CLOUD_FILE}")
+    print(f"\n Loading point cloud: {POINT_CLOUD_FILE}")
     
     # Step 1: Initialize
     surf = SurfaceParameterization(point_cloud_path=POINT_CLOUD_FILE)
     
     # Step 2: Compute local frame
-    print("\n🔄 Computing local coordinate frame...")
+    print("\n Computing local coordinate frame...")
     surf.compute_local_frame()
     
     # Step 3: Compute parameterization
-    print("\n🔄 Computing XY parameterization...")
+    print("\n Computing XY parameterization...")
     surf.compute_xy_parameterization(method='projection')
     
     # Step 4: Build interpolation
-    print("\n🔄 Building inverse interpolation...")
+    print("\n Building inverse interpolation...")
     surf.build_inverse_interpolation(method='rbf', neighbors=50)
     
     # Step 5: Evaluate quality
-    print("\n🔄 Evaluating quality...")
+    print("\n Evaluating quality...")
     metrics = surf.evaluate_quality(sample_size=1000)
     
     # Step 6: Test interpolation
@@ -377,7 +379,7 @@ def main():
     path_3d = surf.interpolate(path_xy)
     path_length = np.sum(np.linalg.norm(np.diff(path_3d, axis=0), axis=1))
     
-    print(f"\n✓ Generated scanning path:")
+    print(f"\nGenerated scanning path:")
     print(f"  Waypoints: {len(path_3d)}")
     print(f"  Path length: {path_length:.2f} units")
     
@@ -388,23 +390,24 @@ def main():
     
     grid_uvw, grid_xy = surf.create_regular_grid(x_samples=50, y_samples=50)
     
-    np.save('surface_grid_uvw.npy', grid_uvw)
-    np.save('surface_grid_xy.npy', grid_xy)
-    np.save('scanning_path_uvw.npy', path_3d)
-    np.save('scanning_path_xy.npy', path_xy)
+    # Save files in the same directory as the script
+    np.save(os.path.join(script_dir, 'surface_grid_uvw.npy'), grid_uvw)
+    np.save(os.path.join(script_dir, 'surface_grid_xy.npy'), grid_xy)
+    np.save(os.path.join(script_dir, 'scanning_path_uvw.npy'), path_3d)
+    np.save(os.path.join(script_dir, 'scanning_path_xy.npy'), path_xy)
     
-    print(f"\n✓ Grid created: {grid_uvw.shape}")
-    print(f"✓ Saved files:")
+    print(f"\nGrid created: {grid_uvw.shape}")
+    print(f"Saved files:")
     print(f"  - surface_grid_uvw.npy (Cartesian grid)")
     print(f"  - surface_grid_xy.npy (Parameter grid)")
     print(f"  - scanning_path_uvw.npy (3D path)")
     print(f"  - scanning_path_xy.npy (2D path)")
     
     # Step 9: Visualize
-    surf.visualize(save_path='surface_visualization.png', grid_samples=30)
+    surf.visualize(save_path=os.path.join(script_dir, 'surface_visualization.png'), grid_samples=30)
     
     # Create path visualization
-    print("\n📊 Generating path visualization...")
+    print("\n Generating path visualization...")
     fig = plt.figure(figsize=(12, 5))
     
     ax1 = fig.add_subplot(121, projection='3d')
@@ -438,15 +441,15 @@ def main():
     ax2.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig('scanning_path_visualization.png', dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(script_dir, 'scanning_path_visualization.png'), dpi=150, bbox_inches='tight')
     print(f"✓ Path visualization saved to: scanning_path_visualization.png")
     plt.close(fig)
     
     # Final summary
     print("\n" + "=" * 70)
-    print("  ✅ SURFACE PARAMETERIZATION COMPLETE!")
+    print("  SURFACE PARAMETERIZATION COMPLETE!")
     print("=" * 70)
-    print("\n📁 Generated files:")
+    print("\n Generated files:")
     print("  1. surface_visualization.png - 3D surface visualization")
     print("  2. scanning_path_visualization.png - Path visualization")
     print("  3. surface_grid_uvw.npy - Regular grid (Cartesian)")
@@ -454,11 +457,11 @@ def main():
     print("  5. scanning_path_uvw.npy - Example scanning path (3D)")
     print("  6. scanning_path_xy.npy - Example scanning path (2D)")
     
-    print("\n💡 Usage:")
+    print("\n Usage:")
     print("  To load grids: grid_uvw = np.load('surface_grid_uvw.npy')")
     print("  To load path: path = np.load('scanning_path_uvw.npy')")
     
-    print("\n✅ All done! Check the PNG files for visualizations.")
+    print("\n All done! Check the PNG files for visualizations.")
     print("=" * 70)
     
     return surf
@@ -474,7 +477,7 @@ if __name__ == "__main__":
     try:
         surf = main()
     except Exception as e:
-        print(f"\n❌ Error occurred: {str(e)}")
+        print(f"\n Error occurred: {str(e)}")
         import traceback
         traceback.print_exc()
         print("\nPlease check:")
