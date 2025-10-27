@@ -17,7 +17,7 @@ RDK = Robolink()
 CameraTest=False
 CameraTestVisuals=False
 PictureTest=False
-PictureTestVisuals=False
+PictureTestVisuals=True
 CaptionTest = True
 SavePointCloud=True
 
@@ -207,12 +207,17 @@ def FrameTest(image, depth, depthFiles=None):
     #curve.setName("SplinePath")
     #curve.setParam("Smooth", 1)
     if SavePointCloud:
+        # Save point cloud in multiple formats with date-time stamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(xyz_data)
-        o3d.io.write_point_cloud("point_cloud.pcd", pcd)  
-        o3d.io.write_point_cloud("point_cloud.ply", pcd)
-        np.savetxt('point_cloud.txt', xyz_data, delimiter=' ', fmt='%.6f')
-        np.savetxt('point_cloud_xyz_mm.csv', xyz_data, delimiter=',', header='X,Y,Z', comments='', fmt='%.6f')
+        o3d.io.write_point_cloud(f"point_cloud_{timestamp}.pcd", pcd)  
+        o3d.io.write_point_cloud(f"point_cloud_{timestamp}.ply", pcd)
+        np.savetxt(f'point_cloud_{timestamp}.txt', xyz_data, delimiter=' ', fmt='%.6f')
+        np.savetxt(f'point_cloud_{timestamp}.csv', xyz_data, delimiter=',', header='X,Y,Z', comments='', fmt='%.6f')
+        print(f"Saved point cloud with timestamp: {timestamp}")
 
      
     
@@ -232,8 +237,8 @@ def main():
         FrameTest(image, depth)
     elif CaptionTest:
         #Make list of all images in a folder and a list of all depth files
-        image_folder = 'Vision\ImageTestData\ImageCurveBad'
-        depth_folder = 'Vision\ImageTestData\ImageCurveBad'
+        image_folder = 'Vision\ImageTestData\TestScenarioWithoutMount'
+        depth_folder = 'Vision\ImageTestData\TestScenarioWithoutMount'
         image_files = glob.glob(os.path.join(image_folder, '*.png'))
         depth_files = glob.glob(os.path.join(depth_folder, '*.npy'))
 
