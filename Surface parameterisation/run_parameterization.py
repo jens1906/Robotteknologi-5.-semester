@@ -47,7 +47,7 @@ class SurfaceParameterization:
         """Load point cloud from PLY file."""
         pcd = o3d.io.read_point_cloud(path)
         self.points = np.asarray(pcd.points)
-        print(f"✓ Loaded {len(self.points)} points from {path}")
+        print(f"Loaded {len(self.points)} points from {path}")
         
     def compute_local_frame(self):
         """Compute local coordinate frame using PCA."""
@@ -442,7 +442,7 @@ def main():
     
     plt.tight_layout()
     plt.savefig(os.path.join(script_dir, 'scanning_path_visualization.png'), dpi=150, bbox_inches='tight')
-    print(f"✓ Path visualization saved to: scanning_path_visualization.png")
+    print(f"Path visualization saved to: scanning_path_visualization.png")
     plt.close(fig)
     
     # Final summary
