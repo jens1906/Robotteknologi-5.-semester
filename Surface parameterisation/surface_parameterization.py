@@ -11,6 +11,8 @@ from scipy.interpolate import griddata, RBFInterpolator
 from scipy.spatial import cKDTree
 import open3d as o3d
 from sklearn.decomposition import PCA
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for VS Code
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -309,14 +311,15 @@ class SurfaceParameterization:
         
         return normals
     
-    def visualize(self, show_grid=True, show_original=True, grid_samples=30):
+    def visualize(self, show_grid=True, show_original=True, grid_samples=30, save_path='surface_visualization.png'):
         """
-        Visualize the parameterized surface.
+        Visualize the parameterized surface and save to file.
         
         Args:
             show_grid: Whether to show the interpolated grid
             show_original: Whether to show original Cartesian points
             grid_samples: Number of samples for the grid
+            save_path: Path to save the visualization (default: 'surface_visualization.png')
         """
         fig = plt.figure(figsize=(15, 5))
         
@@ -357,7 +360,9 @@ class SurfaceParameterization:
         ax3.set_title('Height Map (x,y,W)')
         
         plt.tight_layout()
-        plt.show()
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Visualization saved to: {save_path}")
+        plt.close(fig)  # Close to free memory
     
     def evaluate_quality(self, sample_size=1000):
         """
@@ -457,7 +462,8 @@ def main():
     print("\n" + "=" * 60)
     print("Generating visualization...")
     print("=" * 60)
-    surf_param.visualize(show_grid=True, show_original=True, grid_samples=30)
+    surf_param.visualize(show_grid=True, show_original=True, grid_samples=30, 
+                        save_path='surface_visualization.png')
     
     # Export regular grid for robotic path planning
     print("\nCreating regular grid for path planning...")
