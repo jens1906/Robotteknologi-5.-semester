@@ -10,8 +10,13 @@ def create_blob_outline(u_len, v_len, n_points=100):
     
     r = np.sqrt((a * np.cos(theta))**2 + (b * np.sin(theta))**2)
     r = r * (1 + 0.15 * np.sin(3*theta) + 0.1 * np.sin(5*theta) + 0.08 * np.cos(7*theta))
+
+    blob_x, blob_y = r * np.cos(theta), r * np.sin(theta)
+
+    len_x = np.max(blob_x) - np.min(blob_x)
+    len_y = np.max(blob_y) - np.min(blob_y)
     
-    return r * np.cos(theta), r * np.sin(theta)
+    return blob_x, blob_y, len_x, len_y
 
 def cubic_bezier(tau, b0, b1, b2, b3):
     return (1-tau)**3 * b0 + 3 * (1-tau)**2 * tau * b1 + 3 * (1-tau) * tau**2 * b2 + tau**3 * b3
@@ -72,17 +77,18 @@ def path_planning(u_len, v_len, d, n=50):
     line_positions = np.arange(v_start, v_end + d * 0.5, d)    
     lines = [[u for _ in line_positions], [np.full_like(u, v) for v in line_positions]]
     
-    blob_x, blob_y = create_blob_outline(u_len, v_len)
     path = create_continuous_path(lines, d)
 
-    return path, blob_x, blob_y
+    return path
 
 
 v_len = 10.0
 u_len = 24.0
 d = 1
 
-path, blob_x, blob_y = path_planning(u_len, v_len, d)
+blob_x, blob_y, len_x, len_y = create_blob_outline(u_len, v_len)
+
+path = path_planning(len_x, len_y, d)
 
 print(f"Total points in path: {len(path)}")
 
