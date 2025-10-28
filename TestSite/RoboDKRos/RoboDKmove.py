@@ -8,7 +8,7 @@ from robodk.robolink import *    # RoboDK API
 from robodk.robomath import *    # Robot toolbox
 import math
 
-def create_parallel_lines_path(start_x=100, start_y=100, z_height=300, 
+def create_parallel_lines_path(start_x=100, start_y=100, z_height=100, 
                               start_rx=0, start_ry=0, start_rz=0,
                               line_length=200, line_spacing=50, num_lines=5, 
                               rotation_angle=0):
@@ -115,6 +115,7 @@ def create_parallel_lines_path(start_x=100, start_y=100, z_height=300,
                     )
                     points.append(rotated_point)
     
+    print(points)
     return points
 
 def rotate_and_translate_point_6dof(local_x, local_y, local_z, local_rx, local_ry, local_rz,
@@ -159,9 +160,9 @@ def main():
     print("Connected to RoboDK")
     
     # Parameters for the scanning pattern with full 6-DOF control
-    start_x = 200        # Starting X coordinate
-    start_y = 150        # Starting Y coordinate
-    start_z = 300        # Starting Z coordinate
+    start_x = 100        # Starting X coordinate
+    start_y = 100        # Starting Y coordinate
+    start_z = 200        # Starting Z coordinate
     start_rx = 0         # Starting RX rotation (degrees)
     start_ry = 0         # Starting RY rotation (degrees)
     start_rz = 45        # Starting RZ rotation (degrees)
