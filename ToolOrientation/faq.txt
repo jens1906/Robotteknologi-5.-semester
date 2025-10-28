@@ -1,0 +1,2 @@
+Input = [x,y,z]n
+Output = [x,y,z]n + [idk]n
