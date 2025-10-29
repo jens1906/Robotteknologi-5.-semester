@@ -58,3 +58,6 @@ COLCON_IGNORE
 AMENT_IGNORE
 
 # End of https://www.toptal.com/developers/gitignore/api/ros2
+ToolOrientation/compute_path_orientations.py
+validate_pipeline.py
+PIPELINE_OVERVIEW.md
