@@ -160,10 +160,10 @@ def main():
     print("Connected to RoboDK")
     
     # Parameters for the scanning pattern with full 6-DOF control
-    start_x = 100        # Starting X coordinate
-    start_y = 100        # Starting Y coordinate
-    start_z = 200        # Starting Z coordinate
-    start_rx = 0         # Starting RX rotation (degrees)
+    start_x = 300        # Starting X coordinate
+    start_y = -600        # Starting Y coordinate
+    start_z = -100        # Starting Z coordinate
+    start_rx = 180         # Starting RX rotation (degrees)
     start_ry = 0         # Starting RY rotation (degrees)
     start_rz = 45        # Starting RZ rotation (degrees)
     

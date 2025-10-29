@@ -1,17 +1,23 @@
 from pathlib import Path
 from robodk import robolink, robomath
 
-
 def main():
     RDK = robolink.Robolink()  # Connect to RoboDK
     RDK.setRunMode(robolink.RUNMODE_SIMULATE)
     RDK.setSimulationSpeed(10)
 
+    # Detect project root automatically (2 levels up from this file)
+    project_root = Path(__file__).resolve().parents[2]
+    testsite_dir = project_root / "TestSite"
+    robodkros_dir = testsite_dir / "RoboDKRos"
+
+    print(f"📂 Using project root: {project_root}")
+
     # --- Frame 1 ---
     frame1 = RDK.AddFrame("Frame 1")
     frame1.setPose(robomath.eye(4))  # World origin
 
-    # --- Bordplade under Frame 1 ---
+    # --- Bordplade ---
     bordplade_path = Path(__file__).parent / "Bundplade.stl"
     if bordplade_path.exists():
         bordplade = RDK.AddFile(str(bordplade_path))
@@ -20,11 +26,11 @@ def main():
     else:
         print(f"⚠️ Bordplade not found at: {bordplade_path}")
 
-    # --- Frame 2 under Frame 1 ---
+    # --- Frame 2 ---
     frame2 = RDK.AddFrame("Frame 2", frame1)
     frame2.setPose(robomath.transl(200, 0, 250))
 
-    # --- Mount under Frame 2 ---
+    # --- Mount ---
     mount_path = Path(__file__).parent / "UR3e mount.stl"
     if mount_path.exists():
         mount = RDK.AddFile(str(mount_path))
@@ -33,7 +39,7 @@ def main():
     else:
         print(f"⚠️ Mount not found at: {mount_path}")
 
-    # --- Create custom UR3e Base frame under Frame 2 ---
+    # --- UR3e Base ---
     ur3e_base = RDK.AddFrame("Frame 3", frame2)
     pose_ur3e_base = robomath.Mat([
         [1, 0, 0, 0],
@@ -43,12 +49,10 @@ def main():
     ])
     ur3e_base.setPose(pose_ur3e_base)
 
-    # --- Load UR3e Robot ---
-    ur_path = Path(r"C:\Users\André's PC\Documents\GitHub\Robotteknologi-5.-semester\TestSite\UR3e.robot")
+    # --- UR3e Robot ---
+    ur_path = testsite_dir / "UR3e.robot"
     if ur_path.exists():
         ur_robot = RDK.AddFile(str(ur_path))
-        
-        # Now safely parent robot under our manually defined UR3e Base
         if ur3e_base.Valid() and ur_robot.Valid():
             ur_robot.setParent(ur3e_base)
             pose_robot = robomath.Mat([
@@ -63,7 +67,7 @@ def main():
     else:
         print(f"⚠️ UR3e robot not found at: {ur_path}")
 
-    # --- Frame 4 under Frame 1 ---
+    # --- Frame 4 ---
     frame4 = RDK.AddFrame("Frame 4", frame1)
     frame4.setPose(robomath.Mat([
         [1, 0, 0, 200],
@@ -72,10 +76,8 @@ def main():
         [0, 0, 0, 1]
     ]))
 
-    # --- TestpladeKurve v3 under Frame 4 ---
-    testplade_path = Path(
-        r"C:\Users\André's PC\Documents\GitHub\Robotteknologi-5.-semester\TestSite\RoboDKRos\TestpladeKurve v3.stl"
-    )
+    # --- TestpladeKurve ---
+    testplade_path = robodkros_dir / "TestpladeKurve v3.stl"
     if testplade_path.exists():
         testplade = RDK.AddFile(str(testplade_path))
         testplade.setParent(frame4)
@@ -88,7 +90,6 @@ def main():
         testplade.setPose(pose_testplade)
     else:
         print(f"⚠️ TestpladeKurve file not found at: {testplade_path}")
-
 
 if __name__ == "__main__":
     main()

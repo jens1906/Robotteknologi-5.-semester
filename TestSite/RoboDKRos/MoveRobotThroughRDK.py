@@ -1,96 +1,99 @@
 from robodk.robolink import *
 from robodk.robomath import *
+import numpy as np
 import time
 
-#-------------------------------------------
 # Connect to RoboDK
-#-------------------------------------------
 RDK = Robolink()
-
-# Get the robot (change the name if needed)
 robot = RDK.Item('UR3e', ITEM_TYPE_ROBOT)
+robot.Connect()
 
-if not robot.Valid():
-    print("Robot not found! Make sure RoboDK is running and the robot is loaded.")
-    print("Available robots:")
-    for item in RDK.ItemList(ITEM_TYPE_ROBOT):
-        print(f"  - {item.Name()}")
-    exit()
-else:
-    robot.Connect()
-    print(f"Connected to robot: {robot.Name()}")
+RDK.setSimulationSpeed(1)
+robot.setSpeed(100)  # deg/s
+robot.setSpeed(100, 100)  # linear mm/s, optional joint speed limit
+robot.setAcceleration(1000)  # mm/s^2
+robot.setSpeedJoints(1000)  # deg/s
+robot.setAccelerationJoints(1000)
 
-#-------------------------------------------
-# Optional: move robot to a start position
-#-------------------------------------------
+RDK.setRunMode(RUNMODE_RUN_ROBOT)
+RDK.setCollisionActive(COLLISION_ON)
+
+print("-" * 50)
+
+def safe_move(robot: Item, target: Mat, move_type: str = 'J'):
+    if type(target) == Mat:
+        pass
+    elif type(target) is list:
+        target = robot.SolveFK(target)
+
+    move_type = move_type.upper()
+    if move_type not in ['J', 'L', 'C']:
+        raise ValueError("Invalid move_type. Use 'J', 'L', or 'C'.")
+    
+    joints_current = robot.Joints()  # current robot position
+    joints_target = robot.SolveIK(target)
+
+    if not joints_target:
+        print("❌ No IK solution found!")
+        return False
+
+    # ---- PATH TEST using **exact joint vector** for execution ----
+    if move_type == 'J':
+        test_failed = robot.MoveJ_Test(joints_current, joints_target)
+    elif move_type == 'L':
+        # Use FK of the **exact same joints** to avoid numerical differences
+        for joints in joints_target:
+            pose_target = robot.SolveFK(joints)
+            test_failed = robot.MoveL_Test(joints_current, pose_target)
+            if test_failed == -1:
+                print("❌ No valid path found for linear move found, resulting to joint move.")
+                safe_move(robot,target,'J')
+                return True
+
+    elif move_type == 'C':
+        print("MoveC not implemented for poses")
+        return False
+
+    if test_failed:
+        print("⚠️ No valid path found or collision predicted! Move aborted.")
+        return False
+
+    # ---- Execute using the **same joint vector** ----
+    if move_type == 'J':
+        robot.MoveJ(joints_target, blocking=True)
+    elif move_type == 'L':
+        robot.MoveL(joints_target, blocking=True)
+
+    print("✅ Move completed successfully.")
+    return True
+
+# Example joint move
 joint_target = [0.0, -90.0, -90.0, 0.0, 90.0, 0.0]
-#robot.MoveL(joint_target)
+#safe_move(robot, RDK, joint_target, 'J')
 
-#-------------------------------------------
-# Move to a base pose if desired
-#-------------------------------------------
-target_pose = Mat([
-    [1.0, 0.0, 0.0, 100],
-    [0.0, 1.0, 0.0, -300],
-    [0.0, 0.0, 1.0, 400.0],
-    [0.0, 0.0, 0.0, 1.0]
+# Example pose move
+first = Mat([
+    [1, 0, 0, 100],
+    [0, 1, 0, -300],
+    [0, 0, 1, 600],
+    [0, 0, 0, 1]
 ])
-#robot.MoveL(target_pose)
+second = Mat([
+    [1, 0, 0, 100],
+    [0, 1, 0, -300],
+    [0, 0, 1, 500],
+    [0, 0, 0, 1]
+])
 
-#---------------------------------
-# Get the curve object and project
-#---------------------------------
-#---------------------------------
-# Find the real curve object inside RoboDK
-#---------------------------------
-def find_valid_curve(rdk: Robolink, name: str):
-    """Recursively search for a valid object containing curve geometry."""
-    candidates = rdk.ItemList(ITEM_TYPE_OBJECT)
-    for c in candidates:
-        if name.lower() in c.Name().lower():
-            # Make sure it actually has curves
-            linked_curves = c.ObjectLink()
-            if len(linked_curves) > 0 or c.Valid():
-                print(f"✅ Found valid curve object: {c.Name()}")
-                return c
-    raise Exception(f"❌ No valid curve geometry found matching '{name}'")
+third = Mat([
+    [1, 0, 0, 100],
+    [0, 1, 0, -300],
+    [0, 0, 1, 400],
+    [0, 0, 0, 1]
+])
 
-curve_object = find_valid_curve(RDK, '6DOF_ScanPattern_RZ45deg')
+print("Moving to first pose...")
+safe_move(robot, first, 'J')
 
-if not curve_object.Valid():
-    raise Exception("Curve object '6DOF_ScanPattern_RZ45deg' not found!")
-
-# Create or get the Curve Follow project
-curve_follow_project = RDK.Item('CurveFollow', ITEM_TYPE_PROGRAM)
-if not curve_follow_project.Valid():
-    curve_follow_project = RDK.AddMachiningProject("CurveFollow")
-
-#---------------------------------
-# Configure the curve follow project
-#---------------------------------
-# This sets the path parameters for the curve-follow project automatically
-prog, status = curve_follow_project.setMachiningParameters(part=curve_object, params="ReorderAuto=0")
-
-# Link the robot to the project
-curve_follow_project.setLink(robot)
-
-# Optionally set the tool and reference frame if needed:
-# curve_follow_project.setPoseTool(robot.PoseTool())
-# curve_follow_project.setPoseFrame(robot.PoseFrame())
-
-#---------------------------------
-# Simulate first in RoboDK
-#---------------------------------
-print("Simulating curve follow...")
-curve_follow_project.RunProgram()  # runs the project in simulation mode
-while curve_follow_project.Busy():
-    time.sleep(0.1)
-
-#---------------------------------
-# Run the same path on the real robot
-#---------------------------------
-print("Running on real robot...")
-robot.Connect()  # make sure connection is alive
-curve_follow_project.RunCode('', True)  # run directly on connected robot
-
-print("Done.")
+print("Moving to joint pose...")
+safe_move(robot, third, 'L')
