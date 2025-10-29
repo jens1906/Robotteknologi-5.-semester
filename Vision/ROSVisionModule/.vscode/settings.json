@@ -1,0 +1,16 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/home/jens/Documents/GitHub/Robotteknologi-5.-semester/Vision/ROSVisionModule/install/vision_processor/lib/python3.12/site-packages",
+        "/home/jens/Documents/GitHub/Robotteknologi-5.-semester/Vision/ROSVisionModule/install/realsense_publisher/lib/python3.12/site-packages",
+        "/home/jens/catkin_ws/devel/lib/python3/dist-packages",
+        "/home/jens/ros2_ws/install/turtlesim/lib/python3.12/site-packages",
+        "/opt/ros/jazzy/lib/python3.12/site-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/jens/Documents/GitHub/Robotteknologi-5.-semester/Vision/ROSVisionModule/install/vision_processor/lib/python3.12/site-packages",
+        "/home/jens/Documents/GitHub/Robotteknologi-5.-semester/Vision/ROSVisionModule/install/realsense_publisher/lib/python3.12/site-packages",
+        "/home/jens/catkin_ws/devel/lib/python3/dist-packages",
+        "/home/jens/ros2_ws/install/turtlesim/lib/python3.12/site-packages",
+        "/opt/ros/jazzy/lib/python3.12/site-packages"
+    ]
+}
