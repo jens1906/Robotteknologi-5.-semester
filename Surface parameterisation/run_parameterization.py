@@ -64,9 +64,58 @@ class SurfaceParameterization:
         print("Local coordinate frame computed")
         return self.principal_axes, centroid
     
-    def compute_uv_parameterization(self, method='projection'):
+    def local_to_global(self, points_local):
+        """
+        Transform points from local coordinate frame back to global frame.
+        
+        Args:
+            points_local: Nx3 array of points in local frame
+            
+        Returns:
+            points_global: Nx3 array of points in global frame
+            
+        Mathematical operation:
+            points_global = points_local @ principal_axes + centroid
+            
+        This is the inverse of the transformation done in compute_local_frame():
+            points_local = (points_global - centroid) @ principal_axes.T
+        """
+        if not hasattr(self, 'principal_axes') or not hasattr(self, 'centroid'):
+            raise ValueError("Local frame not computed yet. Call compute_local_frame() first.")
+        
+        points_local = np.atleast_2d(points_local)
+        points_global = points_local @ self.principal_axes + self.centroid
+        
+        return points_global
+    
+    def global_to_local(self, points_global):
+        """
+        Transform points from global coordinate frame to local frame.
+        
+        Args:
+            points_global: Nx3 array of points in global frame
+            
+        Returns:
+            points_local: Nx3 array of points in local frame
+            
+        Mathematical operation:
+            points_local = (points_global - centroid) @ principal_axes.T
+        """
+        if not hasattr(self, 'principal_axes') or not hasattr(self, 'centroid'):
+            raise ValueError("Local frame not computed yet. Call compute_local_frame() first.")
+        
+        points_global = np.atleast_2d(points_global)
+        points_local = (points_global - self.centroid) @ self.principal_axes.T
+        
+        return points_local
+    
+    def compute_uv_parameterization(self, method='projection', normalize=False):
         """
         Compute UV parameterization mapping (x,y,z) → (u,v).
+        
+        Args:
+            method: 'projection' or 'distance'
+            normalize: If True, normalize UV to [0:1] range. If False, keep actual XYZ scale.
         """
         if not hasattr(self, 'points_local'):
             self.compute_local_frame()
@@ -89,14 +138,23 @@ class SurfaceParameterization:
         else:
             uv = self.points_local[:, :2]
         
-        uv_min = np.min(uv, axis=0)
-        uv_max = np.max(uv, axis=0)
-        uv_range = uv_max - uv_min
-        uv_range[uv_range == 0] = 1
+        if normalize:
+            # Normalize to [0:1] range
+            uv_min = np.min(uv, axis=0)
+            uv_max = np.max(uv, axis=0)
+            uv_range = uv_max - uv_min
+            uv_range[uv_range == 0] = 1
+            self.uv_params = (uv - uv_min) / uv_range
+            print(f"UV parameterization computed using {method} method (normalized to [0:1])")
+        else:
+            # Keep actual XYZ scale
+            self.uv_params = uv
+            uv_min = np.min(uv, axis=0)
+            uv_max = np.max(uv, axis=0)
+            print(f"UV parameterization computed using {method} method (actual scale)")
+            print(f"  U range: [{uv_min[0]:.3f}, {uv_max[0]:.3f}]")
+            print(f"  V range: [{uv_min[1]:.3f}, {uv_max[1]:.3f}]")
         
-        self.uv_params = (uv - uv_min) / uv_range
-        
-        print(f"UV parameterization computed using {method} method")
         return self.uv_params
     
     def build_inverse_interpolation(self, method='rbf', neighbors=None):
@@ -182,18 +240,21 @@ class SurfaceParameterization:
         """Compute surface normals at parameter space coordinates."""
         uv_query = np.atleast_2d(uv_query)
         normals = np.zeros((len(uv_query), 3))
-        epsilon = 1e-5
+        
+        # Use adaptive epsilon based on UV range
+        uv_range = np.max(self.uv_params, axis=0) - np.min(self.uv_params, axis=0)
+        epsilon = np.maximum(uv_range * 1e-4, 1e-5)  # Adaptive epsilon
         
         for i, uv in enumerate(uv_query):
             u, v = uv
             
-            uv_du = np.array([[u + epsilon, v]])
+            uv_du = np.array([[u + epsilon[0], v]])
             p_du = self.interpolate(uv_du)[0] - self.interpolate(uv.reshape(1, -1))[0]
-            p_du = p_du / epsilon
+            p_du = p_du / epsilon[0]
             
-            uv_dv = np.array([[u, v + epsilon]])
+            uv_dv = np.array([[u, v + epsilon[1]]])
             p_dv = self.interpolate(uv_dv)[0] - self.interpolate(uv.reshape(1, -1))[0]
-            p_dv = p_dv / epsilon
+            p_dv = p_dv / epsilon[1]
             
             normal = np.cross(p_du, p_dv)
             norm = np.linalg.norm(normal)
@@ -206,8 +267,12 @@ class SurfaceParameterization:
     
     def create_regular_grid(self, u_samples=50, v_samples=50):
         """Create a regular grid in parameter space."""
-        u = np.linspace(0, 1, u_samples)
-        v = np.linspace(0, 1, v_samples)
+        # Get actual UV range from the computed parameters
+        uv_min = np.min(self.uv_params, axis=0)
+        uv_max = np.max(self.uv_params, axis=0)
+        
+        u = np.linspace(uv_min[0], uv_max[0], u_samples)
+        v = np.linspace(uv_min[1], uv_max[1], v_samples)
         u_grid, v_grid = np.meshgrid(u, v)
         
         grid_uv = np.column_stack([u_grid.ravel(), v_grid.ravel()])
@@ -364,6 +429,47 @@ class SurfaceParameterization:
             print("Make sure you have a GUI available and Open3D installed with GUI support. Falling back to static images.")
 
 
+def create_matplotlib_path_visualization(surf, path_3d, path_uv, script_dir):
+    """Create static matplotlib visualization of the path."""
+    print("\n Generating path visualization...")
+    fig = plt.figure(figsize=(12, 5))
+
+    ax1 = fig.add_subplot(121, projection='3d')
+    ax1.scatter(surf.points[:, 0], surf.points[:, 1], surf.points[:, 2],
+               c='lightblue', s=1, alpha=0.2)
+    ax1.plot(path_3d[:, 0], path_3d[:, 1], path_3d[:, 2],
+            'r-', linewidth=2, label='Path')
+    ax1.scatter(path_3d[0, 0], path_3d[0, 1], path_3d[0, 2],
+               c='green', s=100, marker='o', label='Start')
+    ax1.scatter(path_3d[-1, 0], path_3d[-1, 1], path_3d[-1, 2],
+               c='red', s=100, marker='s', label='End')
+    ax1.set_xlabel('X')
+    ax1.set_ylabel('Y')
+    ax1.set_zlabel('Z')
+    ax1.set_title('3D Scanning Path')
+    ax1.legend()
+
+    ax2 = fig.add_subplot(122)
+    ax2.scatter(surf.uv_params[:, 0], surf.uv_params[:, 1],
+               c='lightblue', s=5, alpha=0.5)
+    ax2.plot(path_uv[:, 0], path_uv[:, 1], 'r-', linewidth=2, label='Path')
+    ax2.scatter(path_uv[0, 0], path_uv[0, 1],
+               c='green', s=100, marker='o', label='Start')
+    ax2.scatter(path_uv[-1, 0], path_uv[-1, 1],
+               c='red', s=100, marker='s', label='End')
+    ax2.set_xlabel('u (parameter)')
+    ax2.set_ylabel('v (parameter)')
+    ax2.set_title('Parameter Space Path')
+    ax2.set_aspect('equal')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(script_dir, 'scanning_path_visualization.png'), dpi=150, bbox_inches='tight')
+    print(f"✓ Path visualization saved to: scanning_path_visualization.png")
+    plt.close(fig)
+
+
 def main():
     """
     Main function - Run surface parameterization workflow.
@@ -372,6 +478,28 @@ def main():
     print("  SURFACE PARAMETERIZATION - Inverse Interpolation Approach")
     print("  Notation: (u,v) = parameter space | (x,y,z) = Cartesian space")
     print("=" * 70)
+    
+    # Ask user for visualization preference
+    print("\nVisualization Options:")
+    print("  1. Interactive 3D Viewer (Open3D) - Rotate, zoom, and pan in real-time")
+    print("  2. Static Matplotlib - Save images to PNG files")
+    print("  3. Both - Try interactive first, fallback to matplotlib")
+    
+    while True:
+        choice = input("\nChoose visualization method (1/2/3) [default: 3]: ").strip()
+        if choice == '' or choice == '3':
+            viz_mode = 'both'
+            break
+        elif choice == '1':
+            viz_mode = 'interactive'
+            break
+        elif choice == '2':
+            viz_mode = 'matplotlib'
+            break
+        else:
+            print("Invalid choice. Please enter 1, 2, or 3.")
+    
+    print(f"\nVisualization mode: {viz_mode}")
     
     # Configuration
     # Get the directory where this script is located
@@ -410,11 +538,18 @@ def main():
     print("  TESTING INVERSE INTERPOLATION")
     print("=" * 70)
     
+    # Get actual UV range for test points
+    uv_min = np.min(surf.uv_params, axis=0)
+    uv_max = np.max(surf.uv_params, axis=0)
+    uv_center = (uv_min + uv_max) / 2
+    uv_quarter = uv_min + (uv_max - uv_min) * 0.25
+    uv_threequarter = uv_min + (uv_max - uv_min) * 0.75
+    
     test_uv = np.array([
-        [0.5, 0.5],   # Center
-        [0.0, 0.0],   # Corner
-        [1.0, 1.0],   # Opposite corner
-        [0.25, 0.75]  # Random point
+        uv_center,           # Center
+        uv_min,              # Corner
+        uv_max,              # Opposite corner
+        [uv_quarter[0], uv_threequarter[1]]  # Random point
     ])
     
     interpolated = surf.interpolate(test_uv)
@@ -431,13 +566,17 @@ def main():
     print("  GENERATING ROBOTIC SCANNING PATH")
     print("=" * 70)
     
+    # Get actual UV range for path generation
+    uv_min = np.min(surf.uv_params, axis=0)
+    uv_max = np.max(surf.uv_params, axis=0)
+    
     num_passes = 10
     points_per_pass = 20
     path_uv = []
     
     for i in range(num_passes):
-        v = i / (num_passes - 1)
-        u_line = np.linspace(0, 1, points_per_pass)
+        v = uv_min[1] + (uv_max[1] - uv_min[1]) * i / (num_passes - 1)
+        u_line = np.linspace(uv_min[0], uv_max[0], points_per_pass)
         if i % 2 == 1:
             u_line = u_line[::-1]
         for u in u_line:
@@ -450,6 +589,26 @@ def main():
     print(f"\nGenerated scanning path:")
     print(f"  Waypoints: {len(path_3d)}")
     print(f"  Path length: {path_length:.2f} units")
+    print(f"  UV range: U=[{uv_min[0]:.3f}, {uv_max[0]:.3f}], V=[{uv_min[1]:.3f}, {uv_max[1]:.3f}]")
+    
+    # Demonstration: Frame transformations
+    print("\n" + "=" * 70)
+    print("  FRAME TRANSFORMATION DEMONSTRATION")
+    print("=" * 70)
+    
+    # Test local to global and back
+    test_points_global = surf.points[:3]  # Take first 3 points
+    test_points_local = surf.global_to_local(test_points_global)
+    test_points_back = surf.local_to_global(test_points_local)
+    
+    print("\nFrame transformation test:")
+    for i in range(len(test_points_global)):
+        print(f"\n  Point {i+1}:")
+        print(f"    Original (global): [{test_points_global[i, 0]:.4f}, {test_points_global[i, 1]:.4f}, {test_points_global[i, 2]:.4f}]")
+        print(f"    Local frame:       [{test_points_local[i, 0]:.4f}, {test_points_local[i, 1]:.4f}, {test_points_local[i, 2]:.4f}]")
+        print(f"    Back to global:    [{test_points_back[i, 0]:.4f}, {test_points_back[i, 1]:.4f}, {test_points_back[i, 2]:.4f}]")
+        error = np.linalg.norm(test_points_global[i] - test_points_back[i])
+        print(f"    Reconstruction error: {error:.2e}")
     
     # Step 8: Create and export grid
     print("\n" + "=" * 70)
@@ -473,53 +632,34 @@ def main():
     
     # Step 9: Visualize
     surf.visualize(save_path=os.path.join(script_dir, 'surface_visualization.png'), grid_samples=30)
-    # Try interactive Open3D viewer first (allows moving/rotating/zooming)
-    try:
-        print("\n Opening interactive 3D viewer (rotate/zoom/translate)...")
-        # store grid so interactive mesh can be built if desired
-        surf.last_grid_xyz = grid_xyz
-        surf.visualize_interactive(path_3d=path_3d)
-        print("Interactive viewer closed.")
-    except Exception as e:
-        print(f"Interactive viewer failed: {e}\nFalling back to static matplotlib visualization.")
-        # Create path visualization (static fallback)
-        print("\n Generating path visualization...")
-        fig = plt.figure(figsize=(12, 5))
-
-        ax1 = fig.add_subplot(121, projection='3d')
-        ax1.scatter(surf.points[:, 0], surf.points[:, 1], surf.points[:, 2],
-                   c='lightblue', s=1, alpha=0.2)
-        ax1.plot(path_3d[:, 0], path_3d[:, 1], path_3d[:, 2],
-                'r-', linewidth=2, label='Path')
-        ax1.scatter(path_3d[0, 0], path_3d[0, 1], path_3d[0, 2],
-                   c='green', s=100, marker='o', label='Start')
-        ax1.scatter(path_3d[-1, 0], path_3d[-1, 1], path_3d[-1, 2],
-                   c='red', s=100, marker='s', label='End')
-        ax1.set_xlabel('X')
-        ax1.set_ylabel('Y')
-        ax1.set_zlabel('Z')
-        ax1.set_title('3D Scanning Path')
-        ax1.legend()
-
-        ax2 = fig.add_subplot(122)
-        ax2.scatter(surf.uv_params[:, 0], surf.uv_params[:, 1],
-                   c='lightblue', s=5, alpha=0.5)
-        ax2.plot(path_uv[:, 0], path_uv[:, 1], 'r-', linewidth=2, label='Path')
-        ax2.scatter(path_uv[0, 0], path_uv[0, 1],
-                   c='green', s=100, marker='o', label='Start')
-        ax2.scatter(path_uv[-1, 0], path_uv[-1, 1],
-                   c='red', s=100, marker='s', label='End')
-        ax2.set_xlabel('u (parameter)')
-        ax2.set_ylabel('v (parameter)')
-        ax2.set_title('Parameter Space Path')
-        ax2.set_aspect('equal')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(script_dir, 'scanning_path_visualization.png'), dpi=150, bbox_inches='tight')
-        print(f"✓ Path visualization saved to: scanning_path_visualization.png")
-        plt.close(fig)
+    
+    # Choose visualization based on user preference
+    if viz_mode == 'interactive':
+        # Interactive Open3D only
+        try:
+            print("\n Opening interactive 3D viewer (rotate/zoom/translate)...")
+            surf.last_grid_xyz = grid_xyz
+            surf.visualize_interactive(path_3d=path_3d)
+            print("Interactive viewer closed.")
+        except Exception as e:
+            print(f"Interactive viewer failed: {e}")
+            print("Please make sure Open3D is installed with GUI support.")
+    
+    elif viz_mode == 'matplotlib':
+        # Matplotlib only
+        print("\n Generating matplotlib visualizations...")
+        create_matplotlib_path_visualization(surf, path_3d, path_uv, script_dir)
+    
+    else:  # viz_mode == 'both'
+        # Try interactive first, fallback to matplotlib
+        try:
+            print("\n Opening interactive 3D viewer (rotate/zoom/translate)...")
+            surf.last_grid_xyz = grid_xyz
+            surf.visualize_interactive(path_3d=path_3d)
+            print("Interactive viewer closed.")
+        except Exception as e:
+            print(f"Interactive viewer failed: {e}\nFalling back to static matplotlib visualization.")
+            create_matplotlib_path_visualization(surf, path_3d, path_uv, script_dir)
     
     # Final summary
     print("\n" + "=" * 70)

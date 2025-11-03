@@ -1,4 +1,6 @@
 from setuptools import find_packages, setup
+import os
+from glob import glob
 
 package_name = 'parameterization'
 
@@ -10,12 +12,20 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (os.path.join('share', package_name, 'msg'), glob('msg/*.msg')),
+        (os.path.join('share', package_name, 'srv'), glob('srv/*.srv')),
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
     ],
-    install_requires=['setuptools'],
+    install_requires=[
+        'setuptools',
+        'numpy',
+        'scipy',
+        'scikit-learn',
+    ],
     zip_safe=True,
     maintainer='jens',
     maintainer_email='jens1906@gmail.com',
-    description='TODO: Package description',
+    description='Surface parameterization for robotic applications using inverse interpolation',
     license='Apache-2.0',
     extras_require={
         'test': [

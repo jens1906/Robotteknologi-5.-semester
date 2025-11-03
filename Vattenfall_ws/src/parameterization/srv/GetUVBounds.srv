@@ -1,0 +1,9 @@
+# Request the bounds of the parameter space
+---
+# Response with UV bounds
+float64 u_min
+float64 u_max
+float64 v_min
+float64 v_max
+bool success
+string message
