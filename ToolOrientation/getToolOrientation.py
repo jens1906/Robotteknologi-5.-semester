@@ -64,6 +64,7 @@ def rotation_matrix_to_ijk(R):
     #Compute ijk from rotation matrix
     #Args: R(3,3) rotation matrix
     #Returns: ijk vector(3)
+    #Dont need to comment math here, it is normal stuff from internet
     angle = np.arccos((np.trace(R) - 1) / 2)
     
     if np.abs(angle) < 1e-10:
