@@ -31,11 +31,27 @@ ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
   parameterization/parameterization_node.py
   DESTINATION lib/${PROJECT_NAME}
+  RENAME parameterization_node
+)
+
+# Install launch files
+install(DIRECTORY
+  launch
+  DESTINATION share/${PROJECT_NAME}
+)
+
+# Install examples
+install(DIRECTORY
+  examples
+  DESTINATION share/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
 endif()
+
+# Important: Export dependencies for downstream packages
+ament_export_dependencies(rosidl_default_runtime)
 
 ament_package()
