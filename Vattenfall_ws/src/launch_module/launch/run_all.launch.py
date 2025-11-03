@@ -1,0 +1,25 @@
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        Node(
+            package='realsense_publisher',
+            executable='realsense_publisher_node',
+            name='realsense_publisher',
+            output='screen',
+            parameters=[{'some_param': True}],
+        ),
+        Node(
+            package='path_planning',
+            executable='path_planning_node',
+            name='path_planning',
+            output='screen',
+        ),
+        Node(
+            package='corrosion_detection',
+            executable='corrosion_detection_node',
+            name='corrosion_detection',
+            output='screen',
+        ),
+    ])

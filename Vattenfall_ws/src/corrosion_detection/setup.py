@@ -11,7 +11,11 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=[
+        'setuptools',
+        'numpy',
+        'opencv-python',
+    ],
     zip_safe=True,
     maintainer='jens',
     maintainer_email='jens1906@gmail.com',
