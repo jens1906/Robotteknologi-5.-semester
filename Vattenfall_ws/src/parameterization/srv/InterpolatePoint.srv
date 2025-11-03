@@ -1,0 +1,8 @@
+# Request interpolation at (u,v) coordinate(s)
+# Each UVPoint contains a (u,v) pair
+parameterization/UVPoint[] uv_points
+---
+# Response with 3D Cartesian coordinates
+geometry_msgs/Point[] points
+bool success
+string message
