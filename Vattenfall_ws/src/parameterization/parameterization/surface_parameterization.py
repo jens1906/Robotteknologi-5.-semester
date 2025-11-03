@@ -89,16 +89,30 @@ class SurfaceParameterization:
         
         return points_local
     
-    def compute_uv_parameterization(self):
+    def compute_uv_parameterization(self, method='projection', normalize=False):
         """
         Compute UV parameterization mapping (x,y,z) → (u,v).
+        
+        Args:
+            method: 'projection' (recommended for ROS integration)
+            normalize: If False, keeps actual XYZ scale (recommended for ROS)
         """
         if self.points_local is None:
             self.compute_local_frame()
         
-        uv = self.points_local[:, :2]
+        if method == 'projection':
+            uv = self.points_local[:, :2]
         
-        self.uv_params = uv
+        if not normalize:
+            # Keep actual XYZ scale (recommended for ROS)
+            self.uv_params = uv
+        else:
+            # Normalize to [0:1] range
+            uv_min = np.min(uv, axis=0)
+            uv_max = np.max(uv, axis=0)
+            uv_range = uv_max - uv_min
+            uv_range[uv_range == 0] = 1
+            self.uv_params = (uv - uv_min) / uv_range
                 
         return self.uv_params
     
