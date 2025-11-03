@@ -59,6 +59,27 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
     
     return normalize(normal)
 
+
+def rotation_matrix_to_ijk(R):
+    #Compute ijk from rotation matrix
+    #Args: R(3,3) rotation matrix
+    #Returns: ijk vector(3)
+    #Dont need to comment math here, it is normal stuff from internet
+    angle = np.arccos((np.trace(R) - 1) / 2)
+    
+    if np.abs(angle) < 1e-10:
+        return np.array([0.0, 0.0, 0.0])
+    
+    axis = np.array([
+        R[2, 1] - R[1, 2],
+        R[0, 2] - R[2, 0],
+        R[1, 0] - R[0, 1]
+    ]) / (2 * np.sin(angle))
+    
+    ijk = axis * angle
+    return ijk
+
+
 def orientation_matrix_from_path(x, y, z, velocity, normal):
     #Compute orientation matrix at a point
     #Args: x,y,z position, velocity (3,) vector, normal (3,) vector
@@ -102,6 +123,13 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3):
         
         #Compute orientation matrix
         R = orientation_matrix_from_path(x, y, z, velocity, normal)
+        
+        """
+        If ijk is needed, then run this to convert to ijk!
+        ijk = rotation_matrix_to_ijk(R)
+        orientations[i] = ijk
+        """
+
         orientations[i] = R
     
     return path_xyz, orientations
