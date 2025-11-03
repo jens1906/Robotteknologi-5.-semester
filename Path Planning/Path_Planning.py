@@ -81,7 +81,6 @@ def path_planning(u_len, v_len, d, n=50):
 
     return path
 
-
 v_len = 10.0
 u_len = 24.0
 d = 1
