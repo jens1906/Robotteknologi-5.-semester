@@ -8,7 +8,6 @@ This package provides surface parameterization for robotic applications using in
 - Local frame computation using PCA (not normalized)
 - UV parameterization using projection method
 - Inverse interpolation from (u,v) → (x,y,z)
-- Surface normal computation
 - Quality metrics evaluation
 
 ## Prerequisites
@@ -84,28 +83,6 @@ ros2 service call /parameterization/interpolate parameterization/srv/Interpolate
   "{uv_points: [{u: 0.0, v: 0.0}, {u: 1.0, v: 1.0}]}"
 ```
 
-### `/parameterization/get_normal`
-
-Get surface normals at (u,v) coordinates.
-
-**Request:**
-```
-parameterization/UVPoint[] uv_points
-```
-
-**Response:**
-```
-geometry_msgs/Vector3[] normals
-bool success
-string message
-```
-
-**Example:**
-```bash
-ros2 service call /parameterization/get_normal parameterization/srv/GetSurfaceNormal \
-  "{uv_points: [{u: 0.5, v: 0.5}]}"
-```
-
 ### `/parameterization/get_uv_bounds`
 
 Get the bounds of the parameter space.
@@ -158,9 +135,6 @@ surf.build_inverse_interpolation(method='rbf', neighbors=50)
 uv_query = np.array([[u1, v1], [u2, v2]])
 xyz = surf.interpolate(uv_query)
 
-# Get normals
-normals = surf.compute_surface_normals(uv_query)
-
 # Get bounds
 bounds = surf.get_uv_bounds()
 print(f"U: [{bounds['u_min']}, {bounds['u_max']}]")
@@ -178,27 +152,22 @@ Example of using this node in a larger ROS system:
 ```python
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import PointCloud2
-from parameterization.srv import InterpolatePoint, GetSurfaceNormal
+from sensor_msgs.msg import PointCloud
+from parameterization.srv import InterpolatePoint
 from parameterization.msg import UVPoint
 
 class PathPlanningNode(Node):
     def __init__(self):
         super().__init__('path_planning_node')
         
-        # Create service clients
+        # Create service client
         self.interpolate_client = self.create_client(
             InterpolatePoint,
             '/parameterization/interpolate'
         )
         
-        self.normal_client = self.create_client(
-            GetSurfaceNormal,
-            '/parameterization/get_normal'
-        )
-        
     def get_waypoint(self, u, v):
-        """Get a waypoint at (u,v) with surface normal"""
+        """Get a waypoint at (u,v)"""
         # Create UV point
         uv_pt = UVPoint()
         uv_pt.u = u
@@ -213,19 +182,9 @@ class PathPlanningNode(Node):
         
         if future.result().success:
             position = future.result().points[0]
-            
-            # Get surface normal
-            req = GetSurfaceNormal.Request()
-            req.uv_points = [uv_pt]
-            
-            future = self.normal_client.call_async(req)
-            rclpy.spin_until_future_complete(self, future)
-            
-            if future.result().success:
-                normal = future.result().normals[0]
-                return position, normal
+            return position
         
-        return None, None
+        return None
 ```
 
 ## Message Definitions

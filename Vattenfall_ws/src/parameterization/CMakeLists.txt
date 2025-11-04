@@ -18,7 +18,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ParameterizationStatus.msg"
   "msg/UVPoint.msg"
   "srv/InterpolatePoint.srv"
-  "srv/GetSurfaceNormal.srv"
   "srv/GetUVBounds.srv"
   DEPENDENCIES sensor_msgs geometry_msgs std_msgs
 )
