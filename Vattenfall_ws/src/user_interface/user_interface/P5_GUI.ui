@@ -52,7 +52,7 @@ QPushButton:pressed {
      </rect>
     </property>
     <property name="currentIndex">
-     <number>2</number>
+     <number>0</number>
     </property>
     <widget class="QWidget" name="tab">
      <attribute name="title">
@@ -425,17 +425,17 @@ QPushButton:pressed {
      </widget>
     </widget>
     <widget class="QWidget" name="page_2">
-     <widget class="QPushButton" name="Joystick">
+     <widget class="Joystick" name="Joystick" native="true">
       <property name="geometry">
        <rect>
-        <x>10</x>
-        <y>10</y>
-        <width>141</width>
-        <height>111</height>
+        <x>20</x>
+        <y>20</y>
+        <width>131</width>
+        <height>91</height>
        </rect>
       </property>
-      <property name="text">
-       <string>Joystick</string>
+      <property name="focusPolicy">
+       <enum>Qt::FocusPolicy::WheelFocus</enum>
       </property>
      </widget>
     </widget>
@@ -453,6 +453,14 @@ QPushButton:pressed {
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>Joystick</class>
+   <extends>QWidget</extends>
+   <header>joystick</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>
