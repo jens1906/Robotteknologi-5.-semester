@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Surface Parameterization ROS 2 Node
 
@@ -13,12 +14,11 @@ from geometry_msgs.msg import Point, Vector3
 from std_msgs.msg import Header
 import numpy as np
 
-# Import custom messages and services
 from parameterization.msg import ParameterizationStatus, UVPoint
 from parameterization.srv import InterpolatePoint, GetSurfaceNormal, GetUVBounds
 
 # Import the parameterization module
-from .surface_parameterization import SurfaceParameterization
+from parameterization.surface_parameterization import SurfaceParameterization
 
 
 def pointcloud2_to_xyz(cloud_msg):
