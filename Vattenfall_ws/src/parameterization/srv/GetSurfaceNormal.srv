@@ -1,8 +1,0 @@
-# Request surface normal at (u,v) coordinate(s)
-# Each UVPoint contains a (u,v) pair
-parameterization/UVPoint[] uv_points
----
-# Response with surface normals
-geometry_msgs/Vector3[] normals
-bool success
-string message

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Surface Parameterization ROS 2 Node
 
@@ -9,16 +10,15 @@ interpolation and surface normal computation services.
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2
-from geometry_msgs.msg import Point, Vector3
+from geometry_msgs.msg import Point
 from std_msgs.msg import Header
 import numpy as np
 
-# Import custom messages and services
 from parameterization.msg import ParameterizationStatus, UVPoint
-from parameterization.srv import InterpolatePoint, GetSurfaceNormal, GetUVBounds
+from parameterization.srv import InterpolatePoint, GetUVBounds
 
 # Import the parameterization module
-from .surface_parameterization import SurfaceParameterization
+from parameterization.surface_parameterization import SurfaceParameterization
 
 
 def pointcloud2_to_xyz(cloud_msg):
@@ -53,7 +53,6 @@ class ParameterizationNode(Node):
         
     Services:
         - /parameterization/interpolate (InterpolatePoint): Interpolate 3D points from (u,v)
-        - /parameterization/get_normal (GetSurfaceNormal): Get surface normals at (u,v)
         - /parameterization/get_uv_bounds (GetUVBounds): Get parameter space bounds
         
     Parameters:
@@ -104,12 +103,6 @@ class ParameterizationNode(Node):
             InterpolatePoint,
             '/parameterization/interpolate',
             self.interpolate_callback
-        )
-        
-        self.normal_srv = self.create_service(
-            GetSurfaceNormal,
-            '/parameterization/get_normal',
-            self.get_normal_callback
         )
         
         self.bounds_srv = self.create_service(
@@ -229,52 +222,6 @@ class ParameterizationNode(Node):
         except Exception as e:
             response.success = False
             response.message = f'Interpolation error: {str(e)}'
-            self.get_logger().error(response.message)
-        
-        return response
-    
-    def get_normal_callback(self, request, response):
-        """
-        Service callback for surface normal computation.
-        Computes normals at (u,v) coordinates.
-        """
-        try:
-            if not self.surf.is_ready:
-                response.success = False
-                response.message = 'Parameterization not ready. No point cloud received yet.'
-                return response
-            
-            # Validate input
-            if len(request.uv_points) == 0:
-                response.success = False
-                response.message = 'Empty input array'
-                return response
-            
-            # Extract u and v values from UVPoint list
-            u_values = [uv_pt.u for uv_pt in request.uv_points]
-            v_values = [uv_pt.v for uv_pt in request.uv_points]
-            
-            # Create UV query array
-            uv_query = np.column_stack([u_values, v_values])
-            
-            # Compute normals
-            normals = self.surf.compute_surface_normals(uv_query)
-            
-            # Convert to Vector3 messages
-            response.normals = []
-            for normal in normals:
-                v = Vector3()
-                v.x = float(normal[0])
-                v.y = float(normal[1])
-                v.z = float(normal[2])
-                response.normals.append(v)
-            
-            response.success = True
-            response.message = f'Computed {len(normals)} normals'
-            
-        except Exception as e:
-            response.success = False
-            response.message = f'Normal computation error: {str(e)}'
             self.get_logger().error(response.message)
         
         return response

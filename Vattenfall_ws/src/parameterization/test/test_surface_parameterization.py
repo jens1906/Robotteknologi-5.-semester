@@ -271,55 +271,6 @@ class TestSurfaceParameterization:
         with pytest.raises(ValueError, match="Interpolation not ready"):
             surf.interpolate(np.array([[0.0, 0.0]]))
     
-    def test_compute_surface_normals(self, parameterization_simple):
-        """Test surface normal computation"""
-        surf = parameterization_simple
-        
-        # Get center UV coordinate
-        uv_center = np.mean(surf.uv_params, axis=0, keepdims=True)
-        
-        # Compute normals
-        normals = surf.compute_surface_normals(uv_center)
-        
-        assert normals.shape == (1, 3)
-        
-        # Normal should be unit length
-        norm_length = np.linalg.norm(normals[0])
-        assert np.isclose(norm_length, 1.0, rtol=1e-6)
-    
-    def test_compute_surface_normals_flat_plane(self, parameterization_simple):
-        """Test normals on a flat plane should point in same direction"""
-        surf = parameterization_simple
-        
-        # Sample several points
-        sample_indices = np.random.choice(len(surf.uv_params), 10, replace=False)
-        sample_uv = surf.uv_params[sample_indices]
-        
-        normals = surf.compute_surface_normals(sample_uv)
-        
-        # All normals should be similar (plane is flat)
-        for i in range(len(normals) - 1):
-            dot_product = np.dot(normals[i], normals[i + 1])
-            # Normals should be nearly parallel
-            assert dot_product > 0.9  # Allow some numerical variation
-    
-    def test_compute_surface_normals_multiple(self, parameterization_curved):
-        """Test normal computation for multiple points"""
-        surf = parameterization_curved
-        
-        n_samples = 20
-        indices = np.random.choice(len(surf.uv_params), n_samples, replace=False)
-        sample_uv = surf.uv_params[indices]
-        
-        normals = surf.compute_surface_normals(sample_uv)
-        
-        assert normals.shape == (n_samples, 3)
-        
-        # All normals should be unit length
-        for normal in normals:
-            norm_length = np.linalg.norm(normal)
-            assert np.isclose(norm_length, 1.0, rtol=1e-6)
-    
     def test_get_uv_bounds(self, parameterization_simple):
         """Test getting UV parameter space bounds"""
         surf = parameterization_simple
@@ -404,10 +355,6 @@ class TestSurfaceParameterization:
         uv_test = surf.uv_params[:5]
         xyz = surf.interpolate(uv_test)
         assert xyz.shape == (5, 3)
-        
-        # Test normals
-        normals = surf.compute_surface_normals(uv_test)
-        assert normals.shape == (5, 3)
         
         # Evaluate quality
         metrics = surf.evaluate_quality(sample_size=100)
@@ -578,17 +525,9 @@ class TestRealPointCloud:
         sample_indices = np.random.choice(len(surf.uv_params), n_samples, replace=False)
         sample_uv = surf.uv_params[sample_indices]
         
-        # Compute normals
-        normals = surf.compute_surface_normals(sample_uv)
-        
-        assert normals.shape == (n_samples, 3)
-        
-        print(f"\nSurface normals test on {n_samples} samples:")
-        # All normals should be unit length
-        for i, normal in enumerate(normals):
-            norm_length = np.linalg.norm(normal)
-            print(f"  Normal {i}: ({normal[0]:.3f}, {normal[1]:.3f}, {normal[2]:.3f}), length: {norm_length:.6f}")
-            assert np.isclose(norm_length, 1.0, rtol=1e-5)
+        # Test interpolation
+        xyz = surf.interpolate(sample_uv)
+        assert xyz.shape == (n_samples, 3)
     
     def test_frame_transformations_real_data(self, real_point_cloud):
         """Test frame transformations on real data"""
@@ -641,9 +580,6 @@ class TestRealPointCloud:
         # Interpolate to get 3D path
         path_3d = surf.interpolate(path_uv)
         
-        # Compute normals along path
-        normals = surf.compute_surface_normals(path_uv)
-        
         # Calculate path length
         path_length = np.sum(np.linalg.norm(np.diff(path_3d, axis=0), axis=1))
         
@@ -652,7 +588,6 @@ class TestRealPointCloud:
         print(f"  Path length: {path_length:.2f} units")
         
         assert len(path_3d) == len(path_uv)
-        assert len(normals) == len(path_uv)
         assert path_length > 0
 
 

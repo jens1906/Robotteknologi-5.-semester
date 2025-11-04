@@ -86,6 +86,10 @@ class CorrosionDetector(Node):
             msg = Float32MultiArray()
             msg.data = xyz_data.flatten().tolist()
             self.corrosion_scatter_plot.publish(msg)
+            '''
+            CHANGE THIS LATER TO ONLY PUBLISH WHEN UI ACCEPTS
+            '''
+            self.corrosion_accepted = False  
         else:
             self.get_logger().info('A mistake has happened with UI command')
     

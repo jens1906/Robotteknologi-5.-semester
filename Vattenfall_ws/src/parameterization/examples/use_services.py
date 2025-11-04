@@ -5,13 +5,12 @@ This script shows how to:
 1. Wait for the parameterization node to be ready
 2. Get UV bounds
 3. Query interpolation at specific (u,v) coordinates
-4. Get surface normals
-5. Generate a scanning path
+4. Generate a scanning path
 """
 
 import rclpy
 from rclpy.node import Node
-from parameterization.srv import InterpolatePoint, GetSurfaceNormal, GetUVBounds
+from parameterization.srv import InterpolatePoint, GetUVBounds
 from parameterization.msg import ParameterizationStatus, UVPoint
 import numpy as np
 import time
@@ -27,11 +26,6 @@ class ParameterizationClient(Node):
         self.interpolate_client = self.create_client(
             InterpolatePoint,
             '/parameterization/interpolate'
-        )
-        
-        self.normal_client = self.create_client(
-            GetSurfaceNormal,
-            '/parameterization/get_normal'
         )
         
         self.bounds_client = self.create_client(
@@ -53,7 +47,6 @@ class ParameterizationClient(Node):
         # Wait for services
         self.get_logger().info('Waiting for parameterization services...')
         self.interpolate_client.wait_for_service(timeout_sec=10.0)
-        self.normal_client.wait_for_service(timeout_sec=10.0)
         self.bounds_client.wait_for_service(timeout_sec=10.0)
         self.get_logger().info('Services available!')
         
@@ -130,38 +123,6 @@ class ParameterizationClient(Node):
             self.get_logger().error(f'Interpolation failed: {response.message}')
             return None
     
-    def get_surface_normals(self, u_array, v_array):
-        """
-        Get surface normals at (u,v) coordinates.
-        
-        Args:
-            u_array: List of u coordinates
-            v_array: List of v coordinates
-            
-        Returns:
-            List of (nx, ny, nz) tuples, or None on failure
-        """
-        request = GetSurfaceNormal.Request()
-        
-        # Create list of UVPoint messages
-        request.uv_points = []
-        for u, v in zip(u_array, v_array):
-            uv_pt = UVPoint()
-            uv_pt.u = float(u)
-            uv_pt.v = float(v)
-            request.uv_points.append(uv_pt)
-        
-        future = self.normal_client.call_async(request)
-        rclpy.spin_until_future_complete(self, future)
-        
-        response = future.result()
-        if response.success:
-            normals = [(n.x, n.y, n.z) for n in response.normals]
-            return normals
-        else:
-            self.get_logger().error(f'Normal computation failed: {response.message}')
-            return None
-    
     def generate_scanning_path(self, num_passes=5, points_per_pass=10):
         """
         Generate a simple scanning path in UV space.
@@ -171,7 +132,7 @@ class ParameterizationClient(Node):
             points_per_pass: Number of points per pass
             
         Returns:
-            List of waypoints as (x, y, z, nx, ny, nz) tuples
+            List of waypoints as (x, y, z) tuples
         """
         # Get UV bounds
         bounds = self.get_uv_bounds()
@@ -203,17 +164,11 @@ class ParameterizationClient(Node):
         if positions is None:
             return None
         
-        # Get surface normals
-        normals = self.get_surface_normals(u_values, v_values)
-        if normals is None:
-            return None
-        
-        # Combine into waypoints
+        # Create waypoints
         waypoints = []
-        for pos, normal in zip(positions, normals):
+        for pos in positions:
             waypoints.append({
-                'position': pos,
-                'normal': normal
+                'position': pos
             })
         
         return waypoints
@@ -262,11 +217,6 @@ def main():
         if positions:
             pos = positions[0]
             print(f"  Position: ({pos[0]:.3f}, {pos[1]:.3f}, {pos[2]:.3f})")
-        
-        normals = client.get_surface_normals([u_test], [v_test])
-        if normals:
-            normal = normals[0]
-            print(f"  Normal: ({normal[0]:.3f}, {normal[1]:.3f}, {normal[2]:.3f})")
     
     # Generate scanning path
     print("\n" + "=" * 70)
@@ -294,11 +244,9 @@ def main():
         # Show first and last waypoints
         print("\nFirst waypoint:")
         print(f"  Position: {waypoints[0]['position']}")
-        print(f"  Normal: {waypoints[0]['normal']}")
         
         print("\nLast waypoint:")
         print(f"  Position: {waypoints[-1]['position']}")
-        print(f"  Normal: {waypoints[-1]['normal']}")
         
         # Save to file (optional)
         save_choice = input("\nSave waypoints to file? (y/n) [n]: ").strip().lower()
