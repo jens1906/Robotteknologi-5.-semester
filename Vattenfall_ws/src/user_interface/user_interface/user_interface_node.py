@@ -12,8 +12,6 @@ import numpy as np
 import cv2 as cv
 import message_filters
 
-
-
 Test = True
 printlogger = True
 showImages = True
@@ -23,9 +21,10 @@ class RosSignalEmitter(QObject):
     image_signal = pyqtSignal(object)       # NEW: emits python objects (numpy arrays)
 
 class UserInterfaceNode(Node):
-    def __init__(self, signal_emitter):
+    def __init__(self, signal_emitter, ui_instance=None):
         super().__init__('user_interface')
         self.signal_emitter = signal_emitter
+        self.ui_instance = ui_instance  # Reference to UserInterface for state access
         self.ui_corrosion_area_accept_pub = self.create_publisher(Bool, 'ui_corrosion_area_accept_pub', 10)
         self.ui_corrosion_area_add_pub = self.create_publisher(Image, 'ui_corrosion_area_add_pub', 10)
         self.ui_corrosion_area_remove_pub = self.create_publisher(Image, 'ui_corrosion_area_remove_pub', 10)
@@ -47,12 +46,19 @@ class UserInterfaceNode(Node):
         #if printlogger: self.get_logger().info(f'Image and depth matched {color_msg.header.stamp.sec}.{color_msg.header.stamp.nanosec}')
         color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
+        if self.ui_instance and self.ui_instance.detection_state == 0 and self.ui_instance.camera_type == 0:
+            self.signal_emitter.data_signal.emit(f"Color: {depth_image.shape[1]}x{depth_image.shape[0]}")
+            self.signal_emitter.image_signal.emit(color_image)
+        elif self.ui_instance and self.ui_instance.camera_type == 1:
+            self.signal_emitter.data_signal.emit(f"Depth: {depth_image.shape[1]}x{depth_image.shape[0]}")
+            self.signal_emitter.image_signal.emit(depth_image)
         # Process images as needed (don't display with cv.imshow in Qt app)
 
     def corrosion_thresholding_callback(self, msg):
         corrosion_image = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
-        self.signal_emitter.data_signal.emit(f"Corrosion: {msg.width}x{msg.height}")
-        self.signal_emitter.image_signal.emit(corrosion_image)
+        if self.ui_instance and self.ui_instance.detection_state == 1 and self.ui_instance.camera_type == 0:
+            self.signal_emitter.data_signal.emit(f"Thresholded: {msg.width}x{msg.height}")
+            self.signal_emitter.image_signal.emit(corrosion_image)
 
 
     
@@ -85,6 +91,10 @@ class UserInterface(QMainWindow):
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         
+        # State variables
+        self.detection_state = 0  # 0 = Color, 1 = Thresholded
+        self.camera_type = 0
+        
         self.ui.Emergency_Stop.clicked.connect(self.emergency_stop)
         self.ui.Home_Position.clicked.connect(self.home_position)
         self.ui.RUN_1.clicked.connect(self.run_robot)
@@ -98,15 +108,13 @@ class UserInterface(QMainWindow):
         self.ui.Small_Pen.clicked.connect(lambda: self.set_custom_pen(1))
         self.ui.Medium_Pen.clicked.connect(lambda: self.set_custom_pen(2))
         self.ui.Large_Pen.clicked.connect(lambda: self.set_custom_pen(3))
-
-
-
+        self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
 
         # ROS setup
         self.signal_emitter = RosSignalEmitter()
         self.signal_emitter.data_signal.connect(self.on_data)
-        self.signal_emitter.image_signal.connect(self.update_video_frame)  # ADD THIS
-        self.ros_node = UserInterfaceNode(self.signal_emitter)
+        self.signal_emitter.image_signal.connect(self.update_video_frame)
+        self.ros_node = UserInterfaceNode(self.signal_emitter, self)  # Pass self for state access
     
     def emergency_stop(self):
         msg = Bool()
@@ -133,12 +141,12 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info('Terminate pressed')
 
     def toggle_vision_state(self):
-        # Toggle vision state logic
-        if printlogger: self.ros_node.get_logger().info('Toggling Vision State')
+        self.detection_state = 1 - self.detection_state  # Toggle between 0 and 1
+        if printlogger: self.ros_node.get_logger().info(f'Toggling Vision State {self.detection_state}')
 
     def switch_camera_type(self):
-        # Switch camera type logic
-        if printlogger: self.ros_node.get_logger().info('Switching Camera Type')
+        self.camera_type = 1 - self.camera_type  # Toggle between 0 and 1
+        if printlogger: self.ros_node.get_logger().info(f'Switching Camera Type {self.camera_type}')
 
     def reset_vision(self):
         # Reset vision logic
@@ -151,18 +159,15 @@ class UserInterface(QMainWindow):
     def erase_area(self):
         if printlogger: self.ros_node.get_logger().info('Erase area requested')
 
-    def set_small_pen(self):
-        if printlogger: self.ros_node.get_logger().info('Set pen size to small')
-
-    def set_medium_pen(self):
-        if printlogger: self.ros_node.get_logger().info('Set pen size to medium')
-
-    def set_large_pen(self):
-        if printlogger: self.ros_node.get_logger().info('Set pen size to large')
-
     def set_custom_pen(self, size):
         if printlogger: self.ros_node.get_logger().info(f'Set pen size to {size}')
 
+    def tab_difference(self, index):
+        if printlogger: self.ros_node.get_logger().info(f'Tab changed to {index}')
+        if index == 0:
+            self.camera_type = 0
+        elif index == 1:
+            self.detection_state = 1
 
 
 
@@ -178,10 +183,18 @@ class UserInterface(QMainWindow):
         if img is None:
             return
         
-        h, w, ch = img.shape
-        bytes_per_line = ch * w
+        # Handle both color (3D) and grayscale (2D) images
+        if len(img.shape) == 3:
+            # Color image (BGR)
+            h, w, ch = img.shape
+            bytes_per_line = ch * w
+            qimage = QImage(img.data.tobytes(), w, h, bytes_per_line, QImage.Format.Format_BGR888).copy()
+        else:
+            # Grayscale image (2D)
+            h, w = img.shape
+            bytes_per_line = w
+            qimage = QImage(img.data.tobytes(), w, h, bytes_per_line, QImage.Format.Format_Grayscale8).copy()
         
-        qimage = QImage(img.data.tobytes(), w, h, bytes_per_line, QImage.Format.Format_BGR888).copy()
         pixmap = QPixmap.fromImage(qimage)
         
         scaled = pixmap.scaled(self.ui.videoLabel.size(), Qt.AspectRatioMode.KeepAspectRatio,
