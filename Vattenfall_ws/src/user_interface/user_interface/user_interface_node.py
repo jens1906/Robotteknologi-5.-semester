@@ -95,6 +95,7 @@ class UserInterface(QMainWindow):
         self.detection_state = 0  # 0 = Color, 1 = Thresholded
         self.camera_type = 0
         
+        self.ui.videoLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ui.Emergency_Stop.clicked.connect(self.emergency_stop)
         self.ui.Home_Position.clicked.connect(self.home_position)
         self.ui.RUN_1.clicked.connect(self.run_robot)
@@ -146,6 +147,18 @@ class UserInterface(QMainWindow):
 
     def switch_camera_type(self):
         self.camera_type = 1 - self.camera_type  # Toggle between 0 and 1
+        if self.camera_type == 0:
+            self.ui.Reset.setStyleSheet("background-color: #ffffff;")
+            self.ui.Eraser.setStyleSheet("background-color: #ffffff;")
+            self.ui.Undo.setStyleSheet("background-color: #ffffff;")
+
+            if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
+        else:
+            self.ui.Reset.setStyleSheet("background-color: #636363;")
+            self.ui.Eraser.setStyleSheet("background-color: #636363;")
+            self.ui.Undo.setStyleSheet("background-color: #636363;")
+            if printlogger: self.ros_node.get_logger().info('Switching to Depth Camera')
+
         if printlogger: self.ros_node.get_logger().info(f'Switching Camera Type {self.camera_type}')
 
     def reset_vision(self):
