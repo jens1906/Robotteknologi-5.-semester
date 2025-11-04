@@ -84,7 +84,7 @@ QPushButton:pressed {
        <item>
         <spacer name="horizontalSpacer">
          <property name="orientation">
-          <enum>Qt::Orientation::Horizontal</enum>
+          <enum>Qt::Horizontal</enum>
          </property>
          <property name="sizeHint" stdset="0">
           <size>
@@ -110,7 +110,7 @@ QPushButton:pressed {
        <item>
         <spacer name="horizontalSpacer_2">
          <property name="orientation">
-          <enum>Qt::Orientation::Horizontal</enum>
+          <enum>Qt::Horizontal</enum>
          </property>
          <property name="sizeHint" stdset="0">
           <size>
@@ -187,7 +187,7 @@ QPushButton:pressed {
        <item>
         <spacer name="horizontalSpacer_3">
          <property name="orientation">
-          <enum>Qt::Orientation::Horizontal</enum>
+          <enum>Qt::Horizontal</enum>
          </property>
          <property name="sizeHint" stdset="0">
           <size>
@@ -213,7 +213,7 @@ QPushButton:pressed {
        <item>
         <spacer name="horizontalSpacer_4">
          <property name="orientation">
-          <enum>Qt::Orientation::Horizontal</enum>
+          <enum>Qt::Horizontal</enum>
          </property>
          <property name="sizeHint" stdset="0">
           <size>
@@ -239,7 +239,7 @@ QPushButton:pressed {
        <item>
         <spacer name="horizontalSpacer_5">
          <property name="orientation">
-          <enum>Qt::Orientation::Horizontal</enum>
+          <enum>Qt::Horizontal</enum>
          </property>
          <property name="sizeHint" stdset="0">
           <size>
@@ -265,7 +265,7 @@ QPushButton:pressed {
        <item>
         <spacer name="horizontalSpacer_6">
          <property name="orientation">
-          <enum>Qt::Orientation::Horizontal</enum>
+          <enum>Qt::Horizontal</enum>
          </property>
          <property name="sizeHint" stdset="0">
           <size>
@@ -309,7 +309,7 @@ QPushButton:pressed {
        <item>
         <spacer name="horizontalSpacer_7">
          <property name="orientation">
-          <enum>Qt::Orientation::Horizontal</enum>
+          <enum>Qt::Horizontal</enum>
          </property>
          <property name="sizeHint" stdset="0">
           <size>
@@ -434,9 +434,9 @@ QPushButton:pressed {
         <height>111</height>
        </rect>
       </property>
-      <property name="focusPolicy">
-       <enum>Qt::FocusPolicy::WheelFocus</enum>
-      </property>
+    <property name="focusPolicy">
+     <enum>Qt::WheelFocus</enum>
+    </property>
      </widget>
     </widget>
    </widget>

@@ -1,0 +1,45 @@
+import os
+import sys
+
+# Ensure this directory is on sys.path so 'joystick' (custom widget) can be imported
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if THIS_DIR not in sys.path:
+    sys.path.insert(0, THIS_DIR)
+
+try:
+    # Import PyQt5
+    from PyQt5 import QtWidgets, uic
+    # Import custom widget so uic can resolve <widget class="Joystick"> from the .ui file
+    from joystick import Joystick  # noqa: F401 (imported for side effect/availability)
+except Exception as e:
+    print("Failed to import PyQt5 or custom widget 'joystick':", e)
+    print("Tip: Install PyQt5 (no need for pyqt5-tools) ->")
+    print("  python -m pip install PyQt5==5.15.11")
+    sys.exit(1)
+
+
+def main():
+    app = QtWidgets.QApplication(sys.argv)
+
+    # Create a main window and load the UI into it
+    win = QtWidgets.QMainWindow()
+    ui_path = os.path.join(THIS_DIR, "P5_GUI.ui")
+    if not os.path.exists(ui_path):
+        print(f"UI file not found: {ui_path}")
+        sys.exit(1)
+
+    # Load the .ui file. Because we imported 'joystick' above, the custom widget is available.
+    uic.loadUi(ui_path, win)
+
+    # Optional: ensure the stacked widget shows the page with the Joystick if needed
+    # (Your .ui sets currentIndex=1 already, which should show page_2 where the Joystick lives.)
+    # stacked = win.findChild(QtWidgets.QStackedWidget, "stackedWidget")
+    # if stacked is not None:
+    #     stacked.setCurrentIndex(1)
+
+    win.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    main()
