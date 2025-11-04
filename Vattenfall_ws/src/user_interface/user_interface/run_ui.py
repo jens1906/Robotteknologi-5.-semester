@@ -7,14 +7,14 @@ if THIS_DIR not in sys.path:
     sys.path.insert(0, THIS_DIR)
 
 try:
-    # Import PyQt5
-    from PyQt5 import QtWidgets, uic
+    # Import PyQt6
+    from PyQt6 import QtWidgets, uic
     # Import custom widget so uic can resolve <widget class="Joystick"> from the .ui file
     from joystick import Joystick  # noqa: F401 (imported for side effect/availability)
 except Exception as e:
-    print("Failed to import PyQt5 or custom widget 'joystick':", e)
-    print("Tip: Install PyQt5 (no need for pyqt5-tools) ->")
-    print("  python -m pip install PyQt5==5.15.11")
+    print("Failed to import PyQt6 or custom widget 'joystick':", e)
+    print("Tip: Install PyQt6 ->")
+    print("  python -m pip install PyQt6")
     sys.exit(1)
 
 
@@ -38,7 +38,7 @@ def main():
     #     stacked.setCurrentIndex(1)
 
     win.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QWidget, QApplication, QMainWindow, QGridLayout, QStyleFactory
-from PyQt5.QtGui import QPainter
-from PyQt5.QtCore import Qt, QPointF, QRectF, QLineF
+from PyQt6.QtWidgets import QWidget, QApplication, QMainWindow, QGridLayout, QStyleFactory
+from PyQt6.QtGui import QPainter
+from PyQt6.QtCore import Qt, QPointF, QRectF, QLineF
 from enum import Enum
 import sys
 
@@ -23,7 +23,8 @@ class Joystick(QWidget):
         bounds = QRectF(-self.__maxDistance, -self.__maxDistance,
                         self.__maxDistance * 2, self.__maxDistance * 2).translated(self._center())
         painter.drawEllipse(bounds)
-        painter.setBrush(Qt.black)
+        # In PyQt6 use GlobalColor for standard colors
+        painter.setBrush(Qt.GlobalColor.black)
         painter.drawEllipse(self._centerEllipse())
 
     def _centerEllipse(self):
@@ -57,7 +58,8 @@ class Joystick(QWidget):
         return (Direction.Right, distance)
 
     def mousePressEvent(self, ev):
-        self.grabCenter = self._centerEllipse().contains(ev.pos())
+        # In PyQt6 use position() to get QPointF
+        self.grabCenter = self._centerEllipse().contains(ev.position())
         return super().mousePressEvent(ev)
 
     def mouseReleaseEvent(self, event):
@@ -67,7 +69,8 @@ class Joystick(QWidget):
 
     def mouseMoveEvent(self, event):
         if self.grabCenter:
-            self.movingOffset = self._boundJoystick(event.pos())
+            # Use position() for a QPointF to match QRectF/QLineF expectations
+            self.movingOffset = self._boundJoystick(event.position())
             self.update()
         print(self.joystickDirection())
 
@@ -82,4 +85,4 @@ if __name__ == "__main__":
     joystick = Joystick()
     layout.addWidget(joystick, 0, 0)
     mw.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
