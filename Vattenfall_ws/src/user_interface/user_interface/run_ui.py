@@ -20,23 +20,12 @@ except Exception as e:
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
-
-    # Create a main window and load the UI into it
     win = QtWidgets.QMainWindow()
     ui_path = os.path.join(THIS_DIR, "P5_GUI.ui")
     if not os.path.exists(ui_path):
         print(f"UI file not found: {ui_path}")
         sys.exit(1)
-
-    # Load the .ui file. Because we imported 'joystick' above, the custom widget is available.
     uic.loadUi(ui_path, win)
-
-    # Optional: ensure the stacked widget shows the page with the Joystick if needed
-    # (Your .ui sets currentIndex=1 already, which should show page_2 where the Joystick lives.)
-    # stacked = win.findChild(QtWidgets.QStackedWidget, "stackedWidget")
-    # if stacked is not None:
-    #     stacked.setCurrentIndex(1)
-
     win.show()
     sys.exit(app.exec())
 
