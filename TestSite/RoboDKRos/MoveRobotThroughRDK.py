@@ -5,8 +5,6 @@ import CurvePlotter
 import numpy as np
 import time
 
-time.sleep(2)
-
 # --- Connect to RoboDK ---
 RDK = Robolink()
 robot = RDK.Item('UR3e', ITEM_TYPE_ROBOT)
@@ -30,9 +28,16 @@ if connected:
         print(f"⚠️ Connection failed: {e}\nRunning in simulation mode.")
 
 # --- Common settings ---
-RDK.setSimulationSpeed(2)
-RDK.setCollisionActive(COLLISION_ON)
+#RDK.setSimulationSpeed(1)
+#RDK.setCollisionActive(COLLISION_ON)
 
+test = first = transl(-100, -300, 600)
+print(test)
+robot.MoveJ(test, blocking=True)
+
+
+
+"""
 print("-" * 50)
 
 
@@ -69,8 +74,9 @@ def safe_move(robot: Item, target: Mat, move_type: str = 'J'):
         print("MoveC not implemented for poses")
         return False
 
-    if test_failed:
+    if test_failed != 0:
         print("⚠️ No valid path found or collision predicted! Move aborted.")
+        robot.setJoints(joints_current)  # Reset to current joints after test
         return False
 
     # Execute move
@@ -88,6 +94,9 @@ def safe_move(robot: Item, target: Mat, move_type: str = 'J'):
 first = transl(-100, -300, 600)
 second = transl(100, -300, 500)
 third = transl(100, -300, 400)
+
+
+
 
 #print("Moving to first pose...")
 #safe_move(robot, first, 'J')
@@ -110,31 +119,85 @@ all_items = RDK.ItemList(list_names=True)
 #select the curve '6DOF_ScanPattern_RZ45deg' in robodk
 
 #get first point for Curve 
-Curve = RDK.Item('Curve')
-points = Curve.GetPoints(FEATURE_CURVE)[0]
-print(points[0])
-print(points[1])
 
-print("********")
+def get_global_curve_poses(curve_item):
+    Converts all XYZijk curve points into Pose matrices in the parent frame.
+    Returns a list of global Pose() matrices, with inverted Z direction.
 
-for point in Curve.GetPoints(FEATURE_CURVE)[0]:
-    print("Point:", point)
-    if point == Curve.GetPoints(FEATURE_CURVE)[0][0]:
-        continue
-    pose = transl(point[0], point[1], point[2])
-    print("Moving to point:", pose)
-    robot.MoveL(pose, blocking=True)
+    pose_frame = curve_item.Pose()
+    points, _ = curve_item.GetPoints(FEATURE_CURVE)
+
+    poses_global = []
+
+    for p in points:
+        x, y, z, i, j, k = p
+
+        # --- Invert the Z-axis direction ---
+        z_axis = normalize3([-i, -j, -k])
+
+        # Pick a reference axis
+        ref = [1, 0, 0]
+        if abs(dot(z_axis, ref)) > 0.99:
+            ref = [0, 1, 0]
+
+        # Orthogonal axes
+        x_axis = normalize3(cross(ref, z_axis))
+        y_axis = cross(z_axis, x_axis)
+
+        # Build local pose matrix
+        pose_local = Mat([
+            [x_axis[0], y_axis[0], z_axis[0], x],
+            [x_axis[1], y_axis[1], z_axis[1], y],
+            [x_axis[2], y_axis[2], z_axis[2], z],
+            [0, 0, 0, 1]
+        ])
+
+        # Transform to global coordinates
+        pose_global = pose_frame * pose_local
+        poses_global.append(pose_global)
+
+    return poses_global
+
+global_poses = get_global_curve_poses(RDK.Item('Curve'))
+
+#set joints home 0.000000, -90.000000, -90.000000, 0.000000, 90.000000, 0.000000
+robot.setJoints([0, -90, -90, 0, 90, 0])
+
+robot.MoveJ(first, blocking=True)
 
 
-#first = robot.MoveL(Curve.Pose(0), blocking=False)
-#print(first)
+valid_joint_solutions = []
+
+for pose in global_poses:
+    RDK.Render(False)
+    # Solve IK for this pose
+    targetJoints_list = robot.SolveIK_All(pose)
+    currentJoints = robot.Joints()
+    
+    for joint in targetJoints_list:
+        # Check if the move would cause a collision
+        colres = robot.MoveJ_Test(currentJoints, joint)
+        if colres == 0:  # No collision
+            valid_joint_solutions.append(joint)
+            robot.setJoints(currentJoints)
+            RDK.Render(True)
+            robot.MoveJ(joint, blocking=True)
+            break  # Found a valid one, skip the rest
+
+#for joint in valid_joint_solutions:
+#    print("Moving to joint solution:", joint)
+#    robot.MoveJ(joint, blocking=True)
+
+
+#reset to home
+
+#for pose in global_poses:
+#    print("Moving to pose:", pose) 
+#    safe_move(robot, pose, 'J')
+#    #robot.MoveJ(pose, blocking=True)
 
 
 
-
-#safe_move(robot, first, 'J')
-
-"""
 Curve = RDK.Item('Curve')
 
 path_settings = RDK.AddMachiningProject("AutoCurveFollow settings")
@@ -179,9 +242,9 @@ robot_prog = path_settings.getLink(robolink.ITEM_TYPE_PROGRAM)
 
 prog.RunCode()
 
+
+
 """
-
-
 
 
 
