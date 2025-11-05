@@ -28,16 +28,10 @@ if connected:
         print(f"⚠️ Connection failed: {e}\nRunning in simulation mode.")
 
 # --- Common settings ---
-#RDK.setSimulationSpeed(1)
-#RDK.setCollisionActive(COLLISION_ON)
+RDK.setSimulationSpeed(1)
+RDK.setCollisionActive(COLLISION_ON)
+robot.setJoints([0, -90, -90, 0, 90, 0])
 
-test = first = transl(-100, -300, 600)
-print(test)
-robot.MoveJ(test, blocking=True)
-
-
-
-"""
 print("-" * 50)
 
 
@@ -95,35 +89,24 @@ first = transl(-100, -300, 600)
 second = transl(100, -300, 500)
 third = transl(100, -300, 400)
 
-
-
-
-#print("Moving to first pose...")
-#safe_move(robot, first, 'J')
-
-#print("Moving to joint pose...")
-#safe_move(robot, third, 'L')
-
-
 #get all objects in the station
 all_items = RDK.ItemList(list_names=True)
 
-#pts = CurvePlotter.build_curve_with_normals(300, -600, -100, L=200, S=40, N=6, rot_deg=180, tilt_deg=0)
-#print(pts)
+"""
+pts = CurvePlotter.build_curve_with_normals(300, -600, -100, L=200, S=40, N=6, rot_deg=180, tilt_deg=0)
+print(pts)
 
-#if 'Curve' in all_items:
-    #RDK.Item('Curve').Delete()
+if 'Curve' in all_items:
+    RDK.Item('Curve').Delete()
 
-#RDK.AddCurve(pts).setName("Curve")
-
-#select the curve '6DOF_ScanPattern_RZ45deg' in robodk
-
-#get first point for Curve 
+RDK.AddCurve(pts).setName("Curve")
+"""
 
 def get_global_curve_poses(curve_item):
+    """
     Converts all XYZijk curve points into Pose matrices in the parent frame.
     Returns a list of global Pose() matrices, with inverted Z direction.
-
+    """
     pose_frame = curve_item.Pose()
     points, _ = curve_item.GetPoints(FEATURE_CURVE)
 
@@ -158,18 +141,16 @@ def get_global_curve_poses(curve_item):
 
     return poses_global
 
-global_poses = get_global_curve_poses(RDK.Item('Curve'))
-
-#set joints home 0.000000, -90.000000, -90.000000, 0.000000, 90.000000, 0.000000
-robot.setJoints([0, -90, -90, 0, 90, 0])
+global_poses = get_global_curve_poses(RDK.Item('Curve'))[0:-1]
 
 robot.MoveJ(first, blocking=True)
 
 
 valid_joint_solutions = []
 
+start = time.time()
+RDK.Render(False)
 for pose in global_poses:
-    RDK.Render(False)
     # Solve IK for this pose
     targetJoints_list = robot.SolveIK_All(pose)
     currentJoints = robot.Joints()
@@ -180,10 +161,19 @@ for pose in global_poses:
         if colres == 0:  # No collision
             valid_joint_solutions.append(joint)
             robot.setJoints(currentJoints)
-            RDK.Render(True)
-            robot.MoveJ(joint, blocking=True)
             break  # Found a valid one, skip the rest
+    if len(valid_joint_solutions) != 0:
+        print("Moving to next pose", valid_joint_solutions[0])
+        robot.MoveJ(valid_joint_solutions[0], blocking=True)  # Move to the last valid joint found for next iteration
+        valid_joint_solutions.pop(0)  # Remove the first element to avoid duplicates
 
+RDK.Render(True)
+end = time.time()
+print(f"Found {len(valid_joint_solutions)} valid joint solutions in {end - start:.2f} seconds.")
+
+for joint in valid_joint_solutions:
+    #print("Moving to joint solution:", joint)
+    robot.MoveJ(joint, blocking=True)
 #for joint in valid_joint_solutions:
 #    print("Moving to joint solution:", joint)
 #    robot.MoveJ(joint, blocking=True)
@@ -197,7 +187,7 @@ for pose in global_poses:
 #    #robot.MoveJ(pose, blocking=True)
 
 
-
+"""
 Curve = RDK.Item('Curve')
 
 path_settings = RDK.AddMachiningProject("AutoCurveFollow settings")
@@ -241,9 +231,6 @@ prog, status = path_settings.setMachiningParameters(
 robot_prog = path_settings.getLink(robolink.ITEM_TYPE_PROGRAM)
 
 prog.RunCode()
-
-
-
 """
 
 
