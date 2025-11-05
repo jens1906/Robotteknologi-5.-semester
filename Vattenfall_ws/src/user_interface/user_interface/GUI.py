@@ -13,7 +13,7 @@ from user_interface.joystick import Joystick
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
-        MainWindow.resize(1215, 697)
+        MainWindow.resize(820, 645)
         self.centralwidget = QtWidgets.QWidget(parent=MainWindow)
         self.centralwidget.setObjectName("centralwidget")
         self.verticalLayout_2 = QtWidgets.QVBoxLayout(self.centralwidget)
@@ -21,7 +21,7 @@ class Ui_MainWindow(object):
         self.videoLabel = QtWidgets.QLabel(parent=self.centralwidget)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
         sizePolicy.setHorizontalStretch(0)
-        sizePolicy.setVerticalStretch(2)
+        sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.videoLabel.sizePolicy().hasHeightForWidth())
         self.videoLabel.setSizePolicy(sizePolicy)
         self.videoLabel.setObjectName("videoLabel")
@@ -37,6 +37,10 @@ class Ui_MainWindow(object):
         self.Emergency_Stop.setStyleSheet("QPushButton {\n"
 "    background-color: red;\n"
 "    color: black;\n"
+"    border-radius: 70px;     /* half of width/height */\n"
+"    width: 140px;\n"
+"    height: 140px;\n"
+"    border: none;\n"
 "}\n"
 "\n"
 "QPushButton:hover {\n"
@@ -50,13 +54,18 @@ class Ui_MainWindow(object):
         self.Emergency_Stop.setObjectName("Emergency_Stop")
         self.horizontalLayout_3.addWidget(self.Emergency_Stop)
         self.tabWidget = QtWidgets.QTabWidget(parent=self.centralwidget)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.tabWidget.sizePolicy().hasHeightForWidth())
         self.tabWidget.setSizePolicy(sizePolicy)
         self.tabWidget.setObjectName("tabWidget")
         self.tab = QtWidgets.QWidget()
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.tab.sizePolicy().hasHeightForWidth())
+        self.tab.setSizePolicy(sizePolicy)
         self.tab.setObjectName("tab")
         self.verticalLayout_3 = QtWidgets.QVBoxLayout(self.tab)
         self.verticalLayout_3.setObjectName("verticalLayout_3")
@@ -107,6 +116,11 @@ class Ui_MainWindow(object):
         self.verticalLayout_3.addLayout(self.horizontalLayout)
         self.tabWidget.addTab(self.tab, "")
         self.tab_2 = QtWidgets.QWidget()
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.tab_2.sizePolicy().hasHeightForWidth())
+        self.tab_2.setSizePolicy(sizePolicy)
         self.tab_2.setObjectName("tab_2")
         self.horizontalLayout_4 = QtWidgets.QHBoxLayout(self.tab_2)
         self.horizontalLayout_4.setObjectName("horizontalLayout_4")
@@ -201,6 +215,11 @@ class Ui_MainWindow(object):
         self.horizontalLayout_4.addLayout(self.horizontalLayout_2)
         self.tabWidget.addTab(self.tab_2, "")
         self.tab_3 = QtWidgets.QWidget()
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.tab_3.sizePolicy().hasHeightForWidth())
+        self.tab_3.setSizePolicy(sizePolicy)
         self.tab_3.setObjectName("tab_3")
         self.horizontalLayout_5 = QtWidgets.QHBoxLayout(self.tab_3)
         self.horizontalLayout_5.setObjectName("horizontalLayout_5")
@@ -210,7 +229,7 @@ class Ui_MainWindow(object):
         self.tabWidget.addTab(self.tab_3, "")
         self.horizontalLayout_3.addWidget(self.tabWidget)
         self.stackedWidget = QtWidgets.QStackedWidget(parent=self.centralwidget)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.stackedWidget.sizePolicy().hasHeightForWidth())
@@ -218,8 +237,10 @@ class Ui_MainWindow(object):
         self.stackedWidget.setObjectName("stackedWidget")
         self.page = QtWidgets.QWidget()
         self.page.setObjectName("page")
-        self.horizontalLayout_6 = QtWidgets.QHBoxLayout(self.page)
-        self.horizontalLayout_6.setObjectName("horizontalLayout_6")
+        self.verticalLayout_6 = QtWidgets.QVBoxLayout(self.page)
+        self.verticalLayout_6.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_6.setSpacing(0)
+        self.verticalLayout_6.setObjectName("verticalLayout_6")
         self.Terminate = QtWidgets.QPushButton(parent=self.page)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
         sizePolicy.setHorizontalStretch(0)
@@ -230,37 +251,75 @@ class Ui_MainWindow(object):
 "    background-color: orange;\n"
 "    color: black;\n"
 "}\n"
-"\n"
 "QPushButton:hover {\n"
 "    background-color: yellow;\n"
 "}\n"
-"\n"
 "QPushButton:pressed {\n"
 "    background-color: red;\n"
 "}\n"
-"")
+"QPushButton {\n"
+"    background-color: orange;\n"
+"    color: black;\n"
+"}")
         self.Terminate.setObjectName("Terminate")
-        self.horizontalLayout_6.addWidget(self.Terminate)
+        self.verticalLayout_6.addWidget(self.Terminate)
         self.stackedWidget.addWidget(self.page)
         self.page_2 = QtWidgets.QWidget()
         self.page_2.setObjectName("page_2")
-        self.horizontalLayout_7 = QtWidgets.QHBoxLayout(self.page_2)
-        self.horizontalLayout_7.setObjectName("horizontalLayout_7")
+        self.verticalLayout_5 = QtWidgets.QVBoxLayout(self.page_2)
+        self.verticalLayout_5.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_5.setObjectName("verticalLayout_5")
         self.Joystick = Joystick(parent=self.page_2)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.Joystick.sizePolicy().hasHeightForWidth())
         self.Joystick.setSizePolicy(sizePolicy)
+        self.Joystick.setSizeIncrement(QtCore.QSize(2, 2))
         self.Joystick.setFocusPolicy(QtCore.Qt.FocusPolicy.WheelFocus)
         self.Joystick.setObjectName("Joystick")
-        self.horizontalLayout_7.addWidget(self.Joystick)
+        self.verticalLayout_5.addWidget(self.Joystick)
+        self.frame = QtWidgets.QFrame(parent=self.page_2)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Preferred, QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(1)
+        sizePolicy.setHeightForWidth(self.frame.sizePolicy().hasHeightForWidth())
+        self.frame.setSizePolicy(sizePolicy)
+        self.frame.setSizeIncrement(QtCore.QSize(1, 1))
+        self.frame.setObjectName("frame")
+        self.horizontalLayout_6 = QtWidgets.QHBoxLayout(self.frame)
+        self.horizontalLayout_6.setContentsMargins(0, 0, 0, 0)
+        self.horizontalLayout_6.setSpacing(0)
+        self.horizontalLayout_6.setObjectName("horizontalLayout_6")
+        self.pushButton_Z_down = QtWidgets.QPushButton(parent=self.frame)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.pushButton_Z_down.sizePolicy().hasHeightForWidth())
+        self.pushButton_Z_down.setSizePolicy(sizePolicy)
+        self.pushButton_Z_down.setSizeIncrement(QtCore.QSize(0, 1))
+        self.pushButton_Z_down.setObjectName("pushButton_Z_down")
+        self.horizontalLayout_6.addWidget(self.pushButton_Z_down)
+        self.pushButton_Z_up = QtWidgets.QPushButton(parent=self.frame)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.pushButton_Z_up.sizePolicy().hasHeightForWidth())
+        self.pushButton_Z_up.setSizePolicy(sizePolicy)
+        self.pushButton_Z_up.setSizeIncrement(QtCore.QSize(0, 1))
+        self.pushButton_Z_up.setObjectName("pushButton_Z_up")
+        self.horizontalLayout_6.addWidget(self.pushButton_Z_up)
+        self.verticalLayout_5.addWidget(self.frame)
+        self.verticalLayout_5.setStretch(0, 4)
+        self.verticalLayout_5.setStretch(1, 1)
         self.stackedWidget.addWidget(self.page_2)
         self.horizontalLayout_3.addWidget(self.stackedWidget)
         self.verticalLayout_2.addLayout(self.horizontalLayout_3)
+        self.verticalLayout_2.setStretch(0, 5)
+        self.verticalLayout_2.setStretch(1, 1)
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 1215, 33))
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 820, 33))
         self.menubar.setObjectName("menubar")
         MainWindow.setMenuBar(self.menubar)
         self.statusbar = QtWidgets.QStatusBar(parent=MainWindow)
@@ -268,7 +327,7 @@ class Ui_MainWindow(object):
         MainWindow.setStatusBar(self.statusbar)
 
         self.retranslateUi(MainWindow)
-        self.tabWidget.setCurrentIndex(2)
+        self.tabWidget.setCurrentIndex(0)
         self.stackedWidget.setCurrentIndex(1)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
@@ -293,3 +352,5 @@ class Ui_MainWindow(object):
         self.sysinfoLabel.setText(_translate("MainWindow", "sysinfoLabel"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_3), _translate("MainWindow", "System Information"))
         self.Terminate.setText(_translate("MainWindow", "Terminate"))
+        self.pushButton_Z_down.setText(_translate("MainWindow", "-Z"))
+        self.pushButton_Z_up.setText(_translate("MainWindow", "+Z"))

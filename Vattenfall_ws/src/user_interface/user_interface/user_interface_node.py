@@ -17,8 +17,8 @@ printlogger = True
 showImages = True
 
 class RosSignalEmitter(QObject):
-    data_signal = pyqtSignal(str)           # existing: emits text
-    image_signal = pyqtSignal(object)       # NEW: emits python objects (numpy arrays)
+    data_signal = pyqtSignal(str)           
+    image_signal = pyqtSignal(object)       
 
 class UserInterfaceNode(Node):
     def __init__(self, signal_emitter, ui_instance=None):
@@ -33,9 +33,9 @@ class UserInterfaceNode(Node):
         self.ui_terminate_pub = self.create_publisher(Bool, 'ui_terminate_pub', 10)
 
         self.corrosion_thresholding_pub = self.create_subscription(Image, 'corrosion_thresholding_pub', self.corrosion_thresholding_callback, 10)
+        self.ROBODK_completion_notification = self.create_subscription(Bool, 'ROBODK_completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
         color_sub = message_filters.Subscriber(self, Image, 'realsense_camera_color_pub')
-        depth_sub = message_filters.Subscriber(self, Image, 'realsense_camera_depth_pub')
-         
+        depth_sub = message_filters.Subscriber(self, Image, 'realsense_camera_depth_pub')         
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
 
@@ -60,6 +60,13 @@ class UserInterfaceNode(Node):
             self.signal_emitter.data_signal.emit(f"Thresholded: {msg.width}x{msg.height}")
             self.signal_emitter.image_signal.emit(corrosion_image)
 
+
+    def ROBODK_completion_notification_callback(self, msg):
+        if msg.data == True:
+            self.currently_running = False
+            if printlogger: self.get_logger().info('ROBODK has completed the path, ready for new corrosion area')
+        elif msg.data == False:
+            self.currently_running = True
 
     
 
@@ -109,18 +116,43 @@ class UserInterface(QMainWindow):
         self.ui.Small_Pen.clicked.connect(lambda: self.set_custom_pen(1))
         self.ui.Medium_Pen.clicked.connect(lambda: self.set_custom_pen(2))
         self.ui.Large_Pen.clicked.connect(lambda: self.set_custom_pen(3))
-        self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
-
+        if hasattr(self.ui, 'tabWidget'):
+            self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
         # ROS setup
         self.signal_emitter = RosSignalEmitter()
         self.signal_emitter.data_signal.connect(self.on_data)
         self.signal_emitter.image_signal.connect(self.update_video_frame)
         self.ros_node = UserInterfaceNode(self.signal_emitter, self)  # Pass self for state access
     
+    def customize_tabs(self):
+        if hasattr(self.ui, 'tabWidget'):
+            tabbar = self.ui.tabWidget.tabBar()
+            # Make tabs expand to fill the available width equally
+            tabbar.setExpanding(True)
+            
+            # Calculate equal width for each tab based on actual widget width
+            tab_count = self.ui.tabWidget.count()
+            if tab_count > 0:
+                tabbar.setTabsClosable(False)
+                
+                # Get the actual width of the tab widget
+                tab_widget_width = self.ui.tabWidget.width()//3
+                width_per_tab = tab_widget_width // tab_count
+                
+                # Apply stylesheet with calculated pixel width
+                self.ui.tabWidget.setStyleSheet(f"""
+                    QTabBar::tab {{
+                        width: {tab_widget_width}px;
+                        min-width: {width_per_tab}px;
+                    }}
+                """)
+        # Note: Can't use logger here as ros_node isn't created yet
+
     def emergency_stop(self):
         msg = Bool()
         msg.data = True
         self.ros_node.ui_emergency_stop_pub.publish(msg)
+        self.joystick_terminate_change_page(False)
         if printlogger: self.ros_node.get_logger().info('Emergency Stop pressed')
 
     def home_position(self):
@@ -133,12 +165,26 @@ class UserInterface(QMainWindow):
         msg = Bool()
         msg.data = True
         self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
+        self.joystick_terminate_change_page(True)
+        self.ui.stackedWidget.setCurrentIndex(0)
         if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
     
+    def joystick_terminate_change_page(self, state = bool):
+        self.ros_node.get_logger().info(f'Changing page to {state}')
+        if state:
+            self.ui.stackedWidget.setCurrentIndex(0)
+        elif not state:
+            self.ui.stackedWidget.setCurrentIndex(1)
+
     def terminate(self):
         msg = Bool()
         msg.data = True
         self.ros_node.ui_terminate_pub.publish(msg)
+        '''
+        CHANGE THIS LATER
+        '''
+        self.joystick_terminate_change_page(False)
+
         if printlogger: self.ros_node.get_logger().info('Terminate pressed')
 
     def toggle_vision_state(self):
@@ -151,12 +197,18 @@ class UserInterface(QMainWindow):
             self.ui.Reset.setStyleSheet("background-color: #ffffff;")
             self.ui.Eraser.setStyleSheet("background-color: #ffffff;")
             self.ui.Undo.setStyleSheet("background-color: #ffffff;")
+            self.ui.Small_Pen.setStyleSheet("background-color: #ffffff;")
+            self.ui.Medium_Pen.setStyleSheet("background-color: #ffffff;")
+            self.ui.Large_Pen.setStyleSheet("background-color: #ffffff;")
 
             if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
         else:
             self.ui.Reset.setStyleSheet("background-color: #636363;")
             self.ui.Eraser.setStyleSheet("background-color: #636363;")
             self.ui.Undo.setStyleSheet("background-color: #636363;")
+            self.ui.Small_Pen.setStyleSheet("background-color: #636363;")
+            self.ui.Medium_Pen.setStyleSheet("background-color: #636363;")
+            self.ui.Large_Pen.setStyleSheet("background-color: #636363;")
             if printlogger: self.ros_node.get_logger().info('Switching to Depth Camera')
 
         if printlogger: self.ros_node.get_logger().info(f'Switching Camera Type {self.camera_type}')
@@ -221,6 +273,9 @@ def main():
     app = QApplication(sys.argv)
     window = UserInterface()
     window.show()
+    
+    # Customize tabs AFTER window is shown and has proper dimensions
+    window.customize_tabs()
     
     # Start ROS thread AFTER window is shown and Qt event loop is ready
     ros_thread = threading.Thread(target=lambda: rclpy.spin(window.ros_node), daemon=True)

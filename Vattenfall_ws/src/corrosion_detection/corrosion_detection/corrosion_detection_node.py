@@ -30,7 +30,9 @@ class CorrosionDetector(Node):
         self.ui_corrosion_area_accept_sub = self.create_subscription(Bool, 'ui_corrosion_area_accept_pub', self.ui_corrosion_area_accept_callback, 10)        
         self.ui_corrosion_add_sub = self.create_subscription(Image, 'ui_corrosion_area_add_pub', self.ui_corrosion_add_callback, 10)
         self.ui_corrosion_remove_sub = self.create_subscription(Image, 'ui_corrosion_area_remove_pub', self.ui_corrosion_remove_callback, 10)
+        self.ROBODK_completion_notification = self.create_subscription(Bool, 'ROBODK_completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
         self.corrosion_accepted = False  # in __init__
+        self.running_status = False #To help with make a pipeline
 
         # Needs to be changed
         if printlogger: self.get_logger().info('Waiting for synchronized images...')
@@ -39,6 +41,14 @@ class CorrosionDetector(Node):
         # Receive UI command
         self.corrosion_accepted = msg.data
         if printlogger: self.get_logger().info(f'UI command received: {self.corrosion_accepted}')
+
+    def ROBODK_completion_notification_callback(self, msg):
+        if msg.data == True:
+            self.running_status = False
+            self.corrosion_accepted = False
+            self.get_logger().info('ROBODK has completed the path, ready for new corrosion area')
+            self.get_logger().info(f'State: corrosion_accepted={self.corrosion_accepted}, running_status={self.running_status}')
+
 
     def ui_corrosion_add_callback(self, msg):
         self.ui_corrosion_add = msg.data
@@ -80,18 +90,16 @@ class CorrosionDetector(Node):
                 cv.imshow('Thresholded', thresholded_image)
                 cv.imshow('Corrosion Area', color_threshold_image)
                 cv.waitKey(1)
-        elif self.corrosion_accepted:
+        elif self.corrosion_accepted and self.running_status == False:
+            self.running_status = True
             self.get_logger().info('Corrosion area accepted')
             xyz_data = self.combine_and_transform(self.edge_to_scatter_plot(color_image), depth_image)
             msg = Float32MultiArray()
             msg.data = xyz_data.flatten().tolist()
             self.corrosion_scatter_plot.publish(msg)
-            '''
-            CHANGE THIS LATER TO ONLY PUBLISH WHEN UI ACCEPTS
-            '''
-            self.corrosion_accepted = False  
         else:
-            self.get_logger().info('A mistake has happened with UI command')
+            self.get_logger().info(f'Corrosion detection is already running, wait for ROBODK to complete {self.corrosion_accepted} {self.running_status}')
+            #self.get_logger().info('A mistake has happened with UI command')
     
     def threshold_corrosion(self, image):
         # Thresholding in HSV color space to detect corrosion
