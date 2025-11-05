@@ -1,11 +1,13 @@
-import pyrealsense2 as rs
+
+Test = True
+if Test == False:
+    import pyrealsense2 as rs
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 import cv2 as cv
 
-Test = True
 printlogger = True
 test_image = cv.imread('src/realsense_publisher/image/realsense_capture_20251027_142056_color.png')
 test_depth = np.load('src/realsense_publisher/image/realsense_capture_20251027_142056_depth.npy')
