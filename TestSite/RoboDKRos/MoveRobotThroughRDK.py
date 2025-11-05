@@ -10,7 +10,7 @@ RDK = Robolink()
 robot = RDK.Item('UR3e', ITEM_TYPE_ROBOT)
 
 # --- Try to connect to the real robot ---
-connected = False
+connected = False    
 if connected:
     try:
         # Try to connect to the robot
@@ -30,7 +30,6 @@ if connected:
 # --- Common settings ---
 RDK.setSimulationSpeed(1)
 RDK.setCollisionActive(COLLISION_ON)
-robot.setJoints([0, -90, -90, 0, 90, 0])
 
 print("-" * 50)
 
@@ -143,37 +142,29 @@ def get_global_curve_poses(curve_item):
 
 global_poses = get_global_curve_poses(RDK.Item('Curve'))[0:-1]
 
-robot.MoveJ(first, blocking=True)
-
-
-valid_joint_solutions = []
+safe_move(robot, third, 'J')
 
 start = time.time()
-RDK.Render(False)
-for pose in global_poses:
-    # Solve IK for this pose
-    targetJoints_list = robot.SolveIK_All(pose)
-    currentJoints = robot.Joints()
-    
-    for joint in targetJoints_list:
-        # Check if the move would cause a collision
-        colres = robot.MoveJ_Test(currentJoints, joint)
-        if colres == 0:  # No collision
-            valid_joint_solutions.append(joint)
-            robot.setJoints(currentJoints)
-            break  # Found a valid one, skip the rest
-    if len(valid_joint_solutions) != 0:
-        print("Moving to next pose", valid_joint_solutions[0])
-        robot.MoveJ(valid_joint_solutions[0], blocking=True)  # Move to the last valid joint found for next iteration
-        valid_joint_solutions.pop(0)  # Remove the first element to avoid duplicates
+valid_joint_solutions = []
 
-RDK.Render(True)
+# Start from the robot's current position
+totalstartjoing = robot.Joints()
+
+for pose in global_poses:
+    # Get all possible IK solutions for this pose
+    targetJoints_list = robot.SolveIK_All(pose)
+
+    for posjoint in targetJoints_list:
+        #collision = robot.MoveJ_Test(totalstartjoing, posjoint)
+        pass
+    
+
+
+
 end = time.time()
+
 print(f"Found {len(valid_joint_solutions)} valid joint solutions in {end - start:.2f} seconds.")
 
-for joint in valid_joint_solutions:
-    #print("Moving to joint solution:", joint)
-    robot.MoveJ(joint, blocking=True)
 #for joint in valid_joint_solutions:
 #    print("Moving to joint solution:", joint)
 #    robot.MoveJ(joint, blocking=True)
@@ -187,7 +178,7 @@ for joint in valid_joint_solutions:
 #    #robot.MoveJ(pose, blocking=True)
 
 
-"""
+
 Curve = RDK.Item('Curve')
 
 path_settings = RDK.AddMachiningProject("AutoCurveFollow settings")
@@ -231,12 +222,12 @@ prog, status = path_settings.setMachiningParameters(
 robot_prog = path_settings.getLink(robolink.ITEM_TYPE_PROGRAM)
 
 prog.RunCode()
-"""
+
 
 
 
 # --- Disconnect if connected to real robot ---
 if connected:
     print("🔌 Disconnecting from real robot...")
-    robot.Disconnect()
+    #robot.Disconnect()
     print("✅ Disconnected.")
