@@ -118,9 +118,7 @@ class UserInterface(QMainWindow):
         self.ros_node = UserInterfaceNode(self.signal_emitter, self)  # Pass self for state access
     
     def customize_tabs(self):
-        tabbar = self.tabWidget.tabBar()
-
-        # Make tabs expand to fill the available width
+        tabbar = self.ui.tabWidget.tabBar()
         tabbar.setExpanding(True)
 
     def emergency_stop(self):
