@@ -28,23 +28,56 @@ def main():
     uic.loadUi(ui_path, win)
 
     # Ensure tabs stretch across available width when running this loader
-    try:
-        from PyQt6.QtCore import Qt  # for elide mode enum
-        tab = win.findChild(QtWidgets.QTabWidget, "tabWidget")
-        if tab is not None:
-            # Allow the tab widget to grow horizontally
-            tab.setSizePolicy(
-                QtWidgets.QSizePolicy.Policy.Expanding,
-                QtWidgets.QSizePolicy.Policy.Preferred,
-            )
-            # Make individual tabs expand to fill the tab bar width
-            tab.tabBar().setExpanding(True)
-            # Optional: elide long labels nicely instead of overflowing
-            tab.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
-    except Exception as e:
-        print("Warning: could not apply tab stretching:", e)
+    def apply_tab_stretch():
+        try:
+            from PyQt6.QtCore import Qt  # for elide mode enum
+            tab = win.findChild(QtWidgets.QTabWidget, "tabWidget")
+            if tab is not None:
+                # Allow the tab widget to grow horizontally
+                tab.setSizePolicy(
+                    QtWidgets.QSizePolicy.Policy.Expanding,
+                    QtWidgets.QSizePolicy.Policy.Preferred,
+                )
+                # Expanding tabs to fill available tab bar width
+                tb = tab.tabBar()
+                try:
+                    tb.setExpanding(True)
+                    tb.setElideMode(Qt.TextElideMode.ElideRight)
+                    # Allow shrinking so expansion can distribute width evenly
+                    tb.setStyleSheet(
+                        "QTabBar { min-height: 28px; } QTabBar::tab { min-width: 0px; padding: 6px 10px; }"
+                    )
+                except Exception:
+                    pass
 
+            # Favor the tab widget over the emergency button in the parent HBox layout
+            hbox = win.findChild(QtWidgets.QHBoxLayout, "horizontalLayout_3")
+            if hbox is not None:
+                # Layout order is [Emergency_Stop, tabWidget, stackedWidget]; favor tabWidget
+                try:
+                    hbox.setStretch(0, 0)
+                    hbox.setStretch(1, 2)
+                    hbox.setStretch(2, 1)
+                except Exception as e:
+                    print("Warning: could not set layout stretch:", e)
+
+            # Prevent the Emergency button from grabbing extra horizontal space
+            btn = win.findChild(QtWidgets.QPushButton, "Emergency_Stop")
+            if btn is not None:
+                sp = btn.sizePolicy()
+                sp.setHorizontalPolicy(QtWidgets.QSizePolicy.Policy.Preferred)
+                btn.setSizePolicy(sp)
+        except Exception as e:
+            print("Warning: could not apply tab stretching:", e)
+
+    apply_tab_stretch()
     win.show()
+    # Some layout calculations finalize after show; apply once more on the next cycle
+    try:
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, apply_tab_stretch)
+    except Exception:
+        pass
     sys.exit(app.exec())
 
 
