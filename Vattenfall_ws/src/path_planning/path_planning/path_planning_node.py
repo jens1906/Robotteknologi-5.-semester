@@ -22,8 +22,8 @@ class PathPlanner(Node):
 
         # ROS2 publishers and subscribers
         self.uv_path_pub = self.create_publisher(Float64MultiArray, 'path_uv', 10)
-        self.create_subscription(Float64MultiArray, 'param_uv', self.uv_callback, 10)
-    
+        self.create_subscription(Float64MultiArray, '/parameterization/param_uv', self.uv_callback, 10)
+
     def uv_callback(self, msg):
         """Receive UV data and generate path."""
         try:
