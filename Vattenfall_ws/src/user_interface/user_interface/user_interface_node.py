@@ -109,7 +109,8 @@ class UserInterface(QMainWindow):
         self.ui.Small_Pen.clicked.connect(lambda: self.set_custom_pen(1))
         self.ui.Medium_Pen.clicked.connect(lambda: self.set_custom_pen(2))
         self.ui.Large_Pen.clicked.connect(lambda: self.set_custom_pen(3))
-        self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
+        if hasattr(self.ui, 'tabWidget'):
+            self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
         self.customize_tabs()
         # ROS setup
         self.signal_emitter = RosSignalEmitter()
@@ -118,10 +119,12 @@ class UserInterface(QMainWindow):
         self.ros_node = UserInterfaceNode(self.signal_emitter, self)  # Pass self for state access
     
     def customize_tabs(self):
-        tabbar = self.tabWidget.tabBar()
-
-        # Make tabs expand to fill the available width
-        tabbar.setExpanding(True)
+        if hasattr(self.ui, 'tabWidget'):
+            tabbar = self.ui.tabWidget.tabBar()
+            # Make tabs expand to fill the available width
+            tabbar.setExpanding(True)
+        else:
+            if printlogger: self.get_logger().info('tabWidget not found in UI')
 
     def emergency_stop(self):
         msg = Bool()
