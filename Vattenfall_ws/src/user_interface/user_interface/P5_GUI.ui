@@ -6,21 +6,21 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1215</width>
-    <height>697</height>
+    <width>820</width>
+    <height>645</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>MainWindow</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QVBoxLayout" name="verticalLayout_2">
+   <layout class="QVBoxLayout" name="verticalLayout_2" stretch="5,1">
     <item>
      <widget class="QLabel" name="videoLabel">
       <property name="sizePolicy">
        <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
         <horstretch>0</horstretch>
-        <verstretch>2</verstretch>
+        <verstretch>0</verstretch>
        </sizepolicy>
       </property>
       <property name="text">
@@ -42,6 +42,10 @@
          <string notr="true">QPushButton {
     background-color: red;
     color: black;
+    border-radius: 70px;     /* half of width/height */
+    width: 140px;
+    height: 140px;
+    border: none;
 }
 
 QPushButton:hover {
@@ -396,16 +400,31 @@ QPushButton:pressed {
       <item>
        <widget class="QStackedWidget" name="stackedWidget">
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
         </property>
         <property name="currentIndex">
-         <number>1</number>
+         <number>0</number>
         </property>
         <widget class="QWidget" name="page">
-         <layout class="QHBoxLayout" name="horizontalLayout_6">
+         <layout class="QVBoxLayout" name="verticalLayout_6">
+          <property name="spacing">
+           <number>0</number>
+          </property>
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
           <item>
            <widget class="QPushButton" name="Terminate">
             <property name="sizePolicy">
@@ -419,15 +438,16 @@ QPushButton:pressed {
     background-color: orange;
     color: black;
 }
-
 QPushButton:hover {
     background-color: yellow;
 }
-
 QPushButton:pressed {
     background-color: red;
 }
-</string>
+QPushButton {
+    background-color: orange;
+    color: black;
+}</string>
             </property>
             <property name="text">
              <string>Terminate</string>
@@ -437,7 +457,19 @@ QPushButton:pressed {
          </layout>
         </widget>
         <widget class="QWidget" name="page_2">
-         <layout class="QHBoxLayout" name="horizontalLayout_7">
+         <layout class="QVBoxLayout" name="verticalLayout_5" stretch="4,1">
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
           <item>
            <widget class="Joystick" name="Joystick" native="true">
             <property name="sizePolicy">
@@ -446,9 +478,86 @@ QPushButton:pressed {
               <verstretch>0</verstretch>
              </sizepolicy>
             </property>
+            <property name="sizeIncrement">
+             <size>
+              <width>2</width>
+              <height>2</height>
+             </size>
+            </property>
             <property name="focusPolicy">
              <enum>Qt::FocusPolicy::WheelFocus</enum>
             </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QFrame" name="frame">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>1</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="sizeIncrement">
+             <size>
+              <width>1</width>
+              <height>1</height>
+             </size>
+            </property>
+            <layout class="QHBoxLayout" name="horizontalLayout_6">
+             <property name="spacing">
+              <number>0</number>
+             </property>
+             <property name="leftMargin">
+              <number>0</number>
+             </property>
+             <property name="topMargin">
+              <number>0</number>
+             </property>
+             <property name="rightMargin">
+              <number>0</number>
+             </property>
+             <property name="bottomMargin">
+              <number>0</number>
+             </property>
+             <item>
+              <widget class="QPushButton" name="pushButton_Z_down">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="sizeIncrement">
+                <size>
+                 <width>0</width>
+                 <height>1</height>
+                </size>
+               </property>
+               <property name="text">
+                <string>-Z</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="pushButton_Z_up">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="sizeIncrement">
+                <size>
+                 <width>0</width>
+                 <height>1</height>
+                </size>
+               </property>
+               <property name="text">
+                <string>+Z</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
            </widget>
           </item>
          </layout>
@@ -464,7 +573,7 @@ QPushButton:pressed {
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1215</width>
+     <width>820</width>
      <height>33</height>
     </rect>
    </property>

@@ -110,13 +110,19 @@ class UserInterface(QMainWindow):
         self.ui.Medium_Pen.clicked.connect(lambda: self.set_custom_pen(2))
         self.ui.Large_Pen.clicked.connect(lambda: self.set_custom_pen(3))
         self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
-
+        self.customize_tabs()
         # ROS setup
         self.signal_emitter = RosSignalEmitter()
         self.signal_emitter.data_signal.connect(self.on_data)
         self.signal_emitter.image_signal.connect(self.update_video_frame)
         self.ros_node = UserInterfaceNode(self.signal_emitter, self)  # Pass self for state access
     
+    def customize_tabs(self):
+        tabbar = self.tabWidget.tabBar()
+
+        # Make tabs expand to fill the available width
+        tabbar.setExpanding(True)
+
     def emergency_stop(self):
         msg = Bool()
         msg.data = True
