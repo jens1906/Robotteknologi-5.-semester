@@ -157,12 +157,18 @@ class UserInterface(QMainWindow):
             self.ui.Reset.setStyleSheet("background-color: #ffffff;")
             self.ui.Eraser.setStyleSheet("background-color: #ffffff;")
             self.ui.Undo.setStyleSheet("background-color: #ffffff;")
+            self.ui.Small_Pen.setStyleSheet("background-color: #ffffff;")
+            self.ui.Medium_Pen.setStyleSheet("background-color: #ffffff;")
+            self.ui.Large_Pen.setStyleSheet("background-color: #ffffff;")
 
             if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
         else:
             self.ui.Reset.setStyleSheet("background-color: #636363;")
             self.ui.Eraser.setStyleSheet("background-color: #636363;")
             self.ui.Undo.setStyleSheet("background-color: #636363;")
+            self.ui.Small_Pen.setStyleSheet("background-color: #636363;")
+            self.ui.Medium_Pen.setStyleSheet("background-color: #636363;")
+            self.ui.Large_Pen.setStyleSheet("background-color: #636363;")
             if printlogger: self.ros_node.get_logger().info('Switching to Depth Camera')
 
         if printlogger: self.ros_node.get_logger().info(f'Switching Camera Type {self.camera_type}')
