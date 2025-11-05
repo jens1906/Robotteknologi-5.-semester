@@ -11,7 +11,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2
 from geometry_msgs.msg import Point
-from std_msgs.msg import Header
+from std_msgs.msg import Header, Float64MultiArray
 import numpy as np
 
 from parameterization.msg import ParameterizationStatus, UVPoint
@@ -97,6 +97,13 @@ class ParameterizationNode(Node):
             '/parameterization/status',
             10
         )
+
+        # UV parameterization publisher
+        self.param_uv_pub = self.create_publisher(
+            Float64MultiArray,
+            '/parameterization/param_uv',
+            10
+        )
         
         # Create services
         self.interpolate_srv = self.create_service(
@@ -174,6 +181,12 @@ class ParameterizationNode(Node):
             bounds = self.surf.get_uv_bounds()
             self.get_logger().info(f'  UV bounds: U=[{bounds["u_min"]:.3f}, {bounds["u_max"]:.3f}], '
                                  f'V=[{bounds["v_min"]:.3f}, {bounds["v_max"]:.3f}]')
+            
+            # Publish UV parameters
+            uv_msg = Float64MultiArray()
+            uv_msg.data = self.surf.uv_params.flatten().tolist()
+            self.param_uv_pub.publish(uv_msg)
+            self.get_logger().info(f'Published UV parameters: {len(self.surf.uv_params)} points')
             
         except Exception as e:
             self.get_logger().error(f'Error processing point cloud: {str(e)}')

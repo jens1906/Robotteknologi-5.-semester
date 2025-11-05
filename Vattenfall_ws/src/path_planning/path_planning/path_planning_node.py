@@ -3,6 +3,24 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray
 
+
+"""
+
+The functionality of the Path Planner Node
+
+- Subscribes to UV parameterization data.
+- Generates zigzag paths in UV space with interconnection between Bézier curves.
+- Publishes the generated UV path data.
+
+Subscribers:
+- /parameterization/param_uv (Float64MultiArray): UV parameterization data.
+
+Publishers:
+- /path/uv_path (Float64MultiArray): Generated UV path data.
+
+"""
+
+
 class PathPlanner(Node):
     """ Path Planner"""
     
@@ -20,10 +38,13 @@ class PathPlanner(Node):
         self.uv_data = None
         self.paths_uv = None
 
-        # ROS2 publishers and subscribers
-        self.uv_path_pub = self.create_publisher(Float64MultiArray, 'path_uv', 10)
-        self.create_subscription(Float64MultiArray, 'param_uv', self.uv_callback, 10)
-    
+        # Subscribe to UV parameterization data
+        self.create_subscription(Float64MultiArray, '/parameterization/param_uv', self.uv_callback, 10)
+
+        # Publisher for UV path
+        self.uv_path_pub = self.create_publisher(Float64MultiArray, '/path/uv_path', 10)
+
+
     def uv_callback(self, msg):
         """Receive UV data and generate path."""
         try:
@@ -136,3 +157,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
