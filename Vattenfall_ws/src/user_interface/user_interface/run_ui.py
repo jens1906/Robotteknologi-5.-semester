@@ -26,6 +26,24 @@ def main():
         print(f"UI file not found: {ui_path}")
         sys.exit(1)
     uic.loadUi(ui_path, win)
+
+    # Ensure tabs stretch across available width when running this loader
+    try:
+        from PyQt6.QtCore import Qt  # for elide mode enum
+        tab = win.findChild(QtWidgets.QTabWidget, "tabWidget")
+        if tab is not None:
+            # Allow the tab widget to grow horizontally
+            tab.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Expanding,
+                QtWidgets.QSizePolicy.Policy.Preferred,
+            )
+            # Make individual tabs expand to fill the tab bar width
+            tab.tabBar().setExpanding(True)
+            # Optional: elide long labels nicely instead of overflowing
+            tab.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
+    except Exception as e:
+        print("Warning: could not apply tab stretching:", e)
+
     win.show()
     sys.exit(app.exec())
 
