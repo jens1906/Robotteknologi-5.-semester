@@ -107,21 +107,8 @@ def test_parameterization(ply_file_path):
     print(f"   Mean error: {np.mean(errors):.6f}")
     print(f"   Max error: {np.max(errors):.6f}")
     
-    # Test surface normals
-    print("\n8. Testing surface normal computation...")
-    n_normal = min(5, len(points))
-    normal_indices = np.random.choice(len(surf.uv_params), n_normal, replace=False)
-    normal_uv = surf.uv_params[normal_indices]
-    
-    normals = surf.compute_surface_normals(normal_uv)
-    print(f"   Computed {n_normal} surface normals")
-    
-    for i, normal in enumerate(normals):
-        norm_length = np.linalg.norm(normal)
-        print(f"   Normal {i+1}: ({normal[0]:6.3f}, {normal[1]:6.3f}, {normal[2]:6.3f}) | length: {norm_length:.6f}")
-    
     # Test frame transformations
-    print("\n9. Testing frame transformations...")
+    print("\n8. Testing frame transformations...")
     n_transform = min(20, len(points))
     test_points = points[:n_transform]
     
@@ -133,7 +120,7 @@ def test_parameterization(ply_file_path):
     print(f"   Max reconstruction error: {np.max(transform_errors):.10f}")
     
     # Generate example scanning path
-    print("\n10. Generating example scanning path...")
+    print("\n9. Generating example scanning path...")
     num_passes = 5
     points_per_pass = 10
     path_uv = []
@@ -150,7 +137,6 @@ def test_parameterization(ply_file_path):
     
     path_uv = np.array(path_uv)
     path_3d = surf.interpolate(path_uv)
-    path_normals = surf.compute_surface_normals(path_uv)
     path_length = np.sum(np.linalg.norm(np.diff(path_3d, axis=0), axis=1))
     
     print(f"   Generated scanning path")
@@ -166,7 +152,6 @@ def test_parameterization(ply_file_path):
     print(f"  • UV parameterization: {uv.shape}")
     print(f"  • Quality RMSE: {metrics['rmse']:.6f}")
     print(f"  • Interpolation: Working")
-    print(f"  • Surface normals: Working")
     print(f"  • Frame transformations: Working")
     print(f"  • Path generation: Working")
     print("\n" + "=" * 70)

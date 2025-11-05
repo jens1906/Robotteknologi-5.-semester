@@ -190,48 +190,6 @@ class SurfaceParameterization:
         
         return xyz
     
-    def compute_surface_normals(self, uv_query):
-        """
-        Compute surface normals at parameter space coordinates.
-        
-        Args:
-            uv_query: Nx2 array of (u,v) coordinates
-            
-        Returns:
-            normals: Nx3 array of normalized surface normals
-        """
-        if not self.is_ready:
-            raise ValueError("Interpolation not ready. Call build_inverse_interpolation() first.")
-        
-        uv_query = np.atleast_2d(uv_query)
-        normals = np.zeros((len(uv_query), 3))
-        
-        # Use adaptive epsilon based on UV range
-        uv_range = np.max(self.uv_params, axis=0) - np.min(self.uv_params, axis=0)
-        epsilon = np.maximum(uv_range * 1e-4, 1e-5)
-        
-        for i, uv in enumerate(uv_query):
-            u, v = uv
-            
-            # Compute partial derivatives
-            uv_du = np.array([[u + epsilon[0], v]])
-            p_du = self.interpolate(uv_du)[0] - self.interpolate(uv.reshape(1, -1))[0]
-            p_du = p_du / epsilon[0]
-            
-            uv_dv = np.array([[u, v + epsilon[1]]])
-            p_dv = self.interpolate(uv_dv)[0] - self.interpolate(uv.reshape(1, -1))[0]
-            p_dv = p_dv / epsilon[1]
-            
-            # Cross product for normal
-            normal = np.cross(p_du, p_dv)
-            norm = np.linalg.norm(normal)
-            if norm > 0:
-                normals[i] = normal / norm
-            else:
-                normals[i] = np.array([0, 0, 1])
-        
-        return normals
-    
     def get_uv_bounds(self):
         """
         Get the bounds of the parameter space.
