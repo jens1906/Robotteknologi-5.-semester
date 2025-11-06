@@ -145,6 +145,7 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3):
     
     return path_xyz, orientations
 
+
 if ROS2_AVAILABLE:
     class ToolOrientationNode(Node):
         def __init__(self):
@@ -153,14 +154,14 @@ if ROS2_AVAILABLE:
             #Publisher for positions and rotation matrices
             self.trajectory_pub = self.create_publisher(
                 Float64MultiArray,
-                'tool_trajectory',
+                '/tool_orientation/XYZ_with_rotation',
                 10
             )
             
             #Subscriber for input path points
             self.path_sub = self.create_subscription(
                 Float64MultiArray,
-                'input_path',
+                '/path/xyz_path',
                 self.path_callback,
                 10
             )
@@ -170,12 +171,12 @@ if ROS2_AVAILABLE:
             self.declare_parameter('neighbor_range', 3)
             
             self.get_logger().info('Tool Orientation Node initialized')
-            self.get_logger().info('Waiting for path on topic: /input_path')
+            self.get_logger().info('Waiting for path on topic: /path/xyz_path')
         
         def path_callback(self, msg):
             #Callback for receiving path points and computing orientations
             #Expected input: Float64MultiArray with [x1, y1, z1, x2, y2, z2, ...]
-            
+            self.get_logger().info(f'Received path on topic: /path/xyz_path')
             #Extract parameters
             dt = self.get_parameter('dt').value
             neighbor_range = self.get_parameter('neighbor_range').value
