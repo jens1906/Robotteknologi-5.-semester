@@ -25,17 +25,17 @@ class UserInterfaceNode(Node):
         super().__init__('user_interface')
         self.signal_emitter = signal_emitter
         self.ui_instance = ui_instance  # Reference to UserInterface for state access
-        self.ui_corrosion_area_accept_pub = self.create_publisher(Bool, 'ui_corrosion_area_accept_pub', 10)
-        self.ui_corrosion_area_add_pub = self.create_publisher(Image, 'ui_corrosion_area_add_pub', 10)
-        self.ui_corrosion_area_remove_pub = self.create_publisher(Image, 'ui_corrosion_area_remove_pub', 10)
-        self.ui_home_position_pub = self.create_publisher(Bool, 'ui_home_position_pub', 10)
-        self.ui_emergency_stop_pub = self.create_publisher(Bool, 'ui_emergency_stop_pub', 10)
-        self.ui_terminate_pub = self.create_publisher(Bool, 'ui_terminate_pub', 10)
+        self.ui_corrosion_area_accept_pub = self.create_publisher(Bool, '/ui/corrosion_area_accept_pub', 10)
+        self.ui_corrosion_area_add_pub = self.create_publisher(Image, '/ui/corrosion_area_add_pub', 10)
+        self.ui_corrosion_area_remove_pub = self.create_publisher(Image, '/ui/corrosion_area_remove_pub', 10)
+        self.ui_home_position_pub = self.create_publisher(Bool, '/ui/home_position_pub', 10)
+        self.ui_emergency_stop_pub = self.create_publisher(Bool, '/ui/emergency_stop_pub', 10)
+        self.ui_terminate_pub = self.create_publisher(Bool, '/ui/terminate_pub', 10)
 
-        self.corrosion_thresholding_pub = self.create_subscription(Image, 'corrosion_thresholding_pub', self.corrosion_thresholding_callback, 10)
-        self.ROBODK_completion_notification = self.create_subscription(Bool, 'ROBODK_completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
-        color_sub = message_filters.Subscriber(self, Image, 'realsense_camera_color_pub')
-        depth_sub = message_filters.Subscriber(self, Image, 'realsense_camera_depth_pub')         
+        self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, 10)
+        self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
+        color_sub = message_filters.Subscriber(self, Image, '/realsense/camera_color_pub')
+        depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub')
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
 
@@ -43,16 +43,16 @@ class UserInterfaceNode(Node):
         self.get_logger().info('User Interface Node Initialized')
 
     def image_match(self, color_msg, depth_msg):
-        #if printlogger: self.get_logger().info(f'Image and depth matched {color_msg.header.stamp.sec}.{color_msg.header.stamp.nanosec}')
         color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
-        if self.ui_instance and self.ui_instance.detection_state == 0 and self.ui_instance.camera_type == 0:
+        
+        # Show color or depth based on camera_type
+        if self.ui_instance.camera_type == 0 and self.ui_instance.detection_state == 0:
             self.signal_emitter.data_signal.emit(f"Color: {depth_image.shape[1]}x{depth_image.shape[0]}")
             self.signal_emitter.image_signal.emit(color_image)
-        elif self.ui_instance and self.ui_instance.camera_type == 1:
+        elif self.ui_instance.camera_type == 1 and self.ui_instance.detection_state == 1:
             self.signal_emitter.data_signal.emit(f"Depth: {depth_image.shape[1]}x{depth_image.shape[0]}")
             self.signal_emitter.image_signal.emit(depth_image)
-        # Process images as needed (don't display with cv.imshow in Qt app)
 
     def corrosion_thresholding_callback(self, msg):
         corrosion_image = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
@@ -231,8 +231,11 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info(f'Tab changed to {index}')
         if index == 0:
             self.camera_type = 0
+            self.detection_state = 0  # Show color feed on Movement tab
         elif index == 1:
-            self.detection_state = 1
+            self.detection_state = 1  # Show thresholded feed on Vision tab
+        elif index == 2:
+            pass  # System Information tab
 
 
 

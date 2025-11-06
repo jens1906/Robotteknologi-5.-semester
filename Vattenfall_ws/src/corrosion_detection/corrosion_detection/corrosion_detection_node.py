@@ -16,21 +16,24 @@ class CorrosionDetector(Node):
     def __init__(self):
         super().__init__('corrosion_detector')
 
-        self.corrosion_scatter_plot = self.create_publisher(Float32MultiArray, 'corrosion_scatter_plot_pub', 10)
-        self.corrosion_thresholding = self.create_publisher(Image, 'corrosion_thresholding_pub', 10)
+        self.corrosion_scatter_plot = self.create_publisher(Float32MultiArray, '/corrosion/scatter_plot_pub', 10)
+        self.corrosion_thresholding = self.create_publisher(Image, '/corrosion/thresholding_pub', 10)
 
         # Subscribe to both topics
-        color_sub = message_filters.Subscriber(self, Image, 'realsense_camera_color_pub')
-        depth_sub = message_filters.Subscriber(self, Image, 'realsense_camera_depth_pub')
-         
+        color_sub = message_filters.Subscriber(self, Image, '/realsense/camera_color_pub')
+        depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub')
+
         # Synchronize them based on timestamps
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
 
-        self.ui_corrosion_area_accept_sub = self.create_subscription(Bool, 'ui_corrosion_area_accept_pub', self.ui_corrosion_area_accept_callback, 10)        
-        self.ui_corrosion_add_sub = self.create_subscription(Image, 'ui_corrosion_area_add_pub', self.ui_corrosion_add_callback, 10)
-        self.ui_corrosion_remove_sub = self.create_subscription(Image, 'ui_corrosion_area_remove_pub', self.ui_corrosion_remove_callback, 10)
-        self.ROBODK_completion_notification = self.create_subscription(Bool, 'ROBODK_completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
+        self.ui_corrosion_area_accept_sub = self.create_subscription(Bool, '/ui/corrosion_area_accept_pub', self.ui_corrosion_area_accept_callback, 10)        
+        self.ui_corrosion_add_sub = self.create_subscription(Image, '/ui/corrosion_area_add_pub', self.ui_corrosion_add_callback, 10)
+        self.ui_corrosion_remove_sub = self.create_subscription(Image, '/ui/corrosion_area_remove_pub', self.ui_corrosion_remove_callback, 10)
+        self.ui_emergency_stop_sub = self.create_subscription(Bool, '/ui/emergency_stop_pub', self.ui_emergency_stop_callback, 10)
+        self.ui_terminate_pub_sub = self.create_subscription(Bool, '/ui/terminate_pub', self.ui_terminate_callback, 10)
+
+        self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
         self.corrosion_accepted = False  # in __init__
         self.running_status = False #To help with make a pipeline
 
@@ -49,6 +52,16 @@ class CorrosionDetector(Node):
             self.get_logger().info('ROBODK has completed the path, ready for new corrosion area')
             self.get_logger().info(f'State: corrosion_accepted={self.corrosion_accepted}, running_status={self.running_status}')
 
+    def ui_emergency_stop_callback(self, msg):
+        self.running_status = False
+        self.corrosion_accepted = False
+        self.get_logger().info('Emergency stop received, stopping corrosion detection')
+        self.get_logger().info(f'State: corrosion_accepted={self.corrosion_accepted}, running_status={self.running_status}')
+    
+    def ui_terminate_callback(self, msg):
+        self.running_status = False
+        self.corrosion_accepted = False
+        self.get_logger().info('Terminate command received, shutting down node')
 
     def ui_corrosion_add_callback(self, msg):
         self.ui_corrosion_add = msg.data
@@ -83,13 +96,6 @@ class CorrosionDetector(Node):
             color_threshold_image[edge > 0] = [0, 255, 0]
             self.corrosion_thresholding.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
 
-            # Show images(Remove in production)
-            if showImages:
-                cv.imshow('Color', color_image)
-                cv.imshow('Depth', depth_colormap)
-                cv.imshow('Thresholded', thresholded_image)
-                cv.imshow('Corrosion Area', color_threshold_image)
-                cv.waitKey(1)
         elif self.corrosion_accepted and self.running_status == False:
             self.running_status = True
             self.get_logger().info('Corrosion area accepted')
@@ -116,8 +122,6 @@ class CorrosionDetector(Node):
         
         combined_mask = cv.bitwise_and(thresh_h, cv.bitwise_and(thresh_s, thresh_v))
         thresh_hsv = cv.merge([combined_mask, combined_mask, combined_mask])
-        cv.imshow("Thresholded HSV", thresh_hsv)
-        cv.waitKey(1)
         return thresh_hsv
 
     def clean_image(self, image):

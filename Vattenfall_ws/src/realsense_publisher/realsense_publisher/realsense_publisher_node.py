@@ -16,8 +16,8 @@ test_depth = np.load('src/realsense_publisher/image/realsense_capture_20251027_1
 class RealSensePublisher(Node):
     def __init__(self):
         super().__init__('realsense_publisher')
-        self.color_pub = self.create_publisher(Image, 'realsense_camera_color_pub', 10)
-        self.depth_pub = self.create_publisher(Image, 'realsense_camera_depth_pub', 10)
+        self.color_pub = self.create_publisher(Image, '/realsense/camera_color_pub', 10)
+        self.depth_pub = self.create_publisher(Image, '/realsense/camera_depth_pub', 10)
 
         if not Test:
             self.pipeline = rs.pipeline()
