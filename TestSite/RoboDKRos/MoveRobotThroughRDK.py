@@ -29,7 +29,7 @@ if connected:
 
 # --- Common settings ---
 RDK.setSimulationSpeed(1)
-RDK.setCollisionActive(COLLISION_ON)
+#RDK.setCollisionActive(COLLISION_ON)
 
 print("-" * 50)
 
@@ -140,9 +140,25 @@ def get_global_curve_poses(curve_item):
 
     return poses_global
 
-global_poses = get_global_curve_poses(RDK.Item('Curve'))[0:-1]
+global_poses = get_global_curve_poses(RDK.Item('Curve'))[0:10]
 
-safe_move(robot, third, 'J')
+#replace the rotation part of currentpose with rot_matrix
+currentpose = Mat(robot.Pose())
+currentpose[0:3, 0:3] = first[0:3, 0:3]
+neworientation = currentpose
+
+target_joints = robot.SolveIK_All(neworientation)
+currentjoints = robot.Joints()
+for joint in target_joints:
+    col = robot.MoveJ_Test(currentjoints, joint)
+    robot.setJoints(currentjoints)
+    if col == 0:
+        print("Found valid joint solution:", joint)
+        break
+robot.MoveJ(joint, blocking=True)
+robot.MoveL(first, blocking=True)
+
+
 
 start = time.time()
 valid_joint_solutions = []
@@ -151,12 +167,9 @@ valid_joint_solutions = []
 totalstartjoing = robot.Joints()
 
 for pose in global_poses:
-    # Get all possible IK solutions for this pose
-    targetJoints_list = robot.SolveIK_All(pose)
-
-    for posjoint in targetJoints_list:
-        #collision = robot.MoveJ_Test(totalstartjoing, posjoint)
-        pass
+    #print("Processing pose:", pose)
+    #robot.MoveL(pose, blocking=True)
+    break
     
 
 
@@ -178,7 +191,7 @@ print(f"Found {len(valid_joint_solutions)} valid joint solutions in {end - start
 #    #robot.MoveJ(pose, blocking=True)
 
 
-
+"""
 Curve = RDK.Item('Curve')
 
 path_settings = RDK.AddMachiningProject("AutoCurveFollow settings")
@@ -222,7 +235,7 @@ prog, status = path_settings.setMachiningParameters(
 robot_prog = path_settings.getLink(robolink.ITEM_TYPE_PROGRAM)
 
 prog.RunCode()
-
+"""
 
 
 
