@@ -23,6 +23,12 @@ def generate_launch_description():
             output='screen',
         ),
         Node(
+            package='parameterization',
+            executable='parameterization_node',
+            name='parameterization',
+            output='screen',
+        ),
+        Node(
             package='tool_orientation',
             executable='tool_orientation_node',
             name='tool_orientation',
