@@ -1,0 +1,124 @@
+import sys
+try:
+    import cv2  # type: ignore
+except Exception:
+    cv2 = None  # Fallback when OpenCV is not installed
+    print("Notice: OpenCV (cv2) is not installed. Video will be disabled.\nInstall with: pip install opencv-python")
+from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen
+
+# Use the generated Python class from the .ui (GUI.py), not the .ui XML directly
+try:
+    # When running as part of the user_interface package
+    from user_interface.GUI import Ui_MainWindow  # type: ignore
+except Exception:
+    # Fallback when running this file directly from the folder
+    from GUI import Ui_MainWindow  # type: ignore
+
+class VideoOverlay(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.start_point = None
+        self.end_point = None
+        self.drawing = False
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.start_point = event.pos()
+            self.drawing = True
+
+    def mouseMoveEvent(self, event):
+        if self.drawing:
+            self.end_point = event.pos()
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drawing = False
+            self.end_point = event.pos()
+            self.update()
+
+    def paintEvent(self, event):
+        # Draw the frame
+        super().paintEvent(event)
+
+        # Draw overlays
+        if self.start_point and self.end_point:
+            painter = QPainter(self)
+            pen = QPen(Qt.GlobalColor.red, 3, Qt.PenStyle.SolidLine)
+            painter.setPen(pen)
+            painter.drawRect(
+                min(self.start_point.x(), self.end_point.x()),
+                min(self.start_point.y(), self.end_point.y()),
+                abs(self.start_point.x() - self.end_point.x()),
+                abs(self.start_point.y() - self.end_point.y()),
+            )
+            painter.end()
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
+
+        # Replace videoLabel with overlay widget
+        self.overlay = VideoOverlay(self.ui.videoLabel)
+        self.overlay.setGeometry(self.ui.videoLabel.rect())
+        self.overlay.show()
+        # Initialize webcam if OpenCV is available
+        self.cap = None
+        if cv2 is not None:
+            self.cap = cv2.VideoCapture(0)
+            if not self.cap.isOpened():
+                print("Warning: Could not open default camera (index 0)")
+                self.cap = None
+
+        # Timer to update video frames (always created so UI remains responsive)
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_frame)
+        self.timer.start(30)
+
+    def update_frame(self):
+        if self.cap is None or cv2 is None:
+            return
+        ret, frame = self.cap.read()
+        if ret:
+            # Convert frame to RGB
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = frame.shape
+            bytes_per_line = ch * w
+            qimg = QImage(frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+            # Scale to fit the overlay area while keeping aspect ratio
+            pix = QPixmap.fromImage(qimg).scaled(
+                self.overlay.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.overlay.setPixmap(pix)
+
+    def closeEvent(self, event):
+        try:
+            if hasattr(self, "cap") and self.cap is not None:
+                self.cap.release()
+        except Exception:
+            pass
+        event.accept()
+
+    def resizeEvent(self, event):
+        # Keep the overlay fully covering the video label when the window/layout resizes
+        if self.overlay is not None and self.ui is not None:
+            self.overlay.setGeometry(self.ui.videoLabel.rect())
+        super().resizeEvent(event)
+
+
+def main():
+    app = QApplication(sys.argv)
+    win = MainWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

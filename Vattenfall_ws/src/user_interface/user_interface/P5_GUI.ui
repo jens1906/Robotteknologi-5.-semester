@@ -6,15 +6,21 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>820</width>
-    <height>645</height>
+    <width>800</width>
+    <height>480</height>
    </rect>
+  </property>
+  <property name="sizeIncrement">
+   <size>
+    <width>800</width>
+    <height>480</height>
+   </size>
   </property>
   <property name="windowTitle">
    <string>MainWindow</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QVBoxLayout" name="verticalLayout_2" stretch="5,1">
+   <layout class="QVBoxLayout" name="verticalLayout_2" stretch="4,0">
     <item>
      <widget class="QLabel" name="videoLabel">
       <property name="sizePolicy">
@@ -29,7 +35,7 @@
      </widget>
     </item>
     <item>
-     <layout class="QHBoxLayout" name="horizontalLayout_3">
+     <layout class="QHBoxLayout" name="horizontalLayout_3" stretch="2,2,0">
       <item>
        <widget class="QPushButton" name="Emergency_Stop">
         <property name="sizePolicy">
@@ -42,9 +48,9 @@
          <string notr="true">QPushButton {
     background-color: red;
     color: black;
-    border-radius: 70px;     /* half of width/height */
-    width: 140px;
-    height: 140px;
+    border-radius: 50px;     /* half of width/height */
+    width: 100px;
+    height: 100px;
     border: none;
 }
 
@@ -198,10 +204,16 @@ QPushButton:pressed {
           </property>
           <item>
            <layout class="QHBoxLayout" name="horizontalLayout_2" stretch="1,0,1,0,1,0,1,0,0,0,1">
+            <property name="spacing">
+             <number>0</number>
+            </property>
+            <property name="sizeConstraint">
+             <enum>QLayout::SizeConstraint::SetDefaultConstraint</enum>
+            </property>
             <item>
              <widget class="QPushButton" name="Switch_Camera_Type">
               <property name="sizePolicy">
-               <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+               <sizepolicy hsizetype="MinimumExpanding" vsizetype="Preferred">
                 <horstretch>1</horstretch>
                 <verstretch>0</verstretch>
                </sizepolicy>
@@ -213,7 +225,8 @@ QPushButton:pressed {
                </size>
               </property>
               <property name="text">
-               <string>Switch Camera Type</string>
+               <string>Switch
+Camera Type</string>
               </property>
              </widget>
             </item>
@@ -236,7 +249,7 @@ QPushButton:pressed {
             <item>
              <widget class="QPushButton" name="Reset">
               <property name="sizePolicy">
-               <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+               <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
                 <horstretch>1</horstretch>
                 <verstretch>0</verstretch>
                </sizepolicy>
@@ -265,7 +278,7 @@ QPushButton:pressed {
             <item>
              <widget class="QPushButton" name="Undo">
               <property name="sizePolicy">
-               <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+               <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
                 <horstretch>1</horstretch>
                 <verstretch>0</verstretch>
                </sizepolicy>
@@ -294,7 +307,7 @@ QPushButton:pressed {
             <item>
              <widget class="QPushButton" name="Eraser">
               <property name="sizePolicy">
-               <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+               <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
                 <horstretch>1</horstretch>
                 <verstretch>0</verstretch>
                </sizepolicy>
@@ -600,7 +613,7 @@ QPushButton {
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>820</width>
+     <width>800</width>
      <height>33</height>
     </rect>
    </property>
