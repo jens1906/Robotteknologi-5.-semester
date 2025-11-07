@@ -54,7 +54,7 @@ class UserInterfaceNode(Node):
             h, w = color_image.shape[:2]
             self.ui_instance.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
             self.ui_instance.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
-            self.get_logger().info(f"Initialized corrosion_area_add and corrosion_area_remove with shape: {(h, w)}")
+            self.get_logger().info(f"Initialized corrosion_area_add and corrosion_area_remove with shape: {(h, w)} and {color_image.shape}")
         # Show color or depth based on camera_type
         if self.ui_instance.camera_type == 0 and self.ui_instance.detection_state == 0:
             self.signal_emitter.data_signal.emit(f"Color: {depth_image.shape[1]}x{depth_image.shape[0]}")
@@ -276,7 +276,7 @@ class UserInterface(QMainWindow):
     def on_image_dragged(self, x, y, button):
         """Handle image drag events"""
         message = f'Image dragged at ({x}, {y}) with {button} button'
-        print(f"[DRAG]  {message}")
+        self.ros_node.get_logger().info(f"[DRAG]  {message}")
         if printlogger: self.ros_node.get_logger().info(message)
 
 
