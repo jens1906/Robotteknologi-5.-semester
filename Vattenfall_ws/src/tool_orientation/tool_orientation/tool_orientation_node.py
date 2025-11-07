@@ -154,7 +154,7 @@ if ROS2_AVAILABLE:
             #Publisher for positions and rotation matrices
             self.trajectory_pub = self.create_publisher(
                 Float64MultiArray,
-                '/tool_orientation/XYZ_with_rotation',
+                '/tool_orientation/xyz_rotation',
                 10
             )
             
