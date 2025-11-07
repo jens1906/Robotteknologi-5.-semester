@@ -1,87 +1,105 @@
 from robodk.robolink import *
 from robodk.robomath import *
-import robolink
-import CurvePlotter 
-import numpy as np
 import time
 
-# --- Connect to RoboDK ---
+#-------------------------------------------
+# Connect to RoboDK
+#-------------------------------------------
 RDK = Robolink()
+
+# Get the robot (change the name if needed)
 robot = RDK.Item('UR3e', ITEM_TYPE_ROBOT)
 
-# --- Try to connect to the real robot ---
-connected = False    
-if connected:
-    try:
-        # Try to connect to the robot
-        #robot.Connect()
-        status, status_msg = robot.ConnectedState()
-        if status == ROBOTCOM_READY:
-            connected = True
-            RDK.setRunMode(RUNMODE_RUN_ROBOT)
-            print("✅ Connected to the real robot.")
-        else:
-            RDK.setRunMode(RUNMODE_SIMULATE)
-            print("⚠️ Could not connect to the real robot. Running in simulation mode.")
-    except Exception as e:
-        RDK.setRunMode(RUNMODE_SIMULATE)
-        print(f"⚠️ Connection failed: {e}\nRunning in simulation mode.")
+if not robot.Valid():
+    print("Robot not found! Make sure RoboDK is running and the robot is loaded.")
+    print("Available robots:")
+    for item in RDK.ItemList(ITEM_TYPE_ROBOT):
+        print(f"  - {item.Name()}")
+    exit()
+else:
+    robot.Connect()
+    print(f"Connected to robot: {robot.Name()}")
 
+<<<<<<< Updated upstream
 # --- Common settings ---
 RDK.setSimulationSpeed(1)
 #RDK.setCollisionActive(COLLISION_ON)
+=======
+#-------------------------------------------
+# Optional: move robot to a start position
+#-------------------------------------------
+joint_target = [0.0, -90.0, -90.0, 0.0, 90.0, 0.0]
+#robot.MoveL(joint_target)
+>>>>>>> Stashed changes
 
-print("-" * 50)
+#-------------------------------------------
+# Move to a base pose if desired
+#-------------------------------------------
+target_pose = Mat([
+    [1.0, 0.0, 0.0, 100],
+    [0.0, 1.0, 0.0, -300],
+    [0.0, 0.0, 1.0, 400.0],
+    [0.0, 0.0, 0.0, 1.0]
+])
+#robot.MoveL(target_pose)
 
+#---------------------------------
+# Get the curve object and project
+#---------------------------------
+#---------------------------------
+# Find the real curve object inside RoboDK
+#---------------------------------
+def find_valid_curve(rdk: Robolink, name: str):
+    """Recursively search for a valid object containing curve geometry."""
+    candidates = rdk.ItemList(ITEM_TYPE_OBJECT)
+    for c in candidates:
+        if name.lower() in c.Name().lower():
+            # Make sure it actually has curves
+            linked_curves = c.ObjectLink()
+            if len(linked_curves) > 0 or c.Valid():
+                print(f"✅ Found valid curve object: {c.Name()}")
+                return c
+    raise Exception(f"❌ No valid curve geometry found matching '{name}'")
 
-# --- Safe move wrapper ---
-def safe_move(robot: Item, target: Mat, move_type: str = 'J'):
-    if type(target) == Mat:
-        pass
-    elif type(target) is list:
-        target = robot.SolveFK(target)
+curve_object = find_valid_curve(RDK, '6DOF_ScanPattern_RZ45deg')
 
-    move_type = move_type.upper()
-    if move_type not in ['J', 'L', 'C']:
-        raise ValueError("Invalid move_type. Use 'J', 'L', or 'C'.")
+if not curve_object.Valid():
+    raise Exception("Curve object '6DOF_ScanPattern_RZ45deg' not found!")
 
-    joints_current = robot.Joints()
-    joints_target = robot.SolveIK(target)
+# Create or get the Curve Follow project
+curve_follow_project = RDK.Item('CurveFollow', ITEM_TYPE_PROGRAM)
+if not curve_follow_project.Valid():
+    curve_follow_project = RDK.AddMachiningProject("CurveFollow")
 
-    if not joints_target:
-        print("❌ No IK solution found!")
-        return False
+#---------------------------------
+# Configure the curve follow project
+#---------------------------------
+# This sets the path parameters for the curve-follow project automatically
+prog, status = curve_follow_project.setMachiningParameters(part=curve_object, params="ReorderAuto=0")
 
-    # Path test before execution
-    if move_type == 'J':
-        test_failed = robot.MoveJ_Test(joints_current, joints_target)
-    elif move_type == 'L':
-        for joints in joints_target:
-            pose_target = robot.SolveFK(joints)
-            test_failed = robot.MoveL_Test(joints_current, pose_target)
-            if test_failed == -1:
-                print("❌ No valid path found for linear move, switching to joint move.")
-                safe_move(robot, target, 'J')
-                return True
-    else:
-        print("MoveC not implemented for poses")
-        return False
+# Link the robot to the project
+curve_follow_project.setLink(robot)
 
-    if test_failed != 0:
-        print("⚠️ No valid path found or collision predicted! Move aborted.")
-        robot.setJoints(joints_current)  # Reset to current joints after test
-        return False
+# Optionally set the tool and reference frame if needed:
+# curve_follow_project.setPoseTool(robot.PoseTool())
+# curve_follow_project.setPoseFrame(robot.PoseFrame())
 
-    # Execute move
-    robot.setJoints(joints_current)  # Reset to current joints after test
-    if move_type == 'J':
-        robot.MoveJ(joints_target, blocking=True)
-    elif move_type == 'L':
-        robot.MoveL(joints_target, blocking=True)
+#---------------------------------
+# Simulate first in RoboDK
+#---------------------------------
+print("Simulating curve follow...")
+curve_follow_project.RunProgram()  # runs the project in simulation mode
+while curve_follow_project.Busy():
+    time.sleep(0.1)
 
-    print("✅ Move completed successfully.")
-    return True
+#---------------------------------
+# Run the same path on the real robot
+#---------------------------------
+print("Running on real robot...")
+robot.Connect()  # make sure connection is alive
+curve_follow_project.RunCode('', True)  # run directly on connected robot
 
+<<<<<<< Updated upstream
 
 # --- Example poses ---
 first = transl(-100, -300, 600)
@@ -244,3 +262,6 @@ if connected:
     print("🔌 Disconnecting from real robot...")
     #robot.Disconnect()
     print("✅ Disconnected.")
+=======
+print("Done.")
+>>>>>>> Stashed changes
