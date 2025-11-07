@@ -44,12 +44,6 @@ class PathPlanner(Node):
         # Publishers
         self.uv_path_pub = self.create_publisher(Float64MultiArray, '/path/uv_path', 10)
 
-        self.xyz_path_pub = self.create_publisher(
-            Float64MultiArray,
-            '/path/xyz_path',
-            10
-        )
-
 
     def uv_callback(self, msg):
         """Receive UV data and generate path."""
@@ -152,12 +146,6 @@ class PathPlanner(Node):
             uv_msg.data = uv_path.flatten().tolist()
             self.uv_path_pub.publish(uv_msg)
             self.get_logger().info(f'Published UV path: {len(uv_path)} points')
-            
-            # Publish XYZ path (parameterization node will populate this)
-            xyz_msg = Float64MultiArray()
-            xyz_msg.data = uv_path.flatten().tolist()
-            self.xyz_path_pub.publish(xyz_msg)
-            self.get_logger().info(f'Published XYZ path placeholder: {len(uv_path)} points')
         
         except Exception as e:
             self.get_logger().error(f"Error: publish_path(): {e}")
