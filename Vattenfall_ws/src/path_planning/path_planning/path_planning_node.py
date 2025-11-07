@@ -31,7 +31,7 @@ class PathPlanner(Node):
         self.d = 0.05
         self.n_bezier = 50
         self.line_n = 10
-        self.b = self.d / 2
+        self.bezier_curviture = self.d / 2
         self.tau = np.linspace(0, 1, self.n_bezier)
 
         # Data holders
@@ -56,10 +56,9 @@ class PathPlanner(Node):
         except Exception as e:
             self.get_logger().error(f"Error: uv_callback(): {e}")
 
-    @staticmethod
-    def cubic_bezier(tau, b0, b1, b2, b3):
+    def cubic_bezier(self, b0, b1, b2, b3):
         """Cubic Bézier curve."""
-        t = tau[:, None]
+        t = self.tau[:, None]
         return (1-t)**3 * b0 + 3*(1-t)**2 * t * b1 + 3*(1-t)*t**2 * b2 + t**3 * b3
 
     def generate_zigzag_paths(self):
@@ -77,8 +76,7 @@ class PathPlanner(Node):
             u_lin = np.linspace(u_min, u_max, self.line_n)
             v_lin = np.linspace(v_min, v_max, self.line_n)
 
-            u_lines = []
-            v_lines = []
+            u_lines, v_lines = [], []
 
             for i, u in enumerate(u_lin):
                 v_line = v_lin if i % 2 == 0 else v_lin[::-1]
@@ -122,11 +120,11 @@ class PathPlanner(Node):
 
                     if norm_curr > 1e-6 and norm_next > 1e-6:
                         b0 = end
-                        b1 = end + self.b * vec_curr / norm_curr
-                        b2 = next_start - self.b * vec_next / norm_next
+                        b1 = end + self.bezier_curviture * vec_curr / norm_curr
+                        b2 = next_start - self.bezier_curviture * vec_next / norm_next
                         b3 = next_start
 
-                        path.append(self.cubic_bezier(self.tau, b0, b1, b2, b3))
+                        path.append(self.cubic_bezier(b0, b1, b2, b3))
 
             return np.vstack(path)
     
