@@ -9,9 +9,8 @@ interpolation and surface normal computation services.
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import PointCloud2
 from geometry_msgs.msg import Point
-from std_msgs.msg import Header, Float64MultiArray
+from std_msgs.msg import Header, Float64MultiArray, Float32MultiArray
 import numpy as np
 
 from parameterization.msg import ParameterizationStatus, UVPoint
@@ -20,33 +19,12 @@ from parameterization.srv import InterpolatePoint, GetUVBounds
 # Import the parameterization module
 from parameterization.surface_parameterization import SurfaceParameterization
 
-
-def pointcloud2_to_xyz(cloud_msg):
-    """
-    Convert PointCloud2 message to numpy array of XYZ points.
-    
-    Args:
-        cloud_msg: sensor_msgs.msg.PointCloud2
-        
-    Returns:
-        points: Nx3 numpy array
-    """
-    import sensor_msgs_py.point_cloud2 as pc2
-    
-    # Extract XYZ points from PointCloud2
-    points_list = []
-    for point in pc2.read_points(cloud_msg, field_names=("x", "y", "z"), skip_nans=True):
-        points_list.append([point[0], point[1], point[2]])
-    
-    return np.array(points_list, dtype=np.float64)
-
-
 class ParameterizationNode(Node):
     """
     ROS 2 Node for surface parameterization.
     
     Subscribes to:
-        - /point_cloud (sensor_msgs/PointCloud2): Input point cloud
+        - /corrosion/scatter_plot_pub (std_msgs/Float32MultiArray): Input XYZ points from corrosion detection
         
     Publishes:
         - /parameterization/status (ParameterizationStatus): Status and quality metrics
@@ -83,11 +61,11 @@ class ParameterizationNode(Node):
         # Initialize parameterization
         self.surf = SurfaceParameterization()
         
-        # Create subscriber
-        self.point_cloud_sub = self.create_subscription(
-            PointCloud2,
-            '/point_cloud',
-            self.point_cloud_callback,
+        # Create subscriber for corrosion scatter plot
+        self.scatter_plot_sub = self.create_subscription(
+            Float32MultiArray,
+            '/corrosion/scatter_plot_pub',
+            self.scatter_plot_callback,
             10
         )
         
@@ -129,20 +107,28 @@ class ParameterizationNode(Node):
         self.get_logger().info(f'  Neighbors: {self.neighbors}')
         self.get_logger().info(f'  Normalize: {self.normalize}')
     
-    def point_cloud_callback(self, msg):
+    def scatter_plot_callback(self, msg):
         """
-        Callback for point cloud messages.
-        Processes the point cloud and builds parameterization.
+        Callback for scatter plot messages from corrosion detection.
+        Processes the XYZ points and builds parameterization.
         """
         try:
-            self.get_logger().info('Received point cloud, processing...')
+            self.get_logger().info('Received scatter plot data, processing...')
             
-            # Convert PointCloud2 to numpy array
-            points = pointcloud2_to_xyz(msg)
+            # Convert Float32MultiArray to numpy array
+            # The data is expected to be flattened XYZ points: [x1, y1, z1, x2, y2, z2, ...]
+            data = np.array(msg.data, dtype=np.float64)
             
-            if len(points) == 0:
-                self.get_logger().error('Received empty point cloud')
+            if len(data) == 0:
+                self.get_logger().error('Received empty scatter plot data')
                 return
+            
+            # Reshape to Nx3 array (each row is [x, y, z])
+            if len(data) % 3 != 0:
+                self.get_logger().error(f'Invalid data length: {len(data)} (must be multiple of 3)')
+                return
+            
+            points = data.reshape(-1, 3)
             
             self.get_logger().info(f'Processing {len(points)} points')
             
@@ -189,7 +175,7 @@ class ParameterizationNode(Node):
             self.get_logger().info(f'Published UV parameters: {len(self.surf.uv_params)} points')
             
         except Exception as e:
-            self.get_logger().error(f'Error processing point cloud: {str(e)}')
+            self.get_logger().error(f'Error processing scatter plot: {str(e)}')
             import traceback
             self.get_logger().error(traceback.format_exc())
     
