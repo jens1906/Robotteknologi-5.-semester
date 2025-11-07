@@ -34,14 +34,12 @@ class CorrosionDetector(Node):
         self.ui_terminate_pub_sub = self.create_subscription(Bool, '/ui/terminate_pub', self.ui_terminate_callback, 10)
 
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
-        self.corrosion_accepted = False  # in __init__
-        self.running_status = False #To help with make a pipeline
+        self.corrosion_accepted = False  
+        self.running_status = False 
 
-        # Needs to be changed
-        if printlogger: self.get_logger().info('Waiting for synchronized images...')
+        if printlogger: self.get_logger().info('Initialized Corrosion Detector Node')
 
     def ui_corrosion_area_accept_callback(self, msg):
-        # Receive UI command
         self.corrosion_accepted = msg.data
         if printlogger: self.get_logger().info(f'UI command received: {self.corrosion_accepted}')
 
@@ -49,19 +47,22 @@ class CorrosionDetector(Node):
         if msg.data == True:
             self.running_status = False
             self.corrosion_accepted = False
-            self.get_logger().info('ROBODK has completed the path, ready for new corrosion area')
-            self.get_logger().info(f'State: corrosion_accepted={self.corrosion_accepted}, running_status={self.running_status}')
+            if printlogger:
+               self.get_logger().info('ROBODK has completed the path, ready for new corrosion area')
+        if printlogger:
+           self.get_logger().info(f'State: corrosion_accepted={self.corrosion_accepted}, running_status={self.running_status}')
 
     def ui_emergency_stop_callback(self, msg):
         self.running_status = False
         self.corrosion_accepted = False
         self.get_logger().info('Emergency stop received, stopping corrosion detection')
-        self.get_logger().info(f'State: corrosion_accepted={self.corrosion_accepted}, running_status={self.running_status}')
-    
+        if printlogger:
+           self.get_logger().info(f'State: corrosion_accepted={self.corrosion_accepted}, running_status={self.running_status}')
+
     def ui_terminate_callback(self, msg):
         self.running_status = False
         self.corrosion_accepted = False
-        self.get_logger().info('Terminate command received, shutting down node')
+        self.get_logger().info('Terminate command received, stopping activities')
 
     def ui_corrosion_add_callback(self, msg):
         self.ui_corrosion_add = msg.data
@@ -72,6 +73,7 @@ class CorrosionDetector(Node):
         if printlogger: self.get_logger().info('UI command received: Remove corrosion area')
 
     def numpy_to_image_msg(self, img, encoding):
+        #Might be possible to shorten with the use of CvBridge
         msg = Image()
         msg.height = img.shape[0]
         msg.width = img.shape[1]
@@ -87,25 +89,20 @@ class CorrosionDetector(Node):
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
 
         if not self.corrosion_accepted or self.corrosion_accepted is None:
-            depth_colormap = cv.applyColorMap(cv.convertScaleAbs(depth_image, alpha=0.03), cv.COLORMAP_JET)
-
-            # Publish thresholded image
             thresholded_image = self.threshold_corrosion(color_image)
             color_threshold_image = color_image.copy()
             edge = cv.Canny(thresholded_image, 100, 200)
             color_threshold_image[edge > 0] = [0, 255, 0]
             self.corrosion_thresholding.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
-
         elif self.corrosion_accepted and self.running_status == False:
             self.running_status = True
-            self.get_logger().info('Corrosion area accepted')
             xyz_data = self.combine_and_transform(self.edge_to_scatter_plot(color_image), depth_image)
             msg = Float32MultiArray()
             msg.data = xyz_data.flatten().tolist()
             self.corrosion_scatter_plot.publish(msg)
+            if printlogger: self.get_logger().info('Corrosion area accepted')
         else:
-            self.get_logger().info(f'Corrosion detection is already running, wait for ROBODK to complete {self.corrosion_accepted} {self.running_status}')
-            #self.get_logger().info('A mistake has happened with UI command')
+            if printlogger: self.get_logger().info(f'Corrosion detection is already running, wait for ROBODK to complete {self.corrosion_accepted} {self.running_status}')
     
     def threshold_corrosion(self, image):
         # Thresholding in HSV color space to detect corrosion
