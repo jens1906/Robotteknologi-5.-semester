@@ -5,16 +5,17 @@ import threading
 import numpy as np
 import message_filters
 from rclpy.node import Node
+from pathlib import Path
 from std_msgs.msg import Bool
 from sensor_msgs.msg import Image
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtGui import QImage, QPixmap, QFont
 from user_interface.GUI import Ui_MainWindow
 from PyQt6.QtCore import pyqtSignal, QObject, Qt
-from PyQt6.QtWidgets import QApplication, QMainWindow
+from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel
 
 Test = True
 showImages = True
-printlogger = True
+printlogger = False
 
 class RosSignalEmitter(QObject):
     data_signal = pyqtSignal(str)           
@@ -38,6 +39,7 @@ class UserInterfaceNode(Node):
         depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub')
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
+        
 
         # Initialize UI components here (e.g., publishers/subscribers for UI commands)
         self.get_logger().info('User Interface Node Initialized')
@@ -46,6 +48,13 @@ class UserInterfaceNode(Node):
         color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
         
+
+        # Allocate corrosion_area_add and corrosion_area_remove only once on first image match
+        if self.ui_instance.corrosion_area_add is None:
+            h, w = color_image.shape[:2]
+            self.ui_instance.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
+            self.ui_instance.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
+            self.get_logger().info(f"Initialized corrosion_area_add and corrosion_area_remove with shape: {(h, w)}")
         # Show color or depth based on camera_type
         if self.ui_instance.camera_type == 0 and self.ui_instance.detection_state == 0:
             self.signal_emitter.data_signal.emit(f"Color: {depth_image.shape[1]}x{depth_image.shape[0]}")
@@ -53,6 +62,7 @@ class UserInterfaceNode(Node):
         elif self.ui_instance.camera_type == 1 and self.ui_instance.detection_state == 1:
             self.signal_emitter.data_signal.emit(f"Depth: {depth_image.shape[1]}x{depth_image.shape[0]}")
             self.signal_emitter.image_signal.emit(depth_image)
+        
 
     def corrosion_thresholding_callback(self, msg):
         corrosion_image = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
@@ -95,6 +105,10 @@ class UserInterface(QMainWindow):
         self.detection_state = 0 
         self.camera_type = 0
         
+        # Create single-channel image variables (will be dynamically sized)
+        self.corrosion_area_add = None
+        self.corrosion_area_remove = None
+        
         self.ui.RUN_1.clicked.connect(self.run_robot)
         self.ui.RUN_2.clicked.connect(self.run_robot)
         self.ui.Undo.clicked.connect(self.undo_action)
@@ -115,6 +129,8 @@ class UserInterface(QMainWindow):
         self.signal_emitter.data_signal.connect(self.on_data)
         self.signal_emitter.image_signal.connect(self.update_video_frame)
         self.ros_node = UserInterfaceNode(self.signal_emitter, self)  # Pass self for state access
+    
+        self.ui.videoLabel.dragged.connect(self.on_image_dragged)
     
     def customize_tabs(self):
         tabbar = self.ui.tabWidget.tabBar()
@@ -247,6 +263,21 @@ class UserInterface(QMainWindow):
         scaled = pixmap.scaled(self.ui.videoLabel.size(), Qt.AspectRatioMode.KeepAspectRatio,
                                Qt.TransformationMode.SmoothTransformation)
         self.ui.videoLabel.setPixmap(scaled)
+        
+        # Set the actual image dimensions for coordinate mapping
+        self.ui.videoLabel.set_image_dimensions(w, h)
+
+    def on_image_clicked(self, x, y, button):
+        """Handle image click events"""
+        message = f'Image clicked at ({x}, {y}) with {button} button'
+        #print(f"[CLICK] {message}")
+        if printlogger: self.ros_node.get_logger().info(message)
+
+    def on_image_dragged(self, x, y, button):
+        """Handle image drag events"""
+        message = f'Image dragged at ({x}, {y}) with {button} button'
+        print(f"[DRAG]  {message}")
+        if printlogger: self.ros_node.get_logger().info(message)
 
 
 def main():

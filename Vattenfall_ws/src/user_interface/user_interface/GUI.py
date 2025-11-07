@@ -8,6 +8,7 @@
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from user_interface.joystick import Joystick
+from user_interface.clickable_label import ClickableImageLabel
 
 
 class Ui_MainWindow(object):
@@ -18,7 +19,7 @@ class Ui_MainWindow(object):
         self.centralwidget.setObjectName("centralwidget")
         self.verticalLayout_2 = QtWidgets.QVBoxLayout(self.centralwidget)
         self.verticalLayout_2.setObjectName("verticalLayout_2")
-        self.videoLabel = QtWidgets.QLabel(parent=self.centralwidget)
+        self.videoLabel = ClickableImageLabel(parent=self.centralwidget)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
