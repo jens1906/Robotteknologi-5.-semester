@@ -23,7 +23,6 @@ class Joystick(QWidget):
         bounds = QRectF(-self.__maxDistance, -self.__maxDistance,
                         self.__maxDistance * 2, self.__maxDistance * 2).translated(self._center())
         painter.drawEllipse(bounds)
-        # In PyQt6 use GlobalColor for standard colors
         painter.setBrush(Qt.GlobalColor.black)
         painter.drawEllipse(self._centerEllipse())
 
