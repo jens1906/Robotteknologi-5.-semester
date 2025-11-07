@@ -17,6 +17,7 @@ Test = True
 showImages = True
 printlogger = False
 
+
 class RosSignalEmitter(QObject):
     data_signal = pyqtSignal(str)           
     image_signal = pyqtSignal(object)       
@@ -104,6 +105,8 @@ class UserInterface(QMainWindow):
         self.ui.setupUi(self)
         self.detection_state = 0 
         self.camera_type = 0
+        self.tabindex = 0  # Track current tab index
+        self.pen_size_and_type = [0,0]  # [size, type]
         
         # Create single-channel image variables (will be dynamically sized)
         self.corrosion_area_add = None
@@ -226,9 +229,11 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info('Undoing last action')
 
     def erase_area(self):
-        if printlogger: self.ros_node.get_logger().info('Erase area requested')
+        self.pen_size_and_type[1] = 1 - self.pen_size_and_type[1]
+        if printlogger: self.ros_node.get_logger().info(f'Erase area requested{"" if self.pen_size_and_type[1] == 0 else " (Eraser Mode)"}')
 
     def set_custom_pen(self, size):
+        self.pen_size_and_type[0] = size
         if printlogger: self.ros_node.get_logger().info(f'Set pen size to {size}')
 
     def tab_difference(self, index):
@@ -236,9 +241,12 @@ class UserInterface(QMainWindow):
         if index == 0:
             self.camera_type = 0
             self.detection_state = 0  # Show color feed on Movement tab
+            self.tabindex = index
         elif index == 1:
             self.detection_state = 1  # Show thresholded feed on Vision tab
+            self.tabindex = index
         elif index == 2:
+            self.detection_state = 2  # Show color feed on System Information tab
             pass  # System Information tab
 
     def on_data(self, data):
@@ -276,8 +284,35 @@ class UserInterface(QMainWindow):
     def on_image_dragged(self, x, y, button):
         """Handle image drag events"""
         message = f'Image dragged at ({x}, {y}) with {button} button'
-        self.ros_node.get_logger().info(f"[DRAG]  {message}")
-        if printlogger: self.ros_node.get_logger().info(message)
+        # Only print if on Vision tab, camera is color (0), and detection is enabled (1)
+        if self.detection_state == 1 and self.camera_type == 0 and self.tabindex == 1 and self.set_custom_pen[0] in [0, 1, 2]:
+            pen_kernel_sizes = [np.ones((5, 5), np.uint8), np.ones((10, 10), np.uint8), np.ones((20, 20), np.uint8)]
+            if self.set_custom_pen[1]==1:
+                pen_kernel_sizes = [np.ones((5, 5), np.uint8), np.ones((10, 10), np.uint8), np.ones((20, 20), np.uint8)]
+            elif self.set_custom_pen[1] == 0:
+                pen_kernel_sizes = [np.zeros((5, 5), np.uint8), np.zeros((10, 10), np.uint8), np.zeros((20, 20), np.uint8)]
+
+            '''
+            Apply the pen action based on size and type THIS IS THE NEXT STEP
+            '''
+            if self.set_custom_pen[0] == 0:
+
+                pass  # Default pen action
+            elif self.set_custom_pen[0] == 1:
+                pass
+            elif self.set_custom_pen[0] == 2:
+                pass
+
+
+
+
+            self.ros_node.get_logger().info(message)
+        
+
+
+
+
+            if printlogger: self.ros_node.get_logger().info(message)
 
 
 def main():
