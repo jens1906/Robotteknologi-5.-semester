@@ -40,9 +40,11 @@ class PathPlanner(Node):
 
         # Subscribe to UV parameterization data
         self.create_subscription(Float64MultiArray, '/parameterization/param_uv', self.uv_callback, 10)
+        self.create_subscription(Float64MultiArray, '/parameterization/param_uv', self.uv_callback, 10)
+
 
         # Publisher for UV path
-        self.uv_path_pub = self.create_publisher(Float64MultiArray, '/path/uv_path', 10)
+        self.uv_path_pub = self.create_publisher(Float64MultiArray, '/path/xyz_path', 10)
 
 
     def uv_callback(self, msg):
