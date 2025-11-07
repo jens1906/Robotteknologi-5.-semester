@@ -14,7 +14,8 @@ from user_interface.clickable_label import ClickableImageLabel
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
-        MainWindow.resize(820, 645)
+        MainWindow.resize(800, 480)
+        MainWindow.setSizeIncrement(QtCore.QSize(800, 480))
         self.centralwidget = QtWidgets.QWidget(parent=MainWindow)
         self.centralwidget.setObjectName("centralwidget")
         self.verticalLayout_2 = QtWidgets.QVBoxLayout(self.centralwidget)
@@ -25,6 +26,9 @@ class Ui_MainWindow(object):
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.videoLabel.sizePolicy().hasHeightForWidth())
         self.videoLabel.setSizePolicy(sizePolicy)
+        self.videoLabel.setMouseTracking(True)
+        self.videoLabel.setTabletTracking(False)
+        self.videoLabel.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
         self.videoLabel.setObjectName("videoLabel")
         self.verticalLayout_2.addWidget(self.videoLabel)
         self.horizontalLayout_3 = QtWidgets.QHBoxLayout()
@@ -38,9 +42,9 @@ class Ui_MainWindow(object):
         self.Emergency_Stop.setStyleSheet("QPushButton {\n"
 "    background-color: red;\n"
 "    color: black;\n"
-"    border-radius: 70px;     /* half of width/height */\n"
-"    width: 140px;\n"
-"    height: 140px;\n"
+"    border-radius: 50px;     /* half of width/height */\n"
+"    width: 100px;\n"
+"    height: 100px;\n"
 "    border: none;\n"
 "}\n"
 "\n"
@@ -69,6 +73,7 @@ class Ui_MainWindow(object):
         self.tab.setSizePolicy(sizePolicy)
         self.tab.setObjectName("tab")
         self.verticalLayout_3 = QtWidgets.QVBoxLayout(self.tab)
+        self.verticalLayout_3.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetNoConstraint)
         self.verticalLayout_3.setObjectName("verticalLayout_3")
         self.horizontalLayout = QtWidgets.QHBoxLayout()
         self.horizontalLayout.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetDefaultConstraint)
@@ -124,11 +129,14 @@ class Ui_MainWindow(object):
         self.tab_2.setSizePolicy(sizePolicy)
         self.tab_2.setObjectName("tab_2")
         self.horizontalLayout_4 = QtWidgets.QHBoxLayout(self.tab_2)
+        self.horizontalLayout_4.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetNoConstraint)
         self.horizontalLayout_4.setObjectName("horizontalLayout_4")
         self.horizontalLayout_2 = QtWidgets.QHBoxLayout()
+        self.horizontalLayout_2.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetDefaultConstraint)
+        self.horizontalLayout_2.setSpacing(0)
         self.horizontalLayout_2.setObjectName("horizontalLayout_2")
         self.Switch_Camera_Type = QtWidgets.QPushButton(parent=self.tab_2)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.MinimumExpanding, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(1)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.Switch_Camera_Type.sizePolicy().hasHeightForWidth())
@@ -139,7 +147,7 @@ class Ui_MainWindow(object):
         spacerItem2 = QtWidgets.QSpacerItem(20, 20, QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Minimum)
         self.horizontalLayout_2.addItem(spacerItem2)
         self.Reset = QtWidgets.QPushButton(parent=self.tab_2)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(1)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.Reset.sizePolicy().hasHeightForWidth())
@@ -149,7 +157,7 @@ class Ui_MainWindow(object):
         spacerItem3 = QtWidgets.QSpacerItem(20, 20, QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Minimum)
         self.horizontalLayout_2.addItem(spacerItem3)
         self.Undo = QtWidgets.QPushButton(parent=self.tab_2)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(1)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.Undo.sizePolicy().hasHeightForWidth())
@@ -159,7 +167,7 @@ class Ui_MainWindow(object):
         spacerItem4 = QtWidgets.QSpacerItem(20, 20, QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Minimum)
         self.horizontalLayout_2.addItem(spacerItem4)
         self.Eraser = QtWidgets.QPushButton(parent=self.tab_2)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
+        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Policy.Maximum, QtWidgets.QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(1)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.Eraser.sizePolicy().hasHeightForWidth())
@@ -223,6 +231,7 @@ class Ui_MainWindow(object):
         self.tab_3.setSizePolicy(sizePolicy)
         self.tab_3.setObjectName("tab_3")
         self.horizontalLayout_5 = QtWidgets.QHBoxLayout(self.tab_3)
+        self.horizontalLayout_5.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetNoConstraint)
         self.horizontalLayout_5.setObjectName("horizontalLayout_5")
         self.sysinfoLabel = QtWidgets.QLabel(parent=self.tab_3)
         self.sysinfoLabel.setObjectName("sysinfoLabel")
@@ -315,12 +324,13 @@ class Ui_MainWindow(object):
         self.verticalLayout_5.setStretch(1, 1)
         self.stackedWidget.addWidget(self.page_2)
         self.horizontalLayout_3.addWidget(self.stackedWidget)
+        self.horizontalLayout_3.setStretch(0, 2)
+        self.horizontalLayout_3.setStretch(1, 2)
         self.verticalLayout_2.addLayout(self.horizontalLayout_3)
-        self.verticalLayout_2.setStretch(0, 5)
-        self.verticalLayout_2.setStretch(1, 1)
+        self.verticalLayout_2.setStretch(0, 4)
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 820, 33))
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 800, 33))
         self.menubar.setObjectName("menubar")
         MainWindow.setMenuBar(self.menubar)
         self.statusbar = QtWidgets.QStatusBar(parent=MainWindow)
@@ -341,7 +351,8 @@ class Ui_MainWindow(object):
         self.Vision_State.setText(_translate("MainWindow", "Vision State"))
         self.RUN_2.setText(_translate("MainWindow", "RUN"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab), _translate("MainWindow", "Movement"))
-        self.Switch_Camera_Type.setText(_translate("MainWindow", "Switch Camera Type"))
+        self.Switch_Camera_Type.setText(_translate("MainWindow", "Switch\n"
+"Camera Type"))
         self.Reset.setText(_translate("MainWindow", "Reset"))
         self.Undo.setText(_translate("MainWindow", "Undo"))
         self.Eraser.setText(_translate("MainWindow", "Eraser"))
