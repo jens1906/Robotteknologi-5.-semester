@@ -38,13 +38,17 @@ class PathPlanner(Node):
         self.uv_data = None
         self.paths_uv = None
 
-        # Subscribe to UV parameterization data
-        self.create_subscription(Float64MultiArray, '/parameterization/param_uv', self.uv_callback, 10)
+        # Subscribers
         self.create_subscription(Float64MultiArray, '/parameterization/param_uv', self.uv_callback, 10)
 
+        # Publishers
+        self.uv_path_pub = self.create_publisher(Float64MultiArray, '/path/uv_path', 10)
 
-        # Publisher for UV path
-        self.uv_path_pub = self.create_publisher(Float64MultiArray, '/path/xyz_path', 10)
+        self.xyz_path_pub = self.create_publisher(
+            Float64MultiArray,
+            '/path/xyz_path',
+            10
+        )
 
 
     def uv_callback(self, msg):
@@ -56,10 +60,12 @@ class PathPlanner(Node):
         except Exception as e:
             self.get_logger().error(f"Error: uv_callback(): {e}")
 
+
     def cubic_bezier(self, b0, b1, b2, b3):
         """Cubic Bézier curve."""
         t = self.tau[:, None]
         return (1-t)**3 * b0 + 3*(1-t)**2 * t * b1 + 3*(1-t)*t**2 * b2 + t**3 * b3
+
 
     def generate_zigzag_paths(self):
         """Generate zigzag lines in UV space."""
@@ -87,6 +93,7 @@ class PathPlanner(Node):
 
         except Exception as e:
             self.get_logger().error(f"Error: generate_zigzag_paths(): {e}")
+
 
     def create_continuous_path(self):
         """Create continuous path with Bézier smoothing."""
@@ -132,19 +139,29 @@ class PathPlanner(Node):
             self.get_logger().error(f"Error in create_continuous_path: {str(e)}")
             return None
 
+
     def publish_path(self):
-        """Generate and publish path."""
+        """Generate and publish UV path."""
         try:
-            path = self.create_continuous_path()
-            if path is None:
+            uv_path = self.create_continuous_path()
+            if uv_path is None:
                 raise ValueError("Error: publish_path(): Path generation failed.")
             
-            msg = Float64MultiArray()
-            msg.data = path.flatten().tolist()
-            self.uv_path_pub.publish(msg)
+            # Publish UV path
+            uv_msg = Float64MultiArray()
+            uv_msg.data = uv_path.flatten().tolist()
+            self.uv_path_pub.publish(uv_msg)
+            self.get_logger().info(f'Published UV path: {len(uv_path)} points')
+            
+            # Publish XYZ path (parameterization node will populate this)
+            xyz_msg = Float64MultiArray()
+            xyz_msg.data = uv_path.flatten().tolist()
+            self.xyz_path_pub.publish(xyz_msg)
+            self.get_logger().info(f'Published XYZ path placeholder: {len(uv_path)} points')
         
         except Exception as e:
             self.get_logger().error(f"Error: publish_path(): {e}")
+
 
 def main():
     try:
