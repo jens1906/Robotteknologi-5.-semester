@@ -80,8 +80,8 @@ QPushButton:pressed {
 </string>
         </property>
         <property name="text">
-         <string>Emergency
-Stop</string>
+         <string>EMERGENCY
+STOP</string>
         </property>
        </widget>
       </item>
