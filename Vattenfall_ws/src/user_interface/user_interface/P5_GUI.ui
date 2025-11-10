@@ -515,6 +515,9 @@ QPushButton {
         </widget>
         <widget class="QWidget" name="page_2">
          <layout class="QVBoxLayout" name="verticalLayout_5" stretch="5,1">
+          <property name="spacing">
+           <number>0</number>
+          </property>
           <property name="leftMargin">
            <number>0</number>
           </property>
