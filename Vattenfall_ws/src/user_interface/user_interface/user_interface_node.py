@@ -5,6 +5,7 @@ import threading
 import numpy as np
 import message_filters
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 from pathlib import Path
 from std_msgs.msg import Bool
 from sensor_msgs.msg import Image
@@ -27,17 +28,26 @@ class UserInterfaceNode(Node):
         super().__init__('user_interface')
         self.signal_emitter = signal_emitter
         self.ui_instance = ui_instance
+        
+        # QoS profile for image topics (best effort for network transmission)
+        image_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        
         self.ui_terminate_pub = self.create_publisher(Bool, '/ui/terminate_pub', 10)
         self.ui_home_position_pub = self.create_publisher(Bool, '/ui/home_position_pub', 10)
         self.ui_emergency_stop_pub = self.create_publisher(Bool, '/ui/emergency_stop_pub', 10)
-        self.ui_corrosion_area_add_pub = self.create_publisher(Image, '/ui/corrosion_area_add_pub', 10)
+        self.ui_corrosion_area_add_pub = self.create_publisher(Image, '/ui/corrosion_area_add_pub', image_qos)
         self.ui_corrosion_area_accept_pub = self.create_publisher(Bool, '/ui/corrosion_area_accept_pub', 10)
-        self.ui_corrosion_area_remove_pub = self.create_publisher(Image, '/ui/corrosion_area_remove_pub', 10)
+        self.ui_corrosion_area_remove_pub = self.create_publisher(Image, '/ui/corrosion_area_remove_pub', image_qos)
 
-        self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, 10)
+        self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
-        color_sub = message_filters.Subscriber(self, Image, '/realsense/camera_color_pub')
-        depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub')
+        color_sub = message_filters.Subscriber(self, Image, '/realsense/camera_color_pub', qos_profile=image_qos)
+        depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub', qos_profile=image_qos)
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
         

@@ -5,6 +5,7 @@ if Test == False:
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 from sensor_msgs.msg import Image
 import cv2 as cv
 
@@ -16,16 +17,30 @@ test_depth = np.load('src/realsense_publisher/image/realsense_capture_20251027_1
 class RealSensePublisher(Node):
     def __init__(self):
         super().__init__('realsense_publisher')
-        self.color_pub = self.create_publisher(Image, '/realsense/camera_color_pub', 10)
-        self.depth_pub = self.create_publisher(Image, '/realsense/camera_depth_pub', 10)
+        
+        # QoS profile for image topics (best effort for network transmission)
+        image_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        
+        self.color_pub = self.create_publisher(Image, '/realsense/camera_color_pub', image_qos)
+        self.depth_pub = self.create_publisher(Image, '/realsense/camera_depth_pub', image_qos)
 
         if not Test:
+            # Real camera handles 30 fps natively
             self.pipeline = rs.pipeline()
             config = rs.config()
             config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
             config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
             self.pipeline.start(config)
-        self.timer = self.create_timer(0.033, self.publish_frames)
+            # Use callback immediately when camera data is ready
+            self.timer = self.create_timer(0.001, self.publish_frames)
+        else:
+            # Test mode: limit to 30 fps (timer at 30 Hz)
+            self.timer = self.create_timer(0.033, self.publish_frames)  # 1/30 = 0.0333 seconds
     
     def numpy_to_image_msg(self, img, encoding):
         msg = Image()
