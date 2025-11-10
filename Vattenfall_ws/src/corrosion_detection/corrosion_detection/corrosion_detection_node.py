@@ -17,7 +17,8 @@ class CorrosionDetector(Node):
         super().__init__('corrosion_detector')
         self.corrosion_thresholding = self.create_publisher(Image, '/corrosion/thresholding_pub', 10)
         self.corrosion_scatter_plot = self.create_publisher(Float32MultiArray, '/corrosion/scatter_plot_pub', 10)
-
+        self.ui_corrosion_add = np.zeros((480, 640), np.uint8)
+        self.ui_corrosion_remove = np.zeros((480, 640), np.uint8)
         # Subscribers
         self.ui_corrosion_area_accept_sub = self.create_subscription(Bool, '/ui/corrosion_area_accept_pub', self.ui_corrosion_area_accept_callback, 10)        
         self.ui_corrosion_add_sub = self.create_subscription(Image, '/ui/corrosion_area_add_pub', self.ui_corrosion_add_callback, 10)
@@ -60,12 +61,21 @@ class CorrosionDetector(Node):
         self.corrosion_accepted = False
         self.get_logger().info('Terminate command received, stopping activities')
 
+    def image_msg_to_numpy(self, msg):
+        """Convert ROS Image message to numpy array."""
+        if msg.encoding == 'mono8':
+            # Single channel uint8
+            return np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width)
+        else:
+            raise ValueError(f"Unsupported encoding: {msg.encoding}")
+
     def ui_corrosion_add_callback(self, msg):
-        self.ui_corrosion_add = msg.data
+        self.ui_corrosion_add = self.image_msg_to_numpy(msg)
+
         if printlogger: self.get_logger().info('UI command received: Add corrosion area')
 
     def ui_corrosion_remove_callback(self, msg):
-        self.ui_corrosion_remove = msg.data
+        self.ui_corrosion_remove = self.image_msg_to_numpy(msg)
         if printlogger: self.get_logger().info('UI command received: Remove corrosion area')
 
     def numpy_to_image_msg(self, img, encoding):
@@ -87,8 +97,24 @@ class CorrosionDetector(Node):
         if not self.corrosion_accepted or self.corrosion_accepted is None:
             thresholded_image = self.threshold_corrosion(color_image)
             color_threshold_image = color_image.copy()
-            edge = cv.Canny(thresholded_image, 100, 200)
+
+            # Convert threshold to grayscale (single channel)
+            thresh_gray = cv.cvtColor(thresholded_image, cv.COLOR_BGR2GRAY)
+
+            # Combine: add UI painted areas, remove UI erased areas
+            combined_mask = cv.bitwise_or(thresh_gray, self.ui_corrosion_add)
+            combined_mask = cv.bitwise_and(combined_mask, cv.bitwise_not(self.ui_corrosion_remove))
+
+            # Clean the combined mask (your existing morphology)
+            cleaned_mask = self.clean_image(cv.merge([combined_mask, combined_mask, combined_mask]))
+            cleaned_gray = cv.cvtColor(cleaned_mask, cv.COLOR_BGR2GRAY)
+
+            # Edge detection on the cleaned, combined mask
+            edge = cv.Canny(cleaned_gray, 100, 200)
+
+            # Overlay green edges on original color image
             color_threshold_image[edge > 0] = [0, 255, 0]
+
             self.corrosion_thresholding.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
         elif self.corrosion_accepted and self.running_status == False:
             self.running_status = True
