@@ -1,20 +1,22 @@
-import rclpy
 import sys
-import threading
-from rclpy.node import Node
-from sensor_msgs.msg import Image
-from std_msgs.msg import Bool
-from PyQt6.QtWidgets import QApplication, QMainWindow
-from PyQt6.QtCore import pyqtSignal, QObject, Qt
-from PyQt6.QtGui import QImage, QPixmap
-from user_interface.GUI import Ui_MainWindow
-import numpy as np
+import rclpy
 import cv2 as cv
+import threading
+import numpy as np
 import message_filters
+from rclpy.node import Node
+from pathlib import Path
+from std_msgs.msg import Bool
+from sensor_msgs.msg import Image
+from PyQt6.QtGui import QImage, QPixmap, QFont
+from user_interface.GUI import Ui_MainWindow
+from PyQt6.QtCore import pyqtSignal, QObject, Qt
+from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel
 
 Test = True
-printlogger = True
 showImages = True
+printlogger = False
+
 
 class RosSignalEmitter(QObject):
     data_signal = pyqtSignal(str)           
@@ -24,13 +26,13 @@ class UserInterfaceNode(Node):
     def __init__(self, signal_emitter, ui_instance=None):
         super().__init__('user_interface')
         self.signal_emitter = signal_emitter
-        self.ui_instance = ui_instance  # Reference to UserInterface for state access
-        self.ui_corrosion_area_accept_pub = self.create_publisher(Bool, '/ui/corrosion_area_accept_pub', 10)
-        self.ui_corrosion_area_add_pub = self.create_publisher(Image, '/ui/corrosion_area_add_pub', 10)
-        self.ui_corrosion_area_remove_pub = self.create_publisher(Image, '/ui/corrosion_area_remove_pub', 10)
+        self.ui_instance = ui_instance
+        self.ui_terminate_pub = self.create_publisher(Bool, '/ui/terminate_pub', 10)
         self.ui_home_position_pub = self.create_publisher(Bool, '/ui/home_position_pub', 10)
         self.ui_emergency_stop_pub = self.create_publisher(Bool, '/ui/emergency_stop_pub', 10)
-        self.ui_terminate_pub = self.create_publisher(Bool, '/ui/terminate_pub', 10)
+        self.ui_corrosion_area_add_pub = self.create_publisher(Image, '/ui/corrosion_area_add_pub', 10)
+        self.ui_corrosion_area_accept_pub = self.create_publisher(Bool, '/ui/corrosion_area_accept_pub', 10)
+        self.ui_corrosion_area_remove_pub = self.create_publisher(Image, '/ui/corrosion_area_remove_pub', 10)
 
         self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, 10)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
@@ -38,6 +40,7 @@ class UserInterfaceNode(Node):
         depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub')
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
+        
 
         # Initialize UI components here (e.g., publishers/subscribers for UI commands)
         self.get_logger().info('User Interface Node Initialized')
@@ -46,6 +49,13 @@ class UserInterfaceNode(Node):
         color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
         
+
+        # Allocate corrosion_area_add and corrosion_area_remove only once on first image match
+        if self.ui_instance.corrosion_area_add is None:
+            h, w = color_image.shape[:2]
+            self.ui_instance.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
+            self.ui_instance.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
+            self.get_logger().info(f"Initialized corrosion_area_add and corrosion_area_remove with shape: {(h, w)} and {color_image.shape}")
         # Show color or depth based on camera_type
         if self.ui_instance.camera_type == 0 and self.ui_instance.detection_state == 0:
             self.signal_emitter.data_signal.emit(f"Color: {depth_image.shape[1]}x{depth_image.shape[0]}")
@@ -53,6 +63,7 @@ class UserInterfaceNode(Node):
         elif self.ui_instance.camera_type == 1 and self.ui_instance.detection_state == 1:
             self.signal_emitter.data_signal.emit(f"Depth: {depth_image.shape[1]}x{depth_image.shape[0]}")
             self.signal_emitter.image_signal.emit(depth_image)
+        
 
     def corrosion_thresholding_callback(self, msg):
         corrosion_image = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
@@ -60,36 +71,31 @@ class UserInterfaceNode(Node):
             self.signal_emitter.data_signal.emit(f"Thresholded: {msg.width}x{msg.height}")
             self.signal_emitter.image_signal.emit(corrosion_image)
 
-
     def ROBODK_completion_notification_callback(self, msg):
         if msg.data == True:
             self.currently_running = False
             if printlogger: self.get_logger().info('ROBODK has completed the path, ready for new corrosion area')
         elif msg.data == False:
             self.currently_running = True
-
-    
+            if printlogger: self.get_logger().info('ROBODK has started the path')
 
     def accept_corrosion_area(self, accept: bool):
         # Logic to accept or reject corrosion area
         accept_msg = Bool()
         accept_msg.data = True
         self.ui_corrosion_area_accept_pub.publish(accept_msg)
-  
         if printlogger: self.get_logger().info(f'Accepting corrosion area: {accept}')
 
     def erase_corrosion_area(self):
         # Logic to erase corrosion area
         erase_msg = Image()
         self.ui_corrosion_area_remove_pub.publish(erase_msg)
-
         if printlogger: self.get_logger().info('Erasing corrosion area')
 
     def add_corrosion_area(self):
         # Logic to add corrosion area
         add_msg = Image()
         self.ui_corrosion_area_add_pub.publish(add_msg)
-
         if printlogger: self.get_logger().info('Adding corrosion area')
 
 class UserInterface(QMainWindow):
@@ -97,56 +103,58 @@ class UserInterface(QMainWindow):
         super().__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
-        
-        # State variables
-        self.detection_state = 0  # 0 = Color, 1 = Thresholded
+        self.detection_state = 0 
         self.camera_type = 0
+        self.tabindex = 0  # Track current tab index
+        self.pen_size_and_type = [0,0]  # [size, type]
         
-        self.ui.videoLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ui.Emergency_Stop.clicked.connect(self.emergency_stop)
-        self.ui.Home_Position.clicked.connect(self.home_position)
+        # Create single-channel image variables (will be dynamically sized)
+        self.corrosion_area_add = None
+        self.corrosion_area_remove = None
+        
         self.ui.RUN_1.clicked.connect(self.run_robot)
         self.ui.RUN_2.clicked.connect(self.run_robot)
-        self.ui.Terminate.clicked.connect(self.terminate)
-        self.ui.Vision_State.clicked.connect(self.toggle_vision_state)
-        self.ui.Switch_Camera_Type.clicked.connect(self.switch_camera_type)
-        self.ui.Reset.clicked.connect(self.reset_vision)
         self.ui.Undo.clicked.connect(self.undo_action)
         self.ui.Eraser.clicked.connect(self.erase_area)
+        self.ui.Reset.clicked.connect(self.reset_vision)
+        self.ui.Terminate.clicked.connect(self.terminate)
+        self.ui.Home_Position.clicked.connect(self.home_position)
+        self.ui.Emergency_Stop.clicked.connect(self.emergency_stop)
+        self.ui.videoLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ui.Vision_State.clicked.connect(self.toggle_vision_state)
         self.ui.Small_Pen.clicked.connect(lambda: self.set_custom_pen(1))
-        self.ui.Medium_Pen.clicked.connect(lambda: self.set_custom_pen(2))
         self.ui.Large_Pen.clicked.connect(lambda: self.set_custom_pen(3))
-        if hasattr(self.ui, 'tabWidget'):
-            self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
-        # ROS setup
+        self.ui.Medium_Pen.clicked.connect(lambda: self.set_custom_pen(2))
+        self.ui.Switch_Camera_Type.clicked.connect(self.switch_camera_type)
+
+        self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
         self.signal_emitter = RosSignalEmitter()
         self.signal_emitter.data_signal.connect(self.on_data)
         self.signal_emitter.image_signal.connect(self.update_video_frame)
         self.ros_node = UserInterfaceNode(self.signal_emitter, self)  # Pass self for state access
     
+        self.ui.videoLabel.dragged.connect(self.on_image_dragged)
+    
     def customize_tabs(self):
-        if hasattr(self.ui, 'tabWidget'):
-            tabbar = self.ui.tabWidget.tabBar()
-            # Make tabs expand to fill the available width equally
-            tabbar.setExpanding(True)
+        tabbar = self.ui.tabWidget.tabBar()
+        tabbar.setExpanding(True)
+        
+        # Calculate equal width for each tab based on actual widget width
+        tab_count = self.ui.tabWidget.count()
+        if tab_count > 0:
+            tabbar.setTabsClosable(False)
             
-            # Calculate equal width for each tab based on actual widget width
-            tab_count = self.ui.tabWidget.count()
-            if tab_count > 0:
-                tabbar.setTabsClosable(False)
-                
-                # Get the actual width of the tab widget
-                tab_widget_width = self.ui.tabWidget.width()//3
-                width_per_tab = tab_widget_width // tab_count
-                
-                # Apply stylesheet with calculated pixel width
-                self.ui.tabWidget.setStyleSheet(f"""
-                    QTabBar::tab {{
-                        width: {tab_widget_width}px;
-                        min-width: {width_per_tab}px;
-                    }}
-                """)
-        # Note: Can't use logger here as ros_node isn't created yet
+            # Get the actual width of the tab widget
+            tab_widget_width = self.ui.tabWidget.width()//3
+            width_per_tab = tab_widget_width // tab_count
+            
+            # Apply stylesheet with calculated pixel width
+            self.ui.tabWidget.setStyleSheet(f"""
+                QTabBar::tab {{
+                    width: {tab_widget_width}px;
+                    min-width: {width_per_tab}px;
+                }}
+            """)
 
     def emergency_stop(self):
         msg = Bool()
@@ -164,9 +172,9 @@ class UserInterface(QMainWindow):
     def run_robot(self):
         msg = Bool()
         msg.data = True
-        self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
-        self.joystick_terminate_change_page(True)
         self.ui.stackedWidget.setCurrentIndex(0)
+        self.joystick_terminate_change_page(True)
+        self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
         if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
     
     def joystick_terminate_change_page(self, state = bool):
@@ -200,7 +208,6 @@ class UserInterface(QMainWindow):
             self.ui.Small_Pen.setStyleSheet("background-color: #ffffff;")
             self.ui.Medium_Pen.setStyleSheet("background-color: #ffffff;")
             self.ui.Large_Pen.setStyleSheet("background-color: #ffffff;")
-
             if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
         else:
             self.ui.Reset.setStyleSheet("background-color: #636363;")
@@ -222,9 +229,11 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info('Undoing last action')
 
     def erase_area(self):
-        if printlogger: self.ros_node.get_logger().info('Erase area requested')
+        self.pen_size_and_type[1] = 1 - self.pen_size_and_type[1]
+        if printlogger: self.ros_node.get_logger().info(f'Erase area requested{"" if self.pen_size_and_type[1] == 0 else " (Eraser Mode)"}')
 
     def set_custom_pen(self, size):
+        self.pen_size_and_type[0] = size
         if printlogger: self.ros_node.get_logger().info(f'Set pen size to {size}')
 
     def tab_difference(self, index):
@@ -232,16 +241,13 @@ class UserInterface(QMainWindow):
         if index == 0:
             self.camera_type = 0
             self.detection_state = 0  # Show color feed on Movement tab
+            self.tabindex = index
         elif index == 1:
             self.detection_state = 1  # Show thresholded feed on Vision tab
+            self.tabindex = index
         elif index == 2:
+            self.detection_state = 2  # Show color feed on System Information tab
             pass  # System Information tab
-
-
-
-
-
-
 
     def on_data(self, data):
         self.ui.videoLabel.setText(data)
@@ -253,22 +259,60 @@ class UserInterface(QMainWindow):
         
         # Handle both color (3D) and grayscale (2D) images
         if len(img.shape) == 3:
-            # Color image (BGR)
             h, w, ch = img.shape
             bytes_per_line = ch * w
             qimage = QImage(img.data.tobytes(), w, h, bytes_per_line, QImage.Format.Format_BGR888).copy()
         else:
-            # Grayscale image (2D)
             h, w = img.shape
             bytes_per_line = w
             qimage = QImage(img.data.tobytes(), w, h, bytes_per_line, QImage.Format.Format_Grayscale8).copy()
         
         pixmap = QPixmap.fromImage(qimage)
-        
         scaled = pixmap.scaled(self.ui.videoLabel.size(), Qt.AspectRatioMode.KeepAspectRatio,
                                Qt.TransformationMode.SmoothTransformation)
-        
         self.ui.videoLabel.setPixmap(scaled)
+        
+        # Set the actual image dimensions for coordinate mapping
+        self.ui.videoLabel.set_image_dimensions(w, h)
+
+    def on_image_clicked(self, x, y, button):
+        """Handle image click events"""
+        message = f'Image clicked at ({x}, {y}) with {button} button'
+        #print(f"[CLICK] {message}")
+        if printlogger: self.ros_node.get_logger().info(message)
+
+    def on_image_dragged(self, x, y, button):
+        """Handle image drag events"""
+        message = f'Image dragged at ({x}, {y}) with {button} button'
+        # Only print if on Vision tab, camera is color (0), and detection is enabled (1)
+        if self.detection_state == 1 and self.camera_type == 0 and self.tabindex == 1 and self.set_custom_pen[0] in [0, 1, 2]:
+            pen_kernel_sizes = [np.ones((5, 5), np.uint8), np.ones((10, 10), np.uint8), np.ones((20, 20), np.uint8)]
+            if self.set_custom_pen[1]==1:
+                pen_kernel_sizes = [np.ones((5, 5), np.uint8), np.ones((10, 10), np.uint8), np.ones((20, 20), np.uint8)]
+            elif self.set_custom_pen[1] == 0:
+                pen_kernel_sizes = [np.zeros((5, 5), np.uint8), np.zeros((10, 10), np.uint8), np.zeros((20, 20), np.uint8)]
+
+            '''
+            Apply the pen action based on size and type THIS IS THE NEXT STEP
+            '''
+            if self.set_custom_pen[0] == 0:
+
+                pass  # Default pen action
+            elif self.set_custom_pen[0] == 1:
+                pass
+            elif self.set_custom_pen[0] == 2:
+                pass
+
+
+
+
+            self.ros_node.get_logger().info(message)
+        
+
+
+
+
+            if printlogger: self.ros_node.get_logger().info(message)
 
 
 def main():
@@ -276,14 +320,9 @@ def main():
     app = QApplication(sys.argv)
     window = UserInterface()
     window.show()
-    
-    # Customize tabs AFTER window is shown and has proper dimensions
     window.customize_tabs()
-    
-    # Start ROS thread AFTER window is shown and Qt event loop is ready
     ros_thread = threading.Thread(target=lambda: rclpy.spin(window.ros_node), daemon=True)
     ros_thread.start()
-    
     sys.exit(app.exec())
     window.ros_node.destroy_node()
     rclpy.shutdown()

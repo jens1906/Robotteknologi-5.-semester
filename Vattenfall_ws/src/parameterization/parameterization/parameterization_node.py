@@ -76,10 +76,15 @@ class ParameterizationNode(Node):
             10
         )
 
-        # UV parameterization publisher
         self.param_uv_pub = self.create_publisher(
             Float64MultiArray,
             '/parameterization/param_uv',
+            10
+        )
+
+        self.xyz_path_pub = self.create_publisher(
+            Float64MultiArray,
+            '/path/xyz_path',
             10
         )
         
@@ -95,6 +100,14 @@ class ParameterizationNode(Node):
             '/parameterization/get_uv_bounds',
             self.get_uv_bounds_callback
         )
+
+        # Subscribe to UV path from path planner
+        self.create_subscription(
+            Float64MultiArray,
+            '/path/uv_path',
+            self.uv_path_callback,
+            10
+        )
         
         # Create timer for status publishing
         self.status_timer = self.create_timer(
@@ -107,6 +120,7 @@ class ParameterizationNode(Node):
         self.get_logger().info(f'  Neighbors: {self.neighbors}')
         self.get_logger().info(f'  Normalize: {self.normalize}')
     
+
     def scatter_plot_callback(self, msg):
         """
         Callback for scatter plot messages from corrosion detection.
@@ -179,6 +193,35 @@ class ParameterizationNode(Node):
             import traceback
             self.get_logger().error(traceback.format_exc())
     
+
+    def uv_path_callback(self, msg):
+        """Convert UV path to XYZ path."""
+        try:
+            if not self.surf.is_ready:
+                self.get_logger().warn('Parameterization not ready yet')
+                return
+            
+            # Convert message to UV array
+            uv_path = np.array(msg.data).reshape(-1, 2)
+            
+            if len(uv_path) == 0:
+                self.get_logger().warn('Received empty UV path')
+                return
+            
+            # Interpolate to XYZ
+            xyz_path = self.surf.interpolate(uv_path)
+            
+            # Publish result to path planner's XYZ topic
+            xyz_msg = Float64MultiArray()
+            xyz_msg.data = xyz_path.flatten().tolist()
+            self.xyz_path_pub.publish(xyz_msg)
+            
+            self.get_logger().info(f'Converted UV path to XYZ: {len(xyz_path)} points')
+        
+        except Exception as e:
+            self.get_logger().error(f'Error converting UV path: {str(e)}')
+
+
     def interpolate_callback(self, request, response):
         """
         Service callback for interpolation.
@@ -225,6 +268,7 @@ class ParameterizationNode(Node):
         
         return response
     
+
     def get_uv_bounds_callback(self, request, response):
         """
         Service callback for getting UV parameter space bounds.
@@ -251,6 +295,7 @@ class ParameterizationNode(Node):
         
         return response
     
+
     def publish_status(self):
         """
         Publish status message periodically.

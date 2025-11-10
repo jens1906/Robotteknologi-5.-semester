@@ -1,39 +1,35 @@
 import rclpy
+import cv2 as cv
+import numpy as np
+import message_filters
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float32MultiArray, Bool  
-import message_filters
-import numpy as np
-import cv2 as cv
 
-kernel = np.ones((5, 5), np.uint8)
 c = (480 / 2, 640 / 2)
+kernel = np.ones((5, 5), np.uint8)
 
-printlogger = False
 showImages = True
+printlogger = False
 
 class CorrosionDetector(Node):
     def __init__(self):
         super().__init__('corrosion_detector')
-
-        self.corrosion_scatter_plot = self.create_publisher(Float32MultiArray, '/corrosion/scatter_plot_pub', 10)
         self.corrosion_thresholding = self.create_publisher(Image, '/corrosion/thresholding_pub', 10)
+        self.corrosion_scatter_plot = self.create_publisher(Float32MultiArray, '/corrosion/scatter_plot_pub', 10)
 
-        # Subscribe to both topics
-        color_sub = message_filters.Subscriber(self, Image, '/realsense/camera_color_pub')
-        depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub')
-
-        # Synchronize them based on timestamps
-        sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
-        sync.registerCallback(self.image_match)
-
+        # Subscribers
         self.ui_corrosion_area_accept_sub = self.create_subscription(Bool, '/ui/corrosion_area_accept_pub', self.ui_corrosion_area_accept_callback, 10)        
         self.ui_corrosion_add_sub = self.create_subscription(Image, '/ui/corrosion_area_add_pub', self.ui_corrosion_add_callback, 10)
         self.ui_corrosion_remove_sub = self.create_subscription(Image, '/ui/corrosion_area_remove_pub', self.ui_corrosion_remove_callback, 10)
         self.ui_emergency_stop_sub = self.create_subscription(Bool, '/ui/emergency_stop_pub', self.ui_emergency_stop_callback, 10)
         self.ui_terminate_pub_sub = self.create_subscription(Bool, '/ui/terminate_pub', self.ui_terminate_callback, 10)
-
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
+        color_sub = message_filters.Subscriber(self, Image, '/realsense/camera_color_pub')
+        depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub')
+        sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
+        sync.registerCallback(self.image_match)
+
         self.corrosion_accepted = False  
         self.running_status = False 
 
