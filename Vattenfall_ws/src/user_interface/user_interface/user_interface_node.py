@@ -106,11 +106,14 @@ class UserInterface(QMainWindow):
         self.detection_state = 0 
         self.camera_type = 0
         self.tabindex = 0  # Track current tab index
-        self.pen_size_and_type = [0,0]  # [size, type]
+        self.pen_size_and_type = [0,1]  # [size, type]
         
         # Create single-channel image variables (will be dynamically sized)
+        self.undo_add_stack = []
+        self.undo_remove_stack = []
         self.corrosion_area_add = None
         self.corrosion_area_remove = None
+
         
         self.ui.RUN_1.clicked.connect(self.run_robot)
         self.ui.RUN_2.clicked.connect(self.run_robot)
@@ -122,9 +125,9 @@ class UserInterface(QMainWindow):
         self.ui.Emergency_Stop.clicked.connect(self.emergency_stop)
         self.ui.videoLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ui.Vision_State.clicked.connect(self.toggle_vision_state)
-        self.ui.Small_Pen.clicked.connect(lambda: self.set_custom_pen(1))
-        self.ui.Large_Pen.clicked.connect(lambda: self.set_custom_pen(3))
-        self.ui.Medium_Pen.clicked.connect(lambda: self.set_custom_pen(2))
+        self.ui.Small_Pen.clicked.connect(lambda: self.set_custom_pen(0))
+        self.ui.Medium_Pen.clicked.connect(lambda: self.set_custom_pen(1))
+        self.ui.Large_Pen.clicked.connect(lambda: self.set_custom_pen(2))
         self.ui.Switch_Camera_Type.clicked.connect(self.switch_camera_type)
 
         self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
@@ -133,6 +136,7 @@ class UserInterface(QMainWindow):
         self.signal_emitter.image_signal.connect(self.update_video_frame)
         self.ros_node = UserInterfaceNode(self.signal_emitter, self)  # Pass self for state access
     
+        self.ui.videoLabel.clicked.connect(self.on_image_clicked)
         self.ui.videoLabel.dragged.connect(self.on_image_dragged)
     
     def customize_tabs(self):
@@ -221,12 +225,36 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info(f'Switching Camera Type {self.camera_type}')
 
     def reset_vision(self):
+        self.ros_node.get_logger().info('Resetting vision areas')
+        h,w = self.corrosion_area_add.shape
+        self.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
+        self.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
+        msg = Image()
+        msg = self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8')
+        self.ros_node.ui_corrosion_area_remove_pub.publish(msg)
+        msg = Image()
+        msg = self.numpy_to_image_msg(self.corrosion_area_add, 'mono8')
+        self.ros_node.ui_corrosion_area_add_pub.publish(msg)
+
         # Reset vision logic
         if printlogger: self.ros_node.get_logger().info('Resetting Vision')
 
     def undo_action(self):
-        # Undo action logic
-        if printlogger: self.ros_node.get_logger().info('Undoing last action')
+        if len(self.undo_add_stack) > 0:
+            # Restore previous state
+            self.corrosion_area_add = self.undo_add_stack.pop()
+            self.corrosion_area_remove = self.undo_remove_stack.pop()
+            
+            # Publish updated masks
+            add_msg = self.numpy_to_image_msg(self.corrosion_area_add, 'mono8')
+            remove_msg = self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8')
+            self.ros_node.ui_corrosion_area_add_pub.publish(add_msg)
+            self.ros_node.ui_corrosion_area_remove_pub.publish(remove_msg)
+            
+            if printlogger:
+                self.ros_node.get_logger().info(f'Undo applied (stack size: {len(self.undo_add_stack)})')
+        else:
+            self.ros_node.get_logger().info('Nothing to undo')
 
     def erase_area(self):
         self.pen_size_and_type[1] = 1 - self.pen_size_and_type[1]
@@ -281,38 +309,81 @@ class UserInterface(QMainWindow):
         #print(f"[CLICK] {message}")
         if printlogger: self.ros_node.get_logger().info(message)
 
+    def place_kernel(self, img, kernel, x, y):
+        """Place kernel centered at (x,y) in img using loops."""
+        kernel_height, kernel_width = kernel.shape
+        img_height, img_width = img.shape
+        kernel_mid_y, kernel_mid_x = kernel_height // 2, kernel_width // 2
+
+        for kernel_pos_y in range(kernel_height):
+            for kernel_pos_x in range(kernel_width):
+                # Target position in image
+                img_y = y - kernel_mid_y + kernel_pos_y
+                img_x = x - kernel_mid_x + kernel_pos_x
+
+                # Skip if out of bounds
+                if 0 <= img_y < img_height and 0 <= img_x < img_width:
+                    img[img_y, img_x] = kernel[kernel_pos_y, kernel_pos_x]
+
+    def numpy_to_image_msg(self, img, encoding):
+        #Might be possible to shorten with the use of CvBridge
+        msg = Image()
+        msg.height = img.shape[0]
+        msg.width = img.shape[1]
+        msg.encoding = encoding
+        msg.is_bigendian = 0
+        msg.step = img.shape[1] * img.itemsize * (3 if len(img.shape) == 3 else 1)
+        msg.data = img.tobytes()
+        return msg
+
     def on_image_dragged(self, x, y, button):
         """Handle image drag events"""
-        message = f'Image dragged at ({x}, {y}) with {button} button'
-        # Only print if on Vision tab, camera is color (0), and detection is enabled (1)
-        if self.detection_state == 1 and self.camera_type == 0 and self.tabindex == 1 and self.set_custom_pen[0] in [0, 1, 2]:
-            pen_kernel_sizes = [np.ones((5, 5), np.uint8), np.ones((10, 10), np.uint8), np.ones((20, 20), np.uint8)]
-            if self.set_custom_pen[1]==1:
-                pen_kernel_sizes = [np.ones((5, 5), np.uint8), np.ones((10, 10), np.uint8), np.ones((20, 20), np.uint8)]
-            elif self.set_custom_pen[1] == 0:
-                pen_kernel_sizes = [np.zeros((5, 5), np.uint8), np.zeros((10, 10), np.uint8), np.zeros((20, 20), np.uint8)]
+        if self.detection_state == 1 and self.camera_type == 0 and self.tabindex == 1 and self.pen_size_and_type[0] in [0, 1, 2] and (self.pen_size_and_type[0] and self.pen_size_and_type[1]) is not None:
+            if printlogger: self.ros_node.get_logger().info(f'Pen size: {self.pen_size_and_type[0]}, Pen type: {self.pen_size_and_type[1]}')
+            self.pen_kernel_sizes = [   np.ones((5, 5), np.uint8) * 255,   
+                                        np.ones((10, 10), np.uint8) * 255,
+                                        np.ones((20, 20), np.uint8) * 255]            
+            msg = Image()
+            if self.pen_size_and_type[1]==1:
+                if printlogger: self.ros_node.get_logger().info("Using add kernels")
+                self.place_kernel(self.corrosion_area_add, self.pen_kernel_sizes[self.pen_size_and_type[0]], x, y)
+                msg = self.numpy_to_image_msg(self.corrosion_area_add, 'mono8')
+                self.ros_node.ui_corrosion_area_add_pub.publish(msg)
+            elif self.pen_size_and_type[1]==0:
+                if printlogger: self.ros_node.get_logger().info("Using remove kernels")
+                self.place_kernel(self.corrosion_area_remove, self.pen_kernel_sizes[self.pen_size_and_type[0]], x, y)
+                msg = self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8')
+                self.ros_node.ui_corrosion_area_remove_pub.publish(msg)
+        #self.ros_node.get_logger().info(f'click{self.ui.videoLabel.clicked}')
 
-            '''
-            Apply the pen action based on size and type THIS IS THE NEXT STEP
-            '''
-            if self.set_custom_pen[0] == 0:
+        pass
+    
+    def save_undo_state(self):
+        """Save current state before making changes"""
+        if self.corrosion_area_add is not None:
+            # Save current versions of the corrosion areas to the undo stacks
+            self.undo_add_stack.append(self.corrosion_area_add.copy())
+            self.undo_remove_stack.append(self.corrosion_area_remove.copy())
+            
+            # Limit stack size so memory does not grow indefinitely
+            max_undo_levels = 20
+            if len(self.undo_add_stack) > max_undo_levels:
+                self.undo_add_stack.pop(0)  
+                self.undo_remove_stack.pop(0)
+                
+            if printlogger:
+                self.ros_node.get_logger().info(f'Saved undo state (stack size: {len(self.undo_add_stack)})')
+    
 
-                pass  # Default pen action
-            elif self.set_custom_pen[0] == 1:
-                pass
-            elif self.set_custom_pen[0] == 2:
-                pass
+    def on_image_clicked(self, x, y, button):
+        if self.detection_state == 1 and self.camera_type == 0 and self.tabindex == 1:
+            # Save state BEFORE first paint
+            self.save_undo_state()
+            
+        if printlogger:
+            self.ros_node.get_logger().info(f'Click at ({x}, {y}), saved undo state')
 
 
-
-
-            self.ros_node.get_logger().info(message)
-        
-
-
-
-
-            if printlogger: self.ros_node.get_logger().info(message)
 
 
 def main():
