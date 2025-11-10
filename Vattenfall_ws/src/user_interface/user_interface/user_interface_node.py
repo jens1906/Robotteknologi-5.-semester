@@ -258,6 +258,11 @@ class UserInterface(QMainWindow):
 
     def erase_area(self):
         self.pen_size_and_type[1] = 1 - self.pen_size_and_type[1]
+        if self.pen_size_and_type[1] == 0:
+            self.ui.Eraser.setStyleSheet("background-color: #999999;")
+        else:
+            self.ui.Eraser.setStyleSheet("background-color: #ffffff;")
+
         if printlogger: self.ros_node.get_logger().info(f'Erase area requested{"" if self.pen_size_and_type[1] == 0 else " (Eraser Mode)"}')
 
     def set_custom_pen(self, size):
@@ -340,9 +345,9 @@ class UserInterface(QMainWindow):
         """Handle image drag events"""
         if self.detection_state == 1 and self.camera_type == 0 and self.tabindex == 1 and self.pen_size_and_type[0] in [0, 1, 2] and (self.pen_size_and_type[0] and self.pen_size_and_type[1]) is not None:
             if printlogger: self.ros_node.get_logger().info(f'Pen size: {self.pen_size_and_type[0]}, Pen type: {self.pen_size_and_type[1]}')
-            self.pen_kernel_sizes = [   np.ones((5, 5), np.uint8) * 255,   
-                                        np.ones((10, 10), np.uint8) * 255,
-                                        np.ones((20, 20), np.uint8) * 255]            
+            self.pen_kernel_sizes = [   np.ones((10, 10), np.uint8) * 255,   
+                                        np.ones((25, 25), np.uint8) * 255,
+                                        np.ones((50, 50), np.uint8) * 255]            
             msg = Image()
             if self.pen_size_and_type[1]==1:
                 if printlogger: self.ros_node.get_logger().info("Using add kernels")
@@ -354,8 +359,6 @@ class UserInterface(QMainWindow):
                 self.place_kernel(self.corrosion_area_remove, self.pen_kernel_sizes[self.pen_size_and_type[0]], x, y)
                 msg = self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8')
                 self.ros_node.ui_corrosion_area_remove_pub.publish(msg)
-        #self.ros_node.get_logger().info(f'click{self.ui.videoLabel.clicked}')
-
         pass
     
     def save_undo_state(self):
