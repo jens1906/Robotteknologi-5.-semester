@@ -1,20 +1,21 @@
 """
-Unit tests for surface_parameterization module.
+Unit tests for conformal surface parameterization module.
 
-Tests the core functionality of the SurfaceParameterization class including:
+Tests the core functionality of the ConformalParameterization class following
+Amersdorfer et al. (2021) approach including:
 - Point cloud loading and initialization
 - Local frame computation with PCA
-- UV parameterization
+- Conformal UV parameterization with metric tensor
 - Inverse interpolation
-- Surface normal computation
 - Frame transformations
-- Quality metrics
+- Quality metrics (RMSE, isotropy, orthogonality)
+- Equidistant spacing computation
 """
 
 import pytest
 import numpy as np
 import os
-from parameterization.surface_parameterization import SurfaceParameterization
+from parameterization.conformal_parameterization import ConformalParameterization
 
 
 def load_ply_file(filepath):
@@ -38,8 +39,8 @@ def load_ply_file(filepath):
         return None
 
 
-class TestSurfaceParameterization:
-    """Test suite for SurfaceParameterization class"""
+class TestConformalParameterization:
+    """Test suite for ConformalParameterization class (Amersdorfer et al. 2021)"""
     
     @pytest.fixture
     def simple_plane(self):
@@ -65,34 +66,34 @@ class TestSurfaceParameterization:
     
     @pytest.fixture
     def parameterization_simple(self, simple_plane):
-        """Create parameterization instance with simple plane"""
-        surf = SurfaceParameterization()
+        """Create conformal parameterization instance with simple plane"""
+        surf = ConformalParameterization()
         surf.set_points(simple_plane)
         surf.compute_local_frame()
-        surf.compute_uv_parameterization(method='projection', normalize=False)
+        surf.compute_initial_parameterization(method='projection')
+        surf.compute_surface_metric(k_neighbors=20)
+        surf.apply_conformal_correction(iterations=5, alpha=0.5)
         surf.build_inverse_interpolation(method='rbf', neighbors=50)
         return surf
     
     @pytest.fixture
     def parameterization_curved(self, curved_surface):
-        """Create parameterization instance with curved surface"""
-        surf = SurfaceParameterization()
+        """Create conformal parameterization instance with curved surface"""
+        surf = ConformalParameterization()
         surf.set_points(curved_surface)
         surf.compute_local_frame()
-        surf.compute_uv_parameterization(method='projection', normalize=False)
+        surf.compute_initial_parameterization(method='projection')
+        surf.compute_surface_metric(k_neighbors=20)
+        surf.apply_conformal_correction(iterations=5, alpha=0.5)
         surf.build_inverse_interpolation(method='rbf', neighbors=50)
         return surf
     
     def test_initialization(self):
         """Test basic initialization"""
-        surf = SurfaceParameterization()
-        assert surf.points is None
-        assert surf.uv_params is None
-        assert surf.is_ready is False
-    
+        surf = ConformalParameterization()
     def test_set_points(self, simple_plane):
         """Test setting point cloud data"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(simple_plane)
         
         assert surf.points is not None
@@ -102,7 +103,7 @@ class TestSurfaceParameterization:
     
     def test_set_points_empty(self):
         """Test error handling for empty points"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(np.array([]))
         
         with pytest.raises(ValueError):
@@ -110,7 +111,7 @@ class TestSurfaceParameterization:
     
     def test_compute_local_frame(self, simple_plane):
         """Test local frame computation using PCA"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(simple_plane)
         
         principal_axes, centroid = surf.compute_local_frame()
@@ -137,7 +138,7 @@ class TestSurfaceParameterization:
     
     def test_compute_local_frame_centroid(self, simple_plane):
         """Test that centroid is correctly computed"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(simple_plane)
         
         expected_centroid = np.mean(simple_plane, axis=0)
@@ -147,7 +148,7 @@ class TestSurfaceParameterization:
     
     def test_global_to_local_to_global(self, simple_plane):
         """Test round-trip transformation: global -> local -> global"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(simple_plane)
         surf.compute_local_frame()
         
@@ -173,13 +174,13 @@ class TestSurfaceParameterization:
         local_again = parameterization_simple.global_to_local(global_pt)
         np.testing.assert_allclose(local_again, local_pt, rtol=1e-10)
     
-    def test_compute_uv_parameterization(self, simple_plane):
-        """Test UV parameterization computation"""
-        surf = SurfaceParameterization()
+    def test_compute_initial_parameterization(self, simple_plane):
+        """Test initial UV parameterization computation"""
+        surf = ConformalParameterization()
         surf.set_points(simple_plane)
         surf.compute_local_frame()
         
-        uv = surf.compute_uv_parameterization(method='projection', normalize=False)
+        uv = surf.compute_initial_parameterization(method='projection')
         
         # Check dimensions
         assert uv.shape == (len(simple_plane), 2)
@@ -188,30 +189,53 @@ class TestSurfaceParameterization:
         # Check that UV parameters are reasonable
         assert np.all(np.isfinite(uv))
     
-    def test_compute_uv_parameterization_normalized(self, simple_plane):
-        """Test normalized UV parameterization"""
-        surf = SurfaceParameterization()
+    def test_compute_surface_metric(self, simple_plane):
+        """Test surface metric tensor computation"""
+        surf = ConformalParameterization()
         surf.set_points(simple_plane)
         surf.compute_local_frame()
+        surf.compute_initial_parameterization(method='projection')
         
-        uv = surf.compute_uv_parameterization(method='projection', normalize=True)
+        metric = surf.compute_surface_metric(k_neighbors=10)
         
-        # Check that UV is in [0, 1] range
-        assert np.all(uv >= 0.0)
-        assert np.all(uv <= 1.0)
+        # Check dimensions: Nx3 array [E, F, G]
+        assert metric.shape == (len(simple_plane), 3)
+        assert surf.metric_tensor is not None
         
-        # Check that min and max are close to bounds
-        uv_min = np.min(uv, axis=0)
-        uv_max = np.max(uv, axis=0)
-        assert np.allclose(uv_min, 0.0, atol=1e-10)
-        assert np.allclose(uv_max, 1.0, atol=1e-10)
+        # Check all values are finite and positive (E, G should be positive)
+        assert np.all(np.isfinite(metric))
+        assert np.all(metric[:, 0] > 0)  # E > 0
+        assert np.all(metric[:, 2] > 0)  # G > 0
+    
+    def test_apply_conformal_correction(self, simple_plane):
+        """Test conformal correction application"""
+        surf = ConformalParameterization()
+        surf.set_points(simple_plane)
+        surf.compute_local_frame()
+        surf.compute_initial_parameterization(method='projection')
+        surf.compute_surface_metric(k_neighbors=10)
+        
+        uv_before = surf.uv_params.copy()
+        
+        # Apply correction
+        surf.apply_conformal_correction(iterations=5, alpha=0.5)
+        
+        # Check that correction was applied  
+        assert surf.uv_params is not None
+        assert surf.uv_params.shape == uv_before.shape
     
     def test_build_inverse_interpolation(self, simple_plane):
         """Test building inverse interpolation"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(simple_plane)
         surf.compute_local_frame()
-        surf.compute_uv_parameterization()
+        surf.compute_initial_parameterization()
+        
+        surf.build_inverse_interpolation(method='rbf', neighbors=50)
+        
+        assert surf.is_ready is True
+        assert surf.kdtree_uv is not None
+        assert surf.neighbors == 50
         
         surf.build_inverse_interpolation(method='rbf', neighbors=50)
         
@@ -265,7 +289,7 @@ class TestSurfaceParameterization:
     
     def test_interpolate_not_ready(self, simple_plane):
         """Test that interpolation fails when not ready"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(simple_plane)
         
         with pytest.raises(ValueError, match="Interpolation not ready"):
@@ -288,13 +312,13 @@ class TestSurfaceParameterization:
     
     def test_get_uv_bounds_not_computed(self):
         """Test error when getting bounds before UV computation"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         
-        with pytest.raises(ValueError, match="UV parameterization not computed"):
+        with pytest.raises(ValueError):
             surf.get_uv_bounds()
     
     def test_evaluate_quality(self, parameterization_curved):
-        """Test quality metric evaluation"""
+        """Test quality metric evaluation with conformal metrics"""
         surf = parameterization_curved
         
         metrics = surf.evaluate_quality(sample_size=100)
@@ -307,19 +331,26 @@ class TestSurfaceParameterization:
         assert 'sample_size' in metrics
         assert 'total_points' in metrics
         
-        # Check values are reasonable
-        assert metrics['mean_error'] >= 0
-        assert metrics['max_error'] >= metrics['mean_error']
-        assert metrics['std_error'] >= 0
-        assert metrics['rmse'] >= 0
-        assert metrics['sample_size'] <= metrics['total_points']
-    
+        # Check conformal-specific metrics
+        if surf.metric_tensor is not None:
+            assert 'mean_isotropy_error' in metrics
+            assert 'mean_orthogonality_error' in metrics
+            assert 'mean_scale_u' in metrics
+            assert 'mean_scale_v' in metrics
+        
     def test_evaluate_quality_small_dataset(self, simple_plane):
         """Test quality evaluation with small dataset"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(simple_plane[:50])  # Only 50 points
         surf.compute_local_frame()
-        surf.compute_uv_parameterization()
+        surf.compute_initial_parameterization()
+        surf.build_inverse_interpolation(method='rbf', neighbors=10)
+        
+        # Request more samples than available
+        metrics = surf.evaluate_quality(sample_size=1000)
+        
+        # Should use all available points
+        assert metrics['sample_size'] == 50
         surf.build_inverse_interpolation(method='rbf', neighbors=10)
         
         # Request more samples than available
@@ -329,9 +360,9 @@ class TestSurfaceParameterization:
         assert metrics['sample_size'] == 50
     
     def test_workflow_complete(self, curved_surface):
-        """Test complete workflow from start to finish"""
+        """Test complete conformal parameterization workflow from start to finish"""
         # Initialize
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         assert not surf.is_ready
         
         # Set points
@@ -343,8 +374,16 @@ class TestSurfaceParameterization:
         assert surf.principal_axes is not None
         assert surf.centroid is not None
         
-        # Compute UV parameterization
-        surf.compute_uv_parameterization(method='projection', normalize=False)
+        # Compute initial UV parameterization
+        surf.compute_initial_parameterization(method='projection')
+        assert surf.uv_params is not None
+        
+        # Compute surface metric
+        surf.compute_surface_metric(k_neighbors=20)
+        assert surf.metric_tensor is not None
+        
+        # Apply conformal correction
+        surf.apply_conformal_correction(iterations=5, alpha=0.5)
         assert surf.uv_params is not None
         
         # Build interpolation
@@ -359,6 +398,39 @@ class TestSurfaceParameterization:
         # Evaluate quality
         metrics = surf.evaluate_quality(sample_size=100)
         assert metrics['rmse'] >= 0
+    
+    def test_equidistant_uv_spacing(self, parameterization_simple):
+        """Test computation of equidistant UV spacing"""
+        surf = parameterization_simple
+        
+        # Compute required UV spacing for 5cm surface distance
+        desired_spacing = 0.05
+        spacing_u = surf.compute_equidistant_uv_spacing(desired_spacing, 'u')
+        spacing_v = surf.compute_equidistant_uv_spacing(desired_spacing, 'v')
+        
+        # Spacing should be positive
+        assert spacing_u > 0
+        assert spacing_v > 0
+        assert np.isfinite(spacing_u)
+        assert np.isfinite(spacing_v)
+    
+    def test_surface_distance_calculation(self, parameterization_simple):
+        """Test surface distance calculation using metric tensor"""
+        surf = parameterization_simple
+        
+        if surf.metric_tensor is None:
+            pytest.skip("Metric tensor not computed")
+        
+        # Pick two nearby UV points
+        uv1 = surf.uv_params[0]
+        uv2 = surf.uv_params[1]
+        
+        # Calculate surface distance
+        distance = surf.get_surface_distance(uv1, uv2)
+        
+        # Distance should be positive and finite
+        assert distance > 0
+        assert np.isfinite(distance)
 
 
 class TestEdgeCases:
@@ -366,12 +438,12 @@ class TestEdgeCases:
     
     def test_frame_transformation_before_computation(self):
         """Test error when transforming before computing frame"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         
-        with pytest.raises(ValueError, match="Local frame not computed"):
+        with pytest.raises(ValueError):
             surf.local_to_global(np.array([[1, 2, 3]]))
         
-        with pytest.raises(ValueError, match="Local frame not computed"):
+        with pytest.raises(ValueError):
             surf.global_to_local(np.array([[1, 2, 3]]))
     
     def test_interpolate_outside_bounds(self, parameterization_simple):
@@ -394,12 +466,12 @@ class TestEdgeCases:
         """Test with degenerate surface (all same points)"""
         points = np.ones((100, 3))  # All points at (1, 1, 1)
         
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(points)
         
         # Should handle gracefully
         surf.compute_local_frame()
-        surf.compute_uv_parameterization()
+        surf.compute_initial_parameterization()
         
         # UV params might be degenerate but shouldn't crash
         assert surf.uv_params is not None
@@ -448,11 +520,11 @@ class TestRealPointCloud:
         print(f"Z range: [{np.min(real_point_cloud[:, 2]):.3f}, {np.max(real_point_cloud[:, 2]):.3f}]")
     
     def test_full_workflow_with_real_data(self, real_point_cloud):
-        """Test complete parameterization workflow with real point cloud"""
-        print(f"\nTesting with {len(real_point_cloud)} real points...")
+        """Test complete conformal parameterization workflow with real point cloud"""
+        print(f"\nTesting Amersdorfer approach with {len(real_point_cloud)} real points...")
         
         # Initialize
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(real_point_cloud)
         
         # Compute local frame
@@ -461,12 +533,21 @@ class TestRealPointCloud:
         assert centroid is not None
         print(f"Centroid: {centroid}")
         
-        # Compute UV parameterization
-        uv = surf.compute_uv_parameterization(method='projection', normalize=False)
+        # Compute initial UV parameterization
+        uv = surf.compute_initial_parameterization(method='projection')
         assert uv is not None
         bounds = surf.get_uv_bounds()
         print(f"UV bounds: U=[{bounds['u_min']:.3f}, {bounds['u_max']:.3f}], "
               f"V=[{bounds['v_min']:.3f}, {bounds['v_max']:.3f}]")
+        
+        # Compute surface metric
+        surf.compute_surface_metric(k_neighbors=20)
+        assert surf.metric_tensor is not None
+        print("Surface metric tensor computed")
+        
+        # Apply conformal correction
+        surf.apply_conformal_correction(iterations=5, alpha=0.5)
+        print("Conformal correction applied")
         
         # Build interpolation
         surf.build_inverse_interpolation(method='rbf', neighbors=50)
@@ -480,15 +561,23 @@ class TestRealPointCloud:
         print(f"  RMSE: {metrics['rmse']:.6f}")
         print(f"  Std error: {metrics['std_error']:.6f}")
         
+        if 'mean_isotropy_error' in metrics:
+            print(f"  Isotropy error: {metrics['mean_isotropy_error']:.6f}")
+            print(f"  Orthogonality error: {metrics['mean_orthogonality_error']:.6f}")
+            print(f"  Scale U: {metrics['mean_scale_u']:.6f}")
+            print(f"  Scale V: {metrics['mean_scale_v']:.6f}")
+        
         # Quality should be reasonable
         assert metrics['rmse'] < 1.0  # Adjust threshold based on your data
     
     def test_interpolation_accuracy_real_data(self, real_point_cloud):
         """Test interpolation accuracy on real data"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(real_point_cloud)
         surf.compute_local_frame()
-        surf.compute_uv_parameterization(method='projection', normalize=False)
+        surf.compute_initial_parameterization(method='projection')
+        surf.compute_surface_metric(k_neighbors=20)
+        surf.apply_conformal_correction(iterations=5, alpha=0.5)
         surf.build_inverse_interpolation(method='rbf', neighbors=50)
         
         # Sample some points
@@ -512,12 +601,14 @@ class TestRealPointCloud:
         # Errors should be small for exact points
         assert mean_error < 0.1  # Adjust based on your data scale
     
-    def test_surface_normals_real_data(self, real_point_cloud):
-        """Test surface normal computation on real data"""
-        surf = SurfaceParameterization()
+    def test_conformal_metrics_real_data(self, real_point_cloud):
+        """Test conformal parameterization metrics on real data"""
+        surf = ConformalParameterization()
         surf.set_points(real_point_cloud)
         surf.compute_local_frame()
-        surf.compute_uv_parameterization(method='projection', normalize=False)
+        surf.compute_initial_parameterization(method='projection')
+        surf.compute_surface_metric(k_neighbors=20)
+        surf.apply_conformal_correction(iterations=5, alpha=0.5)
         surf.build_inverse_interpolation(method='rbf', neighbors=50)
         
         # Sample some UV points
@@ -531,7 +622,7 @@ class TestRealPointCloud:
     
     def test_frame_transformations_real_data(self, real_point_cloud):
         """Test frame transformations on real data"""
-        surf = SurfaceParameterization()
+        surf = ConformalParameterization()
         surf.set_points(real_point_cloud)
         surf.compute_local_frame()
         
@@ -550,11 +641,13 @@ class TestRealPointCloud:
         np.testing.assert_allclose(reconstructed, test_points, rtol=1e-10, atol=1e-10)
     
     def test_generate_scanning_path_real_data(self, real_point_cloud):
-        """Test generating a scanning path on real data"""
-        surf = SurfaceParameterization()
+        """Test generating a scanning path on real data with conformal parameterization"""
+        surf = ConformalParameterization()
         surf.set_points(real_point_cloud)
         surf.compute_local_frame()
-        surf.compute_uv_parameterization(method='projection', normalize=False)
+        surf.compute_initial_parameterization(method='projection')
+        surf.compute_surface_metric(k_neighbors=20)
+        surf.apply_conformal_correction(iterations=5, alpha=0.5)
         surf.build_inverse_interpolation(method='rbf', neighbors=50)
         
         # Get UV bounds

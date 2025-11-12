@@ -1,5 +1,6 @@
 """
-Standalone test script for testing parameterization with your PLY file.
+Standalone test script for testing conformal parameterization with your PLY file.
+This implementation follows Amersdorfer et al. (2021).
 
 Usage:
     python test_with_ply.py <path_to_ply_file>
@@ -30,18 +31,18 @@ def load_ply_file(filepath):
 
 
 def test_parameterization(ply_file_path):
-    """Test parameterization with a PLY file"""
+    """Test conformal parameterization with a PLY file"""
     
     # Import the module
     try:
-        from parameterization.surface_parameterization import SurfaceParameterization
+        from parameterization.conformal_parameterization import ConformalParameterization
     except ImportError:
         # Try adding parent directory to path
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-        from parameterization.surface_parameterization import SurfaceParameterization
+        from parameterization.conformal_parameterization import ConformalParameterization
     
     print("=" * 70)
-    print("  TESTING SURFACE PARAMETERIZATION WITH PLY FILE")
+    print("  TESTING CONFORMAL PARAMETERIZATION (Amersdorfer et al. 2021)")
     print("=" * 70)
     
     # Load point cloud
@@ -57,8 +58,8 @@ def test_parameterization(ply_file_path):
     print(f"   Z range: [{np.min(points[:, 2]):.3f}, {np.max(points[:, 2]):.3f}]")
     
     # Initialize parameterization
-    print("\n2. Initializing parameterization...")
-    surf = SurfaceParameterization()
+    print("\n2. Initializing conformal parameterization...")
+    surf = ConformalParameterization()
     surf.set_points(points)
     print("   Points set")
     
@@ -69,21 +70,38 @@ def test_parameterization(ply_file_path):
     print(f"   Centroid: [{centroid[0]:.3f}, {centroid[1]:.3f}, {centroid[2]:.3f}]")
     print(f"   Principal axes computed (3x3 orthonormal matrix)")
     
-    # Compute UV parameterization
-    print("\n4. Computing UV parameterization (projection method)...")
-    uv = surf.compute_uv_parameterization(method='projection', normalize=False)
+    # Compute initial UV parameterization
+    print("\n4. Computing initial UV parameterization (projection method)...")
+    uv = surf.compute_initial_parameterization(method='projection')
     bounds = surf.get_uv_bounds()
-    print(f"   UV parameterization computed")
+    print(f"   Initial UV parameterization computed")
     print(f"   U range: [{bounds['u_min']:.3f}, {bounds['u_max']:.3f}]")
     print(f"   V range: [{bounds['v_min']:.3f}, {bounds['v_max']:.3f}]")
     
+    # Compute surface metric tensor
+    print("\n5. Computing surface metric tensor...")
+    k_neighbors = min(20, len(points) // 10)
+    metric = surf.compute_surface_metric(k_neighbors=k_neighbors)
+    print(f"   Metric tensor computed using {k_neighbors} neighbors")
+    print(f"   Mean E (∂x/∂u magnitude²): {np.mean(metric[:, 0]):.6f}")
+    print(f"   Mean F (∂x/∂u · ∂x/∂v): {np.mean(metric[:, 1]):.6f}")
+    print(f"   Mean G (∂x/∂v magnitude²): {np.mean(metric[:, 2]):.6f}")
+    
+    # Apply conformal correction
+    print("\n6. Applying conformal correction...")
+    uv_corrected = surf.apply_conformal_correction(iterations=10, alpha=0.5)
+    bounds_after = surf.get_uv_bounds()
+    print(f"   Conformal correction applied (10 iterations, α=0.5)")
+    print(f"   U range after correction: [{bounds_after['u_min']:.3f}, {bounds_after['u_max']:.3f}]")
+    print(f"   V range after correction: [{bounds_after['v_min']:.3f}, {bounds_after['v_max']:.3f}]")
+    
     # Build interpolation
-    print("\n5. Building inverse interpolation (RBF with 50 neighbors)...")
+    print("\n7. Building inverse interpolation (RBF with 50 neighbors)...")
     surf.build_inverse_interpolation(method='rbf', neighbors=50)
     print(f"   Interpolation ready")
     
     # Evaluate quality
-    print("\n6. Evaluating quality metrics...")
+    print("\n8. Evaluating quality metrics...")
     sample_size = min(1000, len(points))
     metrics = surf.evaluate_quality(sample_size=sample_size)
     print(f"   Quality evaluation complete")
@@ -93,8 +111,16 @@ def test_parameterization(ply_file_path):
     print(f"   RMSE: {metrics['rmse']:.6f}")
     print(f"   Std deviation: {metrics['std_error']:.6f}")
     
+    # Conformal quality metrics
+    if 'mean_isotropy_error' in metrics:
+        print(f"\n   Conformal Quality Metrics:")
+        print(f"   Isotropy error: {metrics['mean_isotropy_error']:.6f} (closer to 0 is better)")
+        print(f"   Orthogonality error: {metrics['mean_orthogonality_error']:.6f} (closer to 0 is better)")
+        print(f"   Mean scale U: {metrics['mean_scale_u']:.6f}")
+        print(f"   Mean scale V: {metrics['mean_scale_v']:.6f}")
+    
     # Test interpolation
-    print("\n7. Testing interpolation...")
+    print("\n9. Testing interpolation...")
     n_test = min(10, len(points))
     test_indices = np.random.choice(len(points), n_test, replace=False)
     test_uv = surf.uv_params[test_indices]
@@ -108,7 +134,7 @@ def test_parameterization(ply_file_path):
     print(f"   Max error: {np.max(errors):.6f}")
     
     # Test frame transformations
-    print("\n8. Testing frame transformations...")
+    print("\n10. Testing frame transformations...")
     n_transform = min(20, len(points))
     test_points = points[:n_transform]
     
@@ -116,21 +142,32 @@ def test_parameterization(ply_file_path):
     reconstructed = surf.local_to_global(local_points)
     transform_errors = np.linalg.norm(reconstructed - test_points, axis=1)
     
-    print(f"   Round-trip transformation tested on {n_transform} points")
-    print(f"   Max reconstruction error: {np.max(transform_errors):.10f}")
+    print(f"    Round-trip transformation tested on {n_transform} points")
+    print(f"    Max reconstruction error: {np.max(transform_errors):.10f}")
     
-    # Generate example scanning path
-    print("\n9. Generating example scanning path...")
-    num_passes = 5
-    points_per_pass = 10
+    # Generate example scanning path with equidistant spacing
+    print("\n11. Generating iso-parametric scanning path...")
+    desired_spacing = 0.05  # 5cm on surface
+    
+    # Compute equidistant UV spacing
+    spacing_u = surf.compute_equidistant_uv_spacing(desired_spacing, direction='u')
+    spacing_v = surf.compute_equidistant_uv_spacing(desired_spacing, direction='v')
+    
+    print(f"    Equidistant UV spacing for {desired_spacing*1000:.1f}mm:")
+    print(f"    Δu = {spacing_u:.6f}, Δv = {spacing_v:.6f}")
+    
+    # Generate iso-v curves
+    num_passes = int((bounds_after['v_max'] - bounds_after['v_min']) / spacing_v)
+    num_passes = max(5, min(num_passes, 15))  # Between 5 and 15
+    points_per_pass = 20
+    
     path_uv = []
-    
     for i in range(num_passes):
-        v = bounds['v_min'] + (bounds['v_max'] - bounds['v_min']) * i / (num_passes - 1)
-        u_line = np.linspace(bounds['u_min'], bounds['u_max'], points_per_pass)
+        v = bounds_after['v_min'] + (bounds_after['v_max'] - bounds_after['v_min']) * i / (num_passes - 1)
+        u_line = np.linspace(bounds_after['u_min'], bounds_after['u_max'], points_per_pass)
         
         if i % 2 == 1:
-            u_line = u_line[::-1]
+            u_line = u_line[::-1]  # Alternate direction
         
         for u in u_line:
             path_uv.append([u, v])
@@ -139,9 +176,10 @@ def test_parameterization(ply_file_path):
     path_3d = surf.interpolate(path_uv)
     path_length = np.sum(np.linalg.norm(np.diff(path_3d, axis=0), axis=1))
     
-    print(f"   Generated scanning path")
-    print(f"   Waypoints: {len(path_3d)}")
-    print(f"   Path length: {path_length:.2f} units")
+    print(f"    Generated iso-parametric scanning path")
+    print(f"    Waypoints: {len(path_3d)}")
+    print(f"    Path length: {path_length:.2f} units")
+    print(f"    Number of passes: {num_passes}")
     
     # Summary
     print("\n" + "=" * 70)
@@ -150,7 +188,10 @@ def test_parameterization(ply_file_path):
     print("\nSummary:")
     print(f"  • Point cloud: {len(points)} points")
     print(f"  • UV parameterization: {uv.shape}")
+    print(f"  • Metric tensor: {metric.shape}")
     print(f"  • Quality RMSE: {metrics['rmse']:.6f}")
+    if 'mean_isotropy_error' in metrics:
+        print(f"  • Isotropy error: {metrics['mean_isotropy_error']:.6f}")
     print(f"  • Interpolation: Working")
     print(f"  • Frame transformations: Working")
     print(f"  • Path generation: Working")
