@@ -13,6 +13,7 @@ kernel = np.ones((5, 5), np.uint8)
 showImages = True
 printlogger = False
 
+
 class CorrosionDetector(Node):
     def __init__(self):
         super().__init__('corrosion_detector')
@@ -22,7 +23,7 @@ class CorrosionDetector(Node):
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             durability=QoSDurabilityPolicy.VOLATILE,
             history=QoSHistoryPolicy.KEEP_LAST,
-            depth=1
+            depth=5
         )
         
         self.corrosion_thresholding = self.create_publisher(Image, '/corrosion/thresholding_pub', image_qos)
@@ -43,6 +44,12 @@ class CorrosionDetector(Node):
 
         self.corrosion_accepted = False  
         self.running_status = False 
+        self.last_frame = None
+        self.last_added_area = None
+        self.last_removed_area = None
+        self.movement_change = True
+        self.first_frame_received = False
+        self.last_subscriber_count = 0  # Track subscriber count changes
 
         if printlogger: self.get_logger().info('Initialized Corrosion Detector Node')
 
@@ -99,33 +106,87 @@ class CorrosionDetector(Node):
         msg.data = img.tobytes()
         return msg
 
+    @staticmethod
+    def arrays_differ(a, b):
+        """Check if two numpy arrays differ, handling None cases."""
+        # Both None = no difference
+        if a is None and b is None:
+            return False
+        # One is None = different
+        if a is None or b is None:
+            return True
+        # Different shapes = different
+        if a.shape != b.shape:
+            return True
+        # Use np.array_equal for exact element-wise equality
+        return not np.array_equal(a, b)
+
+
     def image_match(self, color_msg, depth_msg):
         if printlogger: self.get_logger().info(f'Image and depth matched {color_msg.header.stamp.sec}.{color_msg.header.stamp.nanosec}')
+        
         color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
 
-        if not self.corrosion_accepted or self.corrosion_accepted is None:
-            thresholded_image = self.threshold_corrosion(color_image)
-            color_threshold_image = color_image.copy()
+        # Check subscriber count
+        current_subscriber_count = self.corrosion_thresholding.get_subscription_count()
+        subscriber_increased = (current_subscriber_count > self.last_subscriber_count)
+        
+        if current_subscriber_count != self.last_subscriber_count:
+            if printlogger:
+                self.get_logger().info(f'Subscriber count changed: {self.last_subscriber_count} -> {current_subscriber_count}')
+            self.last_subscriber_count = current_subscriber_count
+        
+        # Only process if someone is subscribed
+        if current_subscriber_count == 0:
+            return  # No subscribers, skip processing entirely
 
-            # Convert threshold to grayscale (single channel)
-            thresh_gray = cv.cvtColor(thresholded_image, cv.COLOR_BGR2GRAY)
+        # Check if UI masks changed
+        ui_changed = self.arrays_differ(self.last_added_area, self.ui_corrosion_add) or \
+                    self.arrays_differ(self.last_removed_area, self.ui_corrosion_remove)
 
-            # Combine: add UI painted areas, remove UI erased areas
-            combined_mask = cv.bitwise_or(thresh_gray, self.ui_corrosion_add)
-            combined_mask = cv.bitwise_and(combined_mask, cv.bitwise_not(self.ui_corrosion_remove))
+        if not self.corrosion_accepted:
+            # Process on: first frame, UI change, movement change, OR subscriber count INCREASED
+            should_process = (not self.first_frame_received) or ui_changed or self.movement_change or subscriber_increased
+            
+            if should_process:
+                thresholded_image = self.threshold_corrosion(color_image)
+                color_threshold_image = color_image.copy()
 
-            # Clean the combined mask (your existing morphology)
-            cleaned_mask = self.clean_image(cv.merge([combined_mask, combined_mask, combined_mask]))
-            cleaned_gray = cv.cvtColor(cleaned_mask, cv.COLOR_BGR2GRAY)
+                # Convert threshold to grayscale (single channel)
+                thresh_gray = cv.cvtColor(thresholded_image, cv.COLOR_BGR2GRAY)
 
-            # Edge detection on the cleaned, combined mask
-            edge = cv.Canny(cleaned_gray, 100, 200)
+                # Combine: add UI painted areas, remove UI erased areas
+                combined_mask = cv.bitwise_or(thresh_gray, self.ui_corrosion_add)
+                combined_mask = cv.bitwise_and(combined_mask, cv.bitwise_not(self.ui_corrosion_remove))
 
-            # Overlay green edges on original color image
-            color_threshold_image[edge > 0] = [0, 255, 0]
+                # Clean the combined mask (your existing morphology)
+                cleaned_mask = self.clean_image(cv.merge([combined_mask, combined_mask, combined_mask]))
+                cleaned_gray = cv.cvtColor(cleaned_mask, cv.COLOR_BGR2GRAY)
 
-            self.corrosion_thresholding.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
+                # Edge detection on the cleaned, combined mask
+                edge = cv.Canny(cleaned_gray, 100, 200)
+
+                # Overlay green edges on original color image
+                color_threshold_image[edge > 0] = [0, 255, 0]
+                
+                # Save state for next comparison
+                self.last_frame = color_threshold_image.copy()
+                self.last_added_area = self.ui_corrosion_add.copy()
+                self.last_removed_area = self.ui_corrosion_remove.copy()
+                self.movement_change = False
+                self.first_frame_received = True
+                
+                # Publish processed frame
+                self.corrosion_thresholding.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
+            else:
+                # No changes - reuse last frame
+                if printlogger:
+                    self.get_logger().info('No changes in UI painted areas, skipping processing')
+                
+                if self.last_frame is not None:
+                    self.corrosion_thresholding.publish(self.numpy_to_image_msg(self.last_frame, "bgr8"))
+
         elif self.corrosion_accepted and self.running_status == False:
             self.running_status = True
             xyz_data = self.combine_and_transform(self.edge_to_scatter_plot(color_image), depth_image)

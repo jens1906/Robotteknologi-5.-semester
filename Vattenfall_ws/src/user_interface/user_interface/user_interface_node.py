@@ -78,8 +78,10 @@ class UserInterfaceNode(Node):
     def corrosion_thresholding_callback(self, msg):
         corrosion_image = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
         if self.ui_instance and self.ui_instance.detection_state == 1 and self.ui_instance.camera_type == 0:
-            self.signal_emitter.data_signal.emit(f"Thresholded: {msg.width}x{msg.height}")
-            self.signal_emitter.image_signal.emit(corrosion_image)
+            # Don't update display if user is actively painting
+            if not self.ui_instance.is_painting:
+                self.signal_emitter.data_signal.emit(f"Thresholded: {msg.width}x{msg.height}")
+                self.signal_emitter.image_signal.emit(corrosion_image)
 
     def ROBODK_completion_notification_callback(self, msg):
         if msg.data == True:
@@ -123,6 +125,8 @@ class UserInterface(QMainWindow):
         self.undo_remove_stack = []
         self.corrosion_area_add = None
         self.corrosion_area_remove = None
+        self.last_frame = None
+        self.is_painting = False  # Track if currently painting
 
         
         self.ui.RUN_1.clicked.connect(self.run_robot)
@@ -148,6 +152,7 @@ class UserInterface(QMainWindow):
     
         self.ui.videoLabel.clicked.connect(self.on_image_clicked)
         self.ui.videoLabel.dragged.connect(self.on_image_dragged)
+        self.ui.videoLabel.released.connect(self.on_image_released)
     
     def customize_tabs(self):
         tabbar = self.ui.tabWidget.tabBar()
@@ -299,7 +304,8 @@ class UserInterface(QMainWindow):
         """Convert numpy BGR array to QPixmap and display in videoLabel"""
         if img is None:
             return
-        
+        self.last_frame = img.copy()
+
         # Handle both color (3D) and grayscale (2D) images
         if len(img.shape) == 3:
             h, w, ch = img.shape
@@ -318,6 +324,8 @@ class UserInterface(QMainWindow):
         # Set the actual image dimensions for coordinate mapping
         self.ui.videoLabel.set_image_dimensions(w, h)
 
+
+
     def on_image_clicked(self, x, y, button):
         """Handle image click events"""
         message = f'Image clicked at ({x}, {y}) with {button} button'
@@ -328,6 +336,7 @@ class UserInterface(QMainWindow):
         """Place kernel centered at (x,y) in img using loops."""
         kernel_height, kernel_width = kernel.shape
         img_height, img_width = img.shape
+
         kernel_mid_y, kernel_mid_x = kernel_height // 2, kernel_width // 2
 
         for kernel_pos_y in range(kernel_height):
@@ -339,6 +348,9 @@ class UserInterface(QMainWindow):
                 # Skip if out of bounds
                 if 0 <= img_y < img_height and 0 <= img_x < img_width:
                     img[img_y, img_x] = kernel[kernel_pos_y, kernel_pos_x]
+                    self.last_frame[img_y, img_x, 0] = kernel[kernel_pos_y, kernel_pos_x]
+        self.update_video_frame(self.last_frame)
+
 
     def numpy_to_image_msg(self, img, encoding):
         #Might be possible to shorten with the use of CvBridge
@@ -358,17 +370,13 @@ class UserInterface(QMainWindow):
             self.pen_kernel_sizes = [   np.ones((10, 10), np.uint8) * 255,   
                                         np.ones((25, 25), np.uint8) * 255,
                                         np.ones((50, 50), np.uint8) * 255]            
-            msg = Image()
             if self.pen_size_and_type[1]==1:
                 if printlogger: self.ros_node.get_logger().info("Using add kernels")
                 self.place_kernel(self.corrosion_area_add, self.pen_kernel_sizes[self.pen_size_and_type[0]], x, y)
-                msg = self.numpy_to_image_msg(self.corrosion_area_add, 'mono8')
-                self.ros_node.ui_corrosion_area_add_pub.publish(msg)
+
             elif self.pen_size_and_type[1]==0:
                 if printlogger: self.ros_node.get_logger().info("Using remove kernels")
                 self.place_kernel(self.corrosion_area_remove, self.pen_kernel_sizes[self.pen_size_and_type[0]], x, y)
-                msg = self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8')
-                self.ros_node.ui_corrosion_area_remove_pub.publish(msg)
         pass
     
     def save_undo_state(self):
@@ -392,10 +400,30 @@ class UserInterface(QMainWindow):
         if self.detection_state == 1 and self.camera_type == 0 and self.tabindex == 1:
             # Save state BEFORE first paint
             self.save_undo_state()
+            self.is_painting = True  # Start painting mode
             
         if printlogger:
             self.ros_node.get_logger().info(f'Click at ({x}, {y}), saved undo state')
 
+    def on_image_released(self, x, y, button):
+        """Handle mouse button release - fires when drag ends"""
+        if printlogger:
+            self.ros_node.get_logger().info(f'Released at ({x}, {y}), button={button}')
+        
+        # This fires AFTER dragging stops
+        if self.detection_state == 1 and self.camera_type == 0 and self.tabindex == 1:
+            self.is_painting = False  # End painting mode - allow ROS updates again
+            
+            # Publish final state to ROS for processing
+            msgadd = Image()
+            msgadd = self.numpy_to_image_msg(self.corrosion_area_add, 'mono8')
+            self.ros_node.ui_corrosion_area_add_pub.publish(msgadd)
+
+            msgremove = Image()
+            msgremove = self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8')
+            self.ros_node.ui_corrosion_area_remove_pub.publish(msgremove)
+
+            self.ros_node.get_logger().info('Stroke completed, published masks')
 
 
 

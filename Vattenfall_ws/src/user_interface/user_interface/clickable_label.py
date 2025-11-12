@@ -8,6 +8,7 @@ class ClickableImageLabel(QLabel):
     """QLabel that detects mouse clicks and drags with precise image coordinates"""
     clicked = pyqtSignal(int, int, str)  # x, y, button type
     dragged = pyqtSignal(int, int, str)  # x, y while dragging
+    released = pyqtSignal(int, int, str)  # x, y when mouse button released
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -93,4 +94,17 @@ class ClickableImageLabel(QLabel):
     
     def mouseReleaseEvent(self, event):
         """Handle mouse button release"""
+        label_x = int(event.position().x())
+        label_y = int(event.position().y())
+        image_x, image_y = self._map_coordinates(label_x, label_y)
+        
+        if image_x is not None and image_y is not None:
+            button_name = "left"
+            if event.button() == Qt.MouseButton.RightButton:
+                button_name = "right"
+            elif event.button() == Qt.MouseButton.MiddleButton:
+                button_name = "middle"
+            
+            self.released.emit(image_x, image_y, button_name)
+        
         self.is_dragging = False
