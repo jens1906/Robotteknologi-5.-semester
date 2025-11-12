@@ -17,11 +17,20 @@ from parameterization.msg import ParameterizationStatus, UVPoint
 from parameterization.srv import InterpolatePoint, GetUVBounds
 
 # Import the parameterization module
-from parameterization.surface_parameterization import SurfaceParameterization
+from parameterization.conformal_parameterization import ConformalParameterization
 
 class ParameterizationNode(Node):
     """
-    ROS 2 Node for surface parameterization.
+    ROS 2 Node for surface parameterization using Amersdorfer et al. (2021) approach.
+    
+    Implements conformal parameterization with metric tensor computation for
+    equidistant path planning on curved surfaces.
+    
+    Reference:
+        Amersdorfer, M., Meurer, T., & Glück, T. (2021). 
+        "Equidistant Tool Path and Cartesian Trajectory Planning for Robotic 
+        Machining of Curved Freeform Surfaces." 
+        IEEE Transactions on Automation Science and Engineering.
     
     Subscribes to:
         - /corrosion/scatter_plot_pub (std_msgs/Float32MultiArray): Input XYZ points from corrosion detection
@@ -35,10 +44,12 @@ class ParameterizationNode(Node):
         
     Parameters:
         - interpolation_method (string): 'rbf' for radial basis function
-        - neighbors (int): Number of neighbors for local RBF interpolation
-        - normalize (bool): Normalize UV to [0,1] (default: False)
+        - neighbors (int): Number of neighbors for local RBF interpolation and metric computation
         - quality_sample_size (int): Sample size for quality evaluation
         - status_publish_rate (float): Rate to publish status (Hz)
+        - conformal_iterations (int): Number of conformal correction iterations (default: 5)
+        - conformal_alpha (float): Conformal correction step size (default: 0.5)
+        - metric_neighbors (int): Number of neighbors for metric tensor computation (default: 20)
     """
     
     def __init__(self):
@@ -47,19 +58,25 @@ class ParameterizationNode(Node):
         # Declare parameters
         self.declare_parameter('interpolation_method', 'rbf')
         self.declare_parameter('neighbors', 50)
-        self.declare_parameter('normalize', False)
         self.declare_parameter('quality_sample_size', 1000)
         self.declare_parameter('status_publish_rate', 1.0)
+        self.declare_parameter('conformal_iterations', 5)
+        self.declare_parameter('conformal_alpha', 0.5)
+        self.declare_parameter('metric_neighbors', 20)
         
         # Get parameters
         self.interpolation_method = self.get_parameter('interpolation_method').value
         self.neighbors = self.get_parameter('neighbors').value
-        self.normalize = self.get_parameter('normalize').value
         self.quality_sample_size = self.get_parameter('quality_sample_size').value
         status_rate = self.get_parameter('status_publish_rate').value
+        self.conformal_iterations = self.get_parameter('conformal_iterations').value
+        self.conformal_alpha = self.get_parameter('conformal_alpha').value
+        self.metric_neighbors = self.get_parameter('metric_neighbors').value
         
-        # Initialize parameterization
-        self.surf = SurfaceParameterization()
+        # Initialize conformal parameterization (Amersdorfer et al. 2021)
+        self.surf = ConformalParameterization()
+        self.get_logger().info('Using Conformal Parameterization (Amersdorfer et al. 2021)')
+
         
         # Create subscriber for corrosion scatter plot
         self.scatter_plot_sub = self.create_subscription(
@@ -116,9 +133,11 @@ class ParameterizationNode(Node):
         )
         
         self.get_logger().info('Parameterization node initialized')
-        self.get_logger().info(f'  Method: {self.interpolation_method}')
-        self.get_logger().info(f'  Neighbors: {self.neighbors}')
-        self.get_logger().info(f'  Normalize: {self.normalize}')
+        self.get_logger().info(f'  Interpolation method: {self.interpolation_method}')
+        self.get_logger().info(f'  Interpolation neighbors: {self.neighbors}')
+        self.get_logger().info(f'  Metric neighbors: {self.metric_neighbors}')
+        self.get_logger().info(f'  Conformal iterations: {self.conformal_iterations}')
+        self.get_logger().info(f'  Conformal alpha: {self.conformal_alpha}')
     
 
     def scatter_plot_callback(self, msg):
@@ -149,16 +168,25 @@ class ParameterizationNode(Node):
             # Set points
             self.surf.set_points(points)
             
-            # Compute local frame (not normalized)
+            # Compute local frame using PCA
             self.surf.compute_local_frame()
             self.get_logger().info('Local frame computed')
             
-            # Compute parameterization using projection
-            self.surf.compute_uv_parameterization(
-                method='projection',
-                normalize=self.normalize
+            # Conformal parameterization (Amersdorfer et al. 2021)
+            # Step 1: Initial UV parameterization via projection
+            self.surf.compute_initial_parameterization(method='projection')
+            self.get_logger().info('Initial UV parameterization computed')
+            
+            # Step 2: Compute surface metric tensor (E, F, G)
+            self.surf.compute_surface_metric(k_neighbors=self.metric_neighbors)
+            self.get_logger().info('Surface metric tensor computed')
+            
+            # Step 3: Apply conformal correction to minimize distortion
+            self.surf.apply_conformal_correction(
+                iterations=self.conformal_iterations,
+                alpha=self.conformal_alpha
             )
-            self.get_logger().info('UV parameterization computed')
+            self.get_logger().info('Conformal correction applied')
             
             # Build inverse interpolation
             self.surf.build_inverse_interpolation(
