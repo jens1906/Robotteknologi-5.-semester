@@ -1,0 +1,111 @@
+<?xml version="1.0"?>
+<robot name="testsite_setup" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- ========== PARAMETERS ========== -->
+  <xacro:property name="mesh_dir" value="$(find your_package_name)/meshes"/>
+
+  <!-- ========== FRAME 1 (World Origin) ========== -->
+  <link name="frame_1"/>
+
+  <!-- Bordplade -->
+  <link name="bordplade">
+    <visual>
+      <geometry>
+        <mesh filename="${mesh_dir}/Bundplade.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+  </link>
+
+  <joint name="frame1_to_bordplade" type="fixed">
+    <parent link="frame_1"/>
+    <child link="bordplade"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========== FRAME 2 ========== -->
+  <link name="frame_2"/>
+  <joint name="frame1_to_frame2" type="fixed">
+    <parent link="frame_1"/>
+    <child link="frame_2"/>
+    <origin xyz="0.2 0 0.25" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Mount -->
+  <link name="ur3e_mount">
+    <visual>
+      <geometry>
+        <mesh filename="${mesh_dir}/UR3e_mount.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+  </link>
+  <joint name="frame2_to_mount" type="fixed">
+    <parent link="frame_2"/>
+    <child link="ur3e_mount"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========== FRAME 3 (UR3e Base Frame) ========== -->
+  <link name="ur3e_base"/>
+  <joint name="frame2_to_ur3e_base" type="fixed">
+    <parent link="frame_2"/>
+    <child link="ur3e_base"/>
+    <origin xyz="0 0 -0.218" rpy="0 1.5708 0"/> <!-- Derived from rotation matrix -->
+  </joint>
+
+  <!-- UR3e Robot -->
+  <xacro:include filename="$(find ur_description)/urdf/ur3e_macro.xacro"/>
+  <xacro:ur3e_robot prefix="" parent="ur3e_base">
+    <origin xyz="0.2 0 -0.38" rpy="0 0 0"/>
+  </xacro:ur3e_robot>
+
+  <!-- ========== FRAME 4 ========== -->
+  <link name="frame_4"/>
+  <joint name="frame1_to_frame4" type="fixed">
+    <parent link="frame_1"/>
+    <child link="frame_4"/>
+    <origin xyz="0.2 0 -0.38" rpy="0 0 0"/>
+  </joint>
+
+  <!-- TestpladeKurve -->
+  <link name="testplade_kurve">
+    <visual>
+      <geometry>
+        <mesh filename="${mesh_dir}/TestpladeKurve_v3.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+  </link>
+  <joint name="frame4_to_testplade" type="fixed">
+    <parent link="frame_4"/>
+    <child link="testplade_kurve"/>
+    <origin xyz="0 0 -2.9735" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========== REALSENSE HOLDER ========== -->
+  <link name="realsense_holder">
+    <visual>
+      <geometry>
+        <mesh filename="${mesh_dir}/RealsenseHolder.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+  </link>
+  <joint name="ur3e_to_realsense_holder" type="fixed">
+    <parent link="tool0"/>
+    <child link="realsense_holder"/>
+    <origin xyz="0 0 -0.065" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========== RSD435 CAMERA ========== -->
+  <link name="rsd435_camera">
+    <visual>
+      <geometry>
+        <mesh filename="${mesh_dir}/RSD435.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+  </link>
+  <joint name="holder_to_camera" type="fixed">
+    <parent link="realsense_holder"/>
+    <child link="rsd435_camera"/>
+    <origin xyz="0 0.044 0.075" rpy="0 0 0"/>
+  </joint>
+
+</robot>
