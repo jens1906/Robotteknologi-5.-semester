@@ -1,7 +1,4 @@
 """
-Conformal Surface Parameterization following Amersdorfer et al. (2021)
-"Equidistant Tool Path and Cartesian Trajectory Planning for Robotic Machining of Curved Freeform Surfaces"
-
 This module implements conformal parameterization that preserves local angles and approximately 
 preserves distances, enabling equidistant path planning on curved surfaces.
 """
@@ -18,7 +15,7 @@ class ConformalParameterization:
     """
     Conformal surface parameterization for robotic machining.
     
-    Implements the approach from Amersdorfer et al. (2021) which ensures:
+    Implements:
     1. Local angle preservation (conformality)
     2. Approximate distance preservation through metric correction
     3. Iso-parametric curves correspond to equidistant paths on the surface
@@ -160,7 +157,7 @@ class ConformalParameterization:
         self.metric_tensor = metric_tensor
         return metric_tensor
     
-    def apply_conformal_correction(self, iterations=5, alpha=0.5):
+    def apply_conformal_correction(self, iterations=1, alpha=0.5):
         """
         Apply conformal correction to make the parameterization more isometric.
         
@@ -168,21 +165,27 @@ class ConformalParameterization:
         making E ≈ G and F ≈ 0 (conformality condition).
         
         Args:
-            iterations: Number of correction iterations
+            iterations: Number of correction iterations (0 to skip)
             alpha: Step size for correction (0 < alpha < 1)
         """
+        if iterations == 0:
+            # Skip correction, use initial parameterization as-is
+            self.uv_corrected = self.uv_params.copy()
+            return self.uv_corrected
+            
         if self.metric_tensor is None:
             self.compute_surface_metric()
         
         self.uv_corrected = self.uv_params.copy()
         
         for iter_idx in range(iterations):
-            # Compute metric at current UV coordinates
-            self.compute_surface_metric()
+            # Only recompute metric on first iteration - too slow for large point clouds
+            if iter_idx == 0:
+                metric_tensor = self.metric_tensor
             
             # For each point, adjust UV to reduce anisotropy
             for i in range(len(self.points)):
-                E, F, G = self.metric_tensor[i]
+                E, F, G = metric_tensor[i]
                 
                 # Compute scale factors to make metric more isometric
                 # Target: E = G = scale, F = 0
@@ -205,9 +208,6 @@ class ConformalParameterization:
                     self.uv_corrected[i, 1] *= (1 - alpha) + alpha * scale_v
         
         self.uv_params = self.uv_corrected
-        
-        # Recompute metric after correction
-        self.compute_surface_metric()
         
         return self.uv_corrected
     
