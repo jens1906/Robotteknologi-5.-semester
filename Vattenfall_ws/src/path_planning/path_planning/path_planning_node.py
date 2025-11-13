@@ -86,26 +86,77 @@ class PathPlanner(Node):
             was_ready = self.parameterization_ready
             self.parameterization_ready = msg.is_ready
             
-            # If just became ready, generate path
-            if self.parameterization_ready and not was_ready:
-                self.get_logger().info('Parameterization is ready. Fetching UV bounds...')
-                
-                if self.auto_generate:
-                    # Fetch bounds and generate path
-                    if self.fetch_uv_bounds():
-                        self.generate_zigzag_paths()
-                        self.publish_path()
-                    else:
-                        self.get_logger().error('Failed to fetch UV bounds')
-                else:
-                    self.get_logger().info('Auto-generate disabled. Call generate_path() manually.')
-            
-            elif not self.parameterization_ready:
+            # Only process if we have valid data (num_points > 0)
+            if not msg.is_ready or msg.num_points == 0:
                 if was_ready:
                     self.get_logger().warn('Parameterization no longer ready')
+                self.parameterization_ready = False
+                return
+            
+            # If just became ready, generate path
+            if self.parameterization_ready and not was_ready:
+                self.get_logger().info(f'Parameterization is ready with {msg.num_points} points. Fetching UV bounds...')
+                
+                if self.auto_generate:
+                    # Initiate async service call
+                    self.fetch_uv_bounds_async()
+                else:
+                    self.get_logger().info('Auto-generate disabled. Call generate_path() manually.')
                     
         except Exception as e:
             self.get_logger().error(f"Error in status_callback: {e}")
+
+
+    def fetch_uv_bounds_async(self):
+        """
+        Fetch UV bounds asynchronously from parameterization service.
+        """
+        try:
+            # Wait for service
+            if not self.bounds_client.wait_for_service(timeout_sec=1.0):
+                self.get_logger().error('UV bounds service not available')
+                return
+            
+            # Call service asynchronously
+            request = GetUVBounds.Request()
+            future = self.bounds_client.call_async(request)
+            future.add_done_callback(self.uv_bounds_callback)
+                
+        except Exception as e:
+            self.get_logger().error(f"Error fetching UV bounds: {e}")
+            import traceback
+            self.get_logger().error(traceback.format_exc())
+
+
+    def uv_bounds_callback(self, future):
+        """
+        Callback when UV bounds service call completes.
+        """
+        try:
+            response = future.result()
+            
+            if response.success:
+                self.uv_bounds = {
+                    'u_min': response.u_min,
+                    'u_max': response.u_max,
+                    'v_min': response.v_min,
+                    'v_max': response.v_max
+                }
+                self.get_logger().info(
+                    f'UV bounds received: U=[{response.u_min:.3f}, {response.u_max:.3f}], '
+                    f'V=[{response.v_min:.3f}, {response.v_max:.3f}]'
+                )
+                
+                # Generate and publish path
+                self.generate_zigzag_paths()
+                self.publish_path()
+            else:
+                self.get_logger().error(f'Failed to get UV bounds: {response.message}')
+                
+        except Exception as e:
+            self.get_logger().error(f'Error in UV bounds callback: {e}')
+            import traceback
+            self.get_logger().error(traceback.format_exc())
 
 
     def fetch_uv_bounds(self):
