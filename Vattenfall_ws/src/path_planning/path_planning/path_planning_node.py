@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -6,6 +7,15 @@ from std_msgs.msg import Float64MultiArray
 from parameterization.msg import ParameterizationStatus
 from parameterization.srv import GetUVBounds
 
+=======
+try:
+    import numpy as np
+    import rclpy
+    from rclpy.node import Node
+    from std_msgs.msg import Float64MultiArray
+except ImportError as e:
+    print(f"Path - Import Error: {e}")
+>>>>>>> Stashed changes
 
 """
 
@@ -26,6 +36,28 @@ Services:
 - /parameterization/get_uv_bounds (GetUVBounds): Get UV parameter space bounds.
 
 """
+
+
+testing = True
+
+def testingmode():
+    # create large uv_data array for testing
+    uv_data = np.random.rand(1000, 2)
+
+    #plot uv_data
+    import matplotlib.pyplot as plt
+    plt.scatter(uv_data[:, 0], uv_data[:, 1], color='red')
+    plt.title('UV Data Points')
+    plt.xlabel('U')
+    plt.ylabel('V')
+    plt.grid()
+    plt.show()
+
+testingmode()
+
+
+
+
 
 
 class PathPlanner(Node):
@@ -293,6 +325,6 @@ def main():
     except Exception as e:
         print(f"Path - Error: main(): {e}")
 
-if __name__ == '__main__':
-    main()
+#if __name__ == '__main__':
+#    main()
 
