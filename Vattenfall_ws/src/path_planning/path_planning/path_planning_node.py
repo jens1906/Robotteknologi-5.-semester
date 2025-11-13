@@ -1,4 +1,3 @@
-<<<<<<< Updated upstream
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -6,16 +5,6 @@ from std_msgs.msg import Float64MultiArray
 
 from parameterization.msg import ParameterizationStatus
 from parameterization.srv import GetUVBounds
-
-=======
-try:
-    import numpy as np
-    import rclpy
-    from rclpy.node import Node
-    from std_msgs.msg import Float64MultiArray
-except ImportError as e:
-    print(f"Path - Import Error: {e}")
->>>>>>> Stashed changes
 
 """
 
