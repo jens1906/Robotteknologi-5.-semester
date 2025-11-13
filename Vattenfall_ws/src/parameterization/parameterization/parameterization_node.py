@@ -28,12 +28,6 @@ class ParameterizationNode(Node):
     Implements conformal parameterization with metric tensor computation for
     equidistant path planning on curved surfaces.
     
-    Reference:
-        Amersdorfer, M., Meurer, T., & Glück, T. (2021). 
-        "Equidistant Tool Path and Cartesian Trajectory Planning for Robotic 
-        Machining of Curved Freeform Surfaces." 
-        IEEE Transactions on Automation Science and Engineering.
-    
     Subscribes to:
         - /corrosion/scatter_plot_pub (std_msgs/Float32MultiArray): Input XYZ points from corrosion detection
         
@@ -62,7 +56,7 @@ class ParameterizationNode(Node):
         self.declare_parameter('neighbors', 50)
         self.declare_parameter('quality_sample_size', 1000)
         self.declare_parameter('status_publish_rate', 1.0)
-        self.declare_parameter('conformal_iterations', 2)
+        self.declare_parameter('conformal_iterations', 1)
         self.declare_parameter('conformal_alpha', 0.5)
         self.declare_parameter('metric_neighbors', 20)
         
@@ -77,7 +71,7 @@ class ParameterizationNode(Node):
         
         # Initialize conformal parameterization (Amersdorfer et al. 2021)
         self.surf = ConformalParameterization()
-        self.get_logger().info('Using Conformal Parameterization (Amersdorfer et al. 2021)')
+        self.get_logger().info('Using Conformal Parameterization')
 
         
         # Create subscriber for corrosion scatter plot

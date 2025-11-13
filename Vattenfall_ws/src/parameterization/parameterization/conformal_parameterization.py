@@ -1,7 +1,4 @@
 """
-Conformal Surface Parameterization following Amersdorfer et al. (2021)
-"Equidistant Tool Path and Cartesian Trajectory Planning for Robotic Machining of Curved Freeform Surfaces"
-
 This module implements conformal parameterization that preserves local angles and approximately 
 preserves distances, enabling equidistant path planning on curved surfaces.
 """
@@ -160,7 +157,7 @@ class ConformalParameterization:
         self.metric_tensor = metric_tensor
         return metric_tensor
     
-    def apply_conformal_correction(self, iterations=2, alpha=0.5):
+    def apply_conformal_correction(self, iterations=1, alpha=0.5):
         """
         Apply conformal correction to make the parameterization more isometric.
         
