@@ -150,8 +150,8 @@ def test_parameterization(ply_file_path):
     desired_spacing = 0.05  # 5cm on surface
     
     # Compute equidistant UV spacing
-    spacing_u = surf.compute_equidistant_uv_spacing(desired_spacing, direction='u')
-    spacing_v = surf.compute_equidistant_uv_spacing(desired_spacing, direction='v')
+    spacing_u = surf.compute_equidistant_uv_spacing(desired_spacing, uv_direction='u')
+    spacing_v = surf.compute_equidistant_uv_spacing(desired_spacing, uv_direction='v')
     
     print(f"    Equidistant UV spacing for {desired_spacing*1000:.1f}mm:")
     print(f"    Δu = {spacing_u:.6f}, Δv = {spacing_v:.6f}")
