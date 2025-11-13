@@ -36,6 +36,7 @@ class CorrosionDetector(Node):
         self.ui_corrosion_remove_sub = self.create_subscription(Image, '/ui/corrosion_area_remove_pub', self.ui_corrosion_remove_callback, image_qos)
         self.ui_emergency_stop_sub = self.create_subscription(Bool, '/ui/emergency_stop_pub', self.ui_emergency_stop_callback, 10)
         self.ui_terminate_pub_sub = self.create_subscription(Bool, '/ui/terminate_pub', self.ui_terminate_callback, 10)
+        self.ui_connected_pub_sub = self.create_subscription(Bool, '/ui/connected_pub', self.ui_connected_callback, 10)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
         color_sub = message_filters.Subscriber(self, Image, '/realsense/camera_color_pub', qos_profile=image_qos)
         depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub', qos_profile=image_qos)
@@ -50,12 +51,18 @@ class CorrosionDetector(Node):
         self.movement_change = True
         self.first_frame_received = False
         self.last_subscriber_count = 0  # Track subscriber count changes
+        self.ui_connected_state = False
 
         if printlogger: self.get_logger().info('Initialized Corrosion Detector Node')
 
     def ui_corrosion_area_accept_callback(self, msg):
         self.corrosion_accepted = msg.data
         if printlogger: self.get_logger().info(f'UI command received: {self.corrosion_accepted}')
+
+    def ui_connected_callback(self, msg):
+        self.ui_connected_state = msg.data
+        if printlogger: self.get_logger().info(f'UI connected state updated: {self.ui_connected_state}')
+
 
     def ROBODK_completion_notification_callback(self, msg):
         if msg.data == True:
@@ -128,26 +135,14 @@ class CorrosionDetector(Node):
         color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
 
-        # Check subscriber count
-        current_subscriber_count = self.corrosion_thresholding.get_subscription_count()
-        subscriber_increased = (current_subscriber_count > self.last_subscriber_count)
-        
-        if current_subscriber_count != self.last_subscriber_count:
-            if printlogger:
-                self.get_logger().info(f'Subscriber count changed: {self.last_subscriber_count} -> {current_subscriber_count}')
-            self.last_subscriber_count = current_subscriber_count
-        
-        # Only process if someone is subscribed
-        if current_subscriber_count == 0:
-            return  # No subscribers, skip processing entirely
 
         # Check if UI masks changed
         ui_changed = self.arrays_differ(self.last_added_area, self.ui_corrosion_add) or \
                     self.arrays_differ(self.last_removed_area, self.ui_corrosion_remove)
 
         if not self.corrosion_accepted:
-            # Process on: first frame, UI change, movement change, OR subscriber count INCREASED
-            should_process = (not self.first_frame_received) or ui_changed or self.movement_change or subscriber_increased
+            # Process on: first frame, UI change, or movement change, OR subscriber increased
+            should_process = (not self.first_frame_received) or ui_changed or self.movement_change or self.ui_connected_state==False
             
             if should_process:
                 thresholded_image = self.threshold_corrosion(color_image)
@@ -179,13 +174,6 @@ class CorrosionDetector(Node):
                 
                 # Publish processed frame
                 self.corrosion_thresholding.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
-            else:
-                # No changes - reuse last frame
-                if printlogger:
-                    self.get_logger().info('No changes in UI painted areas, skipping processing')
-                
-                if self.last_frame is not None:
-                    self.corrosion_thresholding.publish(self.numpy_to_image_msg(self.last_frame, "bgr8"))
 
         elif self.corrosion_accepted and self.running_status == False:
             self.running_status = True
@@ -196,7 +184,8 @@ class CorrosionDetector(Node):
             if printlogger: self.get_logger().info('Corrosion area accepted')
         else:
             if printlogger: self.get_logger().info(f'Corrosion detection is already running, wait for ROBODK to complete {self.corrosion_accepted} {self.running_status}')
-    
+
+
     def threshold_corrosion(self, image):
         # Thresholding in HSV color space to detect corrosion
         hsv = cv.cvtColor(image, cv.COLOR_BGR2HSV)
@@ -243,9 +232,12 @@ class CorrosionDetector(Node):
         return xyz_data
 
     def destroy_node(self):
-        # Cleanup 
+        
+        
+
         cv.destroyAllWindows()
         super().destroy_node()
+        
 
 
 def main():

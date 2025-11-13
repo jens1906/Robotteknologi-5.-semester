@@ -13,6 +13,7 @@ from PyQt6.QtGui import QImage, QPixmap, QFont
 from user_interface.GUI import Ui_MainWindow
 from PyQt6.QtCore import pyqtSignal, QObject, Qt
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel
+import signal
 
 Test = True
 showImages = True
@@ -43,6 +44,9 @@ class UserInterfaceNode(Node):
         self.ui_corrosion_area_add_pub = self.create_publisher(Image, '/ui/corrosion_area_add_pub', image_qos)
         self.ui_corrosion_area_accept_pub = self.create_publisher(Bool, '/ui/corrosion_area_accept_pub', 10)
         self.ui_corrosion_area_remove_pub = self.create_publisher(Image, '/ui/corrosion_area_remove_pub', image_qos)
+        self.ui_connected_pub = self.create_publisher(Bool, '/ui/connected_pub', 10)
+        self.ui_connected_pub_state = False
+
 
         self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
@@ -51,6 +55,7 @@ class UserInterfaceNode(Node):
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
         
+        self.last_Threshold_frame = None
 
         # Initialize UI components here (e.g., publishers/subscribers for UI commands)
         self.get_logger().info('User Interface Node Initialized')
@@ -76,12 +81,25 @@ class UserInterfaceNode(Node):
         
 
     def corrosion_thresholding_callback(self, msg):
+        self.get_logger().info('=== Corrosion thresholding callback CALLED ===')
+        if self.ui_connected_pub_state ==False:
+            self.ui_connected_pub_state = True
+            connected_msg = Bool()
+            connected_msg.data = True
+            self.ui_connected_pub.publish(connected_msg)
+            self.get_logger().info('Published UI connected state as True')
+
         corrosion_image = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
+        self.last_Threshold_frame = corrosion_image
+        self.get_logger().info(f'Saved threshold frame with shape: {corrosion_image.shape}')
+        
         if self.ui_instance and self.ui_instance.detection_state == 1 and self.ui_instance.camera_type == 0:
-            # Don't update display if user is actively painting
             if not self.ui_instance.is_painting:
                 self.signal_emitter.data_signal.emit(f"Thresholded: {msg.width}x{msg.height}")
                 self.signal_emitter.image_signal.emit(corrosion_image)
+                self.get_logger().info('Displayed threshold frame')
+        else:
+            self.get_logger().info(f'Not displaying: detection_state={self.ui_instance.detection_state}, camera_type={self.ui_instance.camera_type}')
 
     def ROBODK_completion_notification_callback(self, msg):
         if msg.data == True:
@@ -138,11 +156,11 @@ class UserInterface(QMainWindow):
         self.ui.Home_Position.clicked.connect(self.home_position)
         self.ui.Emergency_Stop.clicked.connect(self.emergency_stop)
         self.ui.videoLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ui.Vision_State.clicked.connect(self.toggle_vision_state)
+        self.ui.Vision_State.clicked.connect(self.toggle_vision_state) # Turn on and off threshold view on tab 1
         self.ui.Small_Pen.clicked.connect(lambda: self.set_custom_pen(0))
         self.ui.Medium_Pen.clicked.connect(lambda: self.set_custom_pen(1))
         self.ui.Large_Pen.clicked.connect(lambda: self.set_custom_pen(2))
-        self.ui.Switch_Camera_Type.clicked.connect(self.switch_camera_type)
+        self.ui.Switch_Camera_Type.clicked.connect(self.switch_camera_type)#switch between threshold and depth
 
         self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
         self.signal_emitter = RosSignalEmitter()
@@ -216,6 +234,15 @@ class UserInterface(QMainWindow):
 
     def toggle_vision_state(self):
         self.detection_state = 1 - self.detection_state  # Toggle between 0 and 1
+        
+        # If switching to threshold view (state 1), display cached frame
+        if self.detection_state == 1 and self.camera_type == 0:
+            if self.ros_node.last_Threshold_frame is not None:
+                self.signal_emitter.data_signal.emit(f"Thresholded: {self.ros_node.last_Threshold_frame.shape[1]}x{self.ros_node.last_Threshold_frame.shape[0]}")
+                self.signal_emitter.image_signal.emit(self.ros_node.last_Threshold_frame)
+                if printlogger:
+                    self.ros_node.get_logger().info('Displayed cached threshold frame on vision state toggle')
+        
         if printlogger: self.ros_node.get_logger().info(f'Toggling Vision State {self.detection_state}')
 
     def switch_camera_type(self):
@@ -293,6 +320,15 @@ class UserInterface(QMainWindow):
         elif index == 1:
             self.detection_state = 1  # Show thresholded feed on Vision tab
             self.tabindex = index
+            # Display the last received threshold frame if available
+            if self.ros_node.last_Threshold_frame is not None:
+                self.signal_emitter.data_signal.emit(f"Thresholded: {self.ros_node.last_Threshold_frame.shape[1]}x{self.ros_node.last_Threshold_frame.shape[0]}")
+                self.signal_emitter.image_signal.emit(self.ros_node.last_Threshold_frame)
+                if printlogger:
+                    self.ros_node.get_logger().info('Displayed cached threshold frame on tab switch')
+            else:
+                if printlogger:
+                    self.ros_node.get_logger().info('No cached threshold frame available yet')
         elif index == 2:
             self.detection_state = 2  # Show color feed on System Information tab
             pass  # System Information tab
@@ -425,12 +461,38 @@ class UserInterface(QMainWindow):
 
             self.ros_node.get_logger().info('Stroke completed, published masks')
 
+    def closeEvent(self, event):
+        """Called when window closes - cleanup before shutdown"""
+        self.cleanup()
+        event.accept()
+    
+    def cleanup(self):
+        """Cleanup function to run before topics disable"""
+        self.ros_node.get_logger().info('Cleaning up - publishing final state')
+        # Publish terminate signal
+        msg = Bool()
+        msg.data = False
+        self.ros_node.ui_connected_pub.publish(msg)
+        self.reset_vision()
+
+        # Add any other cleanup here
+
 
 
 def main():
+    import signal
+    
     rclpy.init()
     app = QApplication(sys.argv)
     window = UserInterface()
+    
+    # Handle Ctrl-C
+    def signal_handler(sig, frame):
+        window.cleanup()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    
     window.show()
     window.customize_tabs()
     ros_thread = threading.Thread(target=lambda: rclpy.spin(window.ros_node), daemon=True)
