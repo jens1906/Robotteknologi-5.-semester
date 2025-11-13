@@ -1,14 +1,23 @@
 # Surface Parameterization ROS 2 Package
 
-This package provides surface parameterization for robotic applications using inverse interpolation. It maps 3D Cartesian points (x,y,z) to 2D parameter space (u,v) and provides interpolation services.
+This package provides **conformal surface parameterization** for robotic applications following the approach from Amersdorfer et al. (2021). It implements equidistant path planning on curved freeform surfaces.
+
+## Reference
+
+**Amersdorfer, M., Meurer, T., & Glück, T. (2021)**  
+*"Equidistant Tool Path and Cartesian Trajectory Planning for Robotic Machining of Curved Freeform Surfaces"*  
+IEEE Transactions on Automation Science and Engineering  
+DOI: 10.1109/TASE.2021.3117691
 
 ## Features
 
-- Receives point clouds and computes surface parameterization
-- Local frame computation using PCA (not normalized)
-- UV parameterization using projection method
+- **Conformal parameterization** with metric tensor computation
+- Maps 3D Cartesian points (x,y,z) to 2D parameter space (u,v) 
+- **Preserves distances** through surface metric correction
+- Enables **equidistant path planning** on curved surfaces
+- Local frame computation using PCA
 - Inverse interpolation from (u,v) → (x,y,z)
-- Quality metrics evaluation
+- Quality metrics evaluation (isotropy, orthogonality, reconstruction error)
 
 ## Prerequisites
 
@@ -33,17 +42,21 @@ ros2 run parameterization parameterization_node
 
 ### Parameters
 
-- `interpolation_method` (string, default: 'rbf'): Interpolation method
-- `neighbors` (int, default: 50): Number of neighbors for local RBF
-- `normalize` (bool, default: false): Normalize UV to [0,1] range
+- `interpolation_method` (string, default: 'rbf'): Interpolation method for UV → XYZ
+- `neighbors` (int, default: 50): Number of neighbors for local RBF interpolation
+- `metric_neighbors` (int, default: 20): Number of neighbors for metric tensor computation
 - `quality_sample_size` (int, default: 1000): Sample size for quality evaluation
 - `status_publish_rate` (float, default: 1.0): Rate to publish status (Hz)
+- `conformal_iterations` (int, default: 5): Number of conformal correction iterations
+- `conformal_alpha` (float, default: 0.5): Conformal correction step size (0 < α < 1)
 
 Example with custom parameters:
 ```bash
 ros2 run parameterization parameterization_node --ros-args \
   -p neighbors:=100 \
-  -p quality_sample_size:=500
+  -p metric_neighbors:=30 \
+  -p conformal_iterations:=10 \
+  -p conformal_alpha:=0.3
 ```
 
 ## Topics
@@ -57,7 +70,8 @@ ros2 run parameterization parameterization_node --ros-args \
 - `/parameterization/status` (ParameterizationStatus): Status and quality metrics
   - `is_ready`: Whether parameterization is ready
   - `num_points`: Number of points in the cloud
-  - `mean_error`, `max_error`, `rmse`, `std_error`: Quality metrics
+  - `mean_error`, `max_error`, `rmse`, `std_error`: Reconstruction quality metrics
+  - Additional conformal metrics (isotropy, orthogonality) in extended status
 
 ## Services
 
@@ -109,14 +123,14 @@ ros2 service call /parameterization/get_uv_bounds parameterization/srv/GetUVBoun
 
 ## Python API
 
-You can also use the parameterization module directly in your Python code:
+You can also use the conformal parameterization module directly in your Python code:
 
 ```python
-from parameterization.surface_parameterization import SurfaceParameterization
+from parameterization.conformal_parameterization import ConformalParameterization
 import numpy as np
 
 # Create instance
-surf = SurfaceParameterization()
+surf = ConformalParameterization()
 
 # Set points
 points = np.array([[x1, y1, z1], [x2, y2, z2], ...])
@@ -125,8 +139,10 @@ surf.set_points(points)
 # Compute local frame
 surf.compute_local_frame()
 
-# Compute UV parameterization
-surf.compute_uv_parameterization(method='projection', normalize=False)
+# Compute conformal parameterization (Amersdorfer et al. 2021)
+surf.compute_initial_parameterization(method='projection')
+surf.compute_surface_metric(k_neighbors=20)
+surf.apply_conformal_correction(iterations=5, alpha=0.5)
 
 # Build interpolation
 surf.build_inverse_interpolation(method='rbf', neighbors=50)
@@ -134,6 +150,12 @@ surf.build_inverse_interpolation(method='rbf', neighbors=50)
 # Interpolate
 uv_query = np.array([[u1, v1], [u2, v2]])
 xyz = surf.interpolate(uv_query)
+
+# Get UV spacing for equidistant paths
+spacing_uv = surf.compute_equidistant_uv_spacing(
+    desired_spacing=0.05,  # 5cm on surface
+    uv_direction='u'
+)
 
 # Get bounds
 bounds = surf.get_uv_bounds()
@@ -143,6 +165,8 @@ print(f"V: [{bounds['v_min']}, {bounds['v_max']}]")
 # Evaluate quality
 metrics = surf.evaluate_quality(sample_size=1000)
 print(f"RMSE: {metrics['rmse']}")
+print(f"Isotropy error: {metrics['mean_isotropy_error']}")
+print(f"Orthogonality error: {metrics['mean_orthogonality_error']}")
 ```
 
 ## Integration Example
@@ -208,19 +232,49 @@ float64 v
 
 ## Workflow
 
-1. Node receives a point cloud via `/point_cloud` topic
-2. Computes local coordinate frame using PCA (not normalized)
-3. Computes UV parameterization using projection method
-4. Builds inverse interpolation using RBF with local neighbors
-5. Publishes status with quality metrics
-6. Other nodes can query interpolation and normals via services
+1. Node receives a point cloud via `/corrosion/scatter_plot_pub` topic
+2. Computes local coordinate frame using PCA
+3. Computes initial UV parameterization via projection
+4. **Computes surface metric tensor (E, F, G) - key for equidistant paths**
+5. **Applies conformal correction to minimize distortion**
+6. Builds inverse interpolation using RBF with local neighbors
+7. Publishes status with quality metrics including isotropy and orthogonality
+8. Other nodes can query interpolation and UV bounds via services
+9. Path planner uses metric-aware spacing for equidistant paths
+
+## Key Concepts
+
+### Surface Metric Tensor
+The metric tensor describes how distances in UV space relate to distances on the surface:
+- **E = ||∂r/∂u||²** - scale factor in u-direction
+- **F = <∂r/∂u, ∂r/∂v>** - cross term (should be ≈0)
+- **G = ||∂r/∂v||²** - scale factor in v-direction
+
+For equidistant paths: `ds² = E du² + 2F du dv + G dv²`
+
+### Conformal Correction
+Iteratively adjusts UV coordinates to make:
+- **E ≈ G** (isotropy) - uniform scaling in all directions
+- **F ≈ 0** (orthogonality) - perpendicular parameter lines
+
+This ensures UV spacing corresponds to surface spacing.
+
+## Quality Metrics
+
+- **Reconstruction RMSE**: How well (u,v) → (x,y,z) works (target: < 1mm)
+- **Isotropy error**: `|E - G| / (E + G)` (target: < 0.1)
+- **Orthogonality error**: `|F| / √(EG)` (target: < 0.1)
+- **Scale factors**: `√E` and `√G` (target: ≈ 1.0)
+
+Good metrics mean equidistant paths in UV space = equidistant paths on the surface!
 
 ## Notes
 
-- The local frame is computed using PCA but is **not normalized**, preserving actual scale
-- UV parameterization uses the projection method by default
-- Interpolation uses local RBF with 50 neighbors by default for efficiency
-- Quality metrics are computed on a sample of points to avoid performance issues with large clouds
+- Uses **conformal parameterization** following Amersdorfer et al. (2021)
+- Computes surface metric tensor for distance preservation
+- Enables **equidistant path planning** on curved surfaces
+- Quality metrics include isotropy and orthogonality
+- Especially effective for curved surfaces (cylinders, complex shapes)
 
 ## License
 
