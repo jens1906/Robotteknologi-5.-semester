@@ -128,22 +128,19 @@
         </widget>
        </widget>
       </widget>
-      <widget class="QCheckBox" name="checkBox">
+      <widget class="QRadioButton" name="radioButton">
        <property name="geometry">
         <rect>
-         <x>710</x>
-         <y>0</y>
-         <width>71</width>
-         <height>41</height>
+         <x>680</x>
+         <y>10</y>
+         <width>92</width>
+         <height>20</height>
         </rect>
        </property>
        <property name="text">
         <string>Info</string>
        </property>
       </widget>
-      <zorder>videoLabel</zorder>
-      <zorder>checkBox</zorder>
-      <zorder>stackedWidget_Info</zorder>
      </widget>
     </item>
     <item>
