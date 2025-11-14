@@ -78,6 +78,9 @@ class UserInterfaceNode(Node):
         elif self.ui_instance.camera_type == 1 and self.ui_instance.detection_state == 1:
             self.signal_emitter.data_signal.emit(f"Depth: {depth_image.shape[1]}x{depth_image.shape[0]}")
             self.signal_emitter.image_signal.emit(depth_image)
+        elif self.ui_instance.camera_type == 0 and self.ui_instance.detection_state == 1 and not self.ui_instance.is_painting:
+            self.signal_emitter.data_signal.emit(f"Thresholded: {self.last_Threshold_frame.shape[1]}x{self.last_Threshold_frame.shape[0]}")
+            self.signal_emitter.image_signal.emit(self.last_Threshold_frame)
         
 
     def corrosion_thresholding_callback(self, msg):
@@ -92,15 +95,8 @@ class UserInterfaceNode(Node):
         corrosion_image = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
         self.last_Threshold_frame = corrosion_image
         self.get_logger().info(f'Saved threshold frame with shape: {corrosion_image.shape}')
-        
-        if self.ui_instance and self.ui_instance.detection_state == 1 and self.ui_instance.camera_type == 0:
-            if not self.ui_instance.is_painting:
-                self.signal_emitter.data_signal.emit(f"Thresholded: {msg.width}x{msg.height}")
-                self.signal_emitter.image_signal.emit(corrosion_image)
-                self.get_logger().info('Displayed threshold frame')
-        else:
-            self.get_logger().info(f'Not displaying: detection_state={self.ui_instance.detection_state}, camera_type={self.ui_instance.camera_type}')
 
+            
     def ROBODK_completion_notification_callback(self, msg):
         if msg.data == True:
             self.currently_running = False
@@ -171,6 +167,9 @@ class UserInterface(QMainWindow):
         self.ui.videoLabel.clicked.connect(self.on_image_clicked)
         self.ui.videoLabel.dragged.connect(self.on_image_dragged)
         self.ui.videoLabel.released.connect(self.on_image_released)
+        
+        # Hide statusLabel
+        self.ui.statusLabel.hide()
     
     def customize_tabs(self):
         tabbar = self.ui.tabWidget.tabBar()
@@ -234,15 +233,6 @@ class UserInterface(QMainWindow):
 
     def toggle_vision_state(self):
         self.detection_state = 1 - self.detection_state  # Toggle between 0 and 1
-        
-        # If switching to threshold view (state 1), display cached frame
-        if self.detection_state == 1 and self.camera_type == 0:
-            if self.ros_node.last_Threshold_frame is not None:
-                self.signal_emitter.data_signal.emit(f"Thresholded: {self.ros_node.last_Threshold_frame.shape[1]}x{self.ros_node.last_Threshold_frame.shape[0]}")
-                self.signal_emitter.image_signal.emit(self.ros_node.last_Threshold_frame)
-                if printlogger:
-                    self.ros_node.get_logger().info('Displayed cached threshold frame on vision state toggle')
-        
         if printlogger: self.ros_node.get_logger().info(f'Toggling Vision State {self.detection_state}')
 
     def switch_camera_type(self):
@@ -256,12 +246,12 @@ class UserInterface(QMainWindow):
             self.ui.Large_Pen.setStyleSheet("background-color: #ffffff;")
             if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
         else:
-            self.ui.Reset.setStyleSheet("background-color: #636363;")
-            self.ui.Eraser.setStyleSheet("background-color: #636363;")
-            self.ui.Undo.setStyleSheet("background-color: #636363;")
-            self.ui.Small_Pen.setStyleSheet("background-color: #636363;")
-            self.ui.Medium_Pen.setStyleSheet("background-color: #636363;")
-            self.ui.Large_Pen.setStyleSheet("background-color: #636363;")
+            self.ui.Reset.setStyleSheet("background-color: #B3B3B3;")
+            self.ui.Eraser.setStyleSheet("background-color: #B3B3B3;")
+            self.ui.Undo.setStyleSheet("background-color: #B3B3B3;")
+            self.ui.Small_Pen.setStyleSheet("background-color: #B3B3B3;")
+            self.ui.Medium_Pen.setStyleSheet("background-color: #B3B3B3;")
+            self.ui.Large_Pen.setStyleSheet("background-color: #B3B3B3;")
             if printlogger: self.ros_node.get_logger().info('Switching to Depth Camera')
 
         if printlogger: self.ros_node.get_logger().info(f'Switching Camera Type {self.camera_type}')
@@ -359,14 +349,6 @@ class UserInterface(QMainWindow):
         
         # Set the actual image dimensions for coordinate mapping
         self.ui.videoLabel.set_image_dimensions(w, h)
-
-
-
-    def on_image_clicked(self, x, y, button):
-        """Handle image click events"""
-        message = f'Image clicked at ({x}, {y}) with {button} button'
-        #print(f"[CLICK] {message}")
-        if printlogger: self.ros_node.get_logger().info(message)
 
     def place_kernel(self, img, kernel, x, y):
         """Place kernel centered at (x,y) in img using loops."""

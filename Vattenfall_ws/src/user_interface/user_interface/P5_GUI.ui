@@ -29,25 +29,118 @@
      </widget>
     </item>
     <item>
-     <widget class="QLabel" name="videoLabel">
+     <widget class="QFrame" name="frame_2">
       <property name="sizePolicy">
        <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
         <horstretch>0</horstretch>
         <verstretch>0</verstretch>
        </sizepolicy>
       </property>
-      <property name="mouseTracking">
-       <bool>true</bool>
+      <property name="frameShape">
+       <enum>QFrame::Shape::StyledPanel</enum>
       </property>
-      <property name="tabletTracking">
-       <bool>false</bool>
+      <property name="frameShadow">
+       <enum>QFrame::Shadow::Raised</enum>
       </property>
-      <property name="focusPolicy">
-       <enum>Qt::FocusPolicy::StrongFocus</enum>
-      </property>
-      <property name="text">
-       <string>videoLabel</string>
-      </property>
+      <widget class="QLabel" name="videoLabel">
+       <property name="geometry">
+        <rect>
+         <x>0</x>
+         <y>7</y>
+         <width>782</width>
+         <height>241</height>
+        </rect>
+       </property>
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="mouseTracking">
+        <bool>true</bool>
+       </property>
+       <property name="tabletTracking">
+        <bool>false</bool>
+       </property>
+       <property name="focusPolicy">
+        <enum>Qt::FocusPolicy::StrongFocus</enum>
+       </property>
+       <property name="text">
+        <string>videoLabel</string>
+       </property>
+      </widget>
+      <widget class="QStackedWidget" name="stackedWidget_Info">
+       <property name="geometry">
+        <rect>
+         <x>650</x>
+         <y>40</y>
+         <width>131</width>
+         <height>211</height>
+        </rect>
+       </property>
+       <property name="currentIndex">
+        <number>1</number>
+       </property>
+       <widget class="QWidget" name="Info_Movement">
+        <widget class="QLabel" name="Info_Movement_Label">
+         <property name="geometry">
+          <rect>
+           <x>0</x>
+           <y>0</y>
+           <width>131</width>
+           <height>211</height>
+          </rect>
+         </property>
+         <property name="text">
+          <string>TextLabel</string>
+         </property>
+        </widget>
+       </widget>
+       <widget class="QWidget" name="Info_Vision">
+        <widget class="QLabel" name="Info_Vision_Label">
+         <property name="geometry">
+          <rect>
+           <x>0</x>
+           <y>0</y>
+           <width>131</width>
+           <height>211</height>
+          </rect>
+         </property>
+         <property name="text">
+          <string>TextLabel</string>
+         </property>
+        </widget>
+       </widget>
+       <widget class="QWidget" name="Info_System">
+        <widget class="QLabel" name="Info_System_Label">
+         <property name="geometry">
+          <rect>
+           <x>0</x>
+           <y>0</y>
+           <width>131</width>
+           <height>211</height>
+          </rect>
+         </property>
+         <property name="text">
+          <string>TextLabel</string>
+         </property>
+        </widget>
+       </widget>
+      </widget>
+      <widget class="QRadioButton" name="radioButton">
+       <property name="geometry">
+        <rect>
+         <x>680</x>
+         <y>10</y>
+         <width>92</width>
+         <height>20</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Info</string>
+       </property>
+      </widget>
      </widget>
     </item>
     <item>
