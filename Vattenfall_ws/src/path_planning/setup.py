@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'path_planning_node = path_planning.path_planning_node:main'
+            'path_planning_node = path_planning.path_planning_node:main',
+            'visualize_path = path_planning.visualize_path:main'
         ],
     },
 )
