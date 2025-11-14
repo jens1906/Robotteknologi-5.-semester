@@ -80,7 +80,7 @@
         </rect>
        </property>
        <property name="currentIndex">
-        <number>0</number>
+        <number>1</number>
        </property>
        <widget class="QWidget" name="Info_Movement">
         <widget class="QLabel" name="Info_Movement_Label">
