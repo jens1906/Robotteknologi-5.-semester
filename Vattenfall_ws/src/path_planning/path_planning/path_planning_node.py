@@ -24,30 +24,9 @@ Publishers:
 Services:
 - /parameterization/get_uv_bounds (GetUVBounds): Get UV parameter space bounds.
 
+To test the path generation independently, set TESTING = True and run this file together with visualize_path.py.
+
 """
-
-
-testing = True
-
-def testingmode():
-    # create large uv_data array for testing
-    uv_data = np.random.rand(1000, 2)
-
-    #plot uv_data
-    import matplotlib.pyplot as plt
-    plt.scatter(uv_data[:, 0], uv_data[:, 1], color='red')
-    plt.title('UV Data Points')
-    plt.xlabel('U')
-    plt.ylabel('V')
-    plt.grid()
-    plt.show()
-
-testingmode()
-
-
-
-
-
 
 class PathPlanner(Node):
     """ Path Planner"""
@@ -56,17 +35,18 @@ class PathPlanner(Node):
         super().__init__('path_planner_node') # Initialize ROS2 node
 
         # Parameters
-        self.declare_parameter('spacing', 0.05)
-        self.declare_parameter('n_bezier', 50)
-        self.declare_parameter('line_n', 10)
-        self.declare_parameter('auto_generate', True)
+        self.declare_parameter('point_spacing', 0.05)  # Resolution of points along lines (V direction) - every point within this distance
+        self.declare_parameter('line_spacing', 0.1)  # Tool coverage radius between lines (U direction) - every point within this distance
+        self.declare_parameter('n_bezier', 50) # Number of points for generating connecting lines
+        self.declare_parameter('auto_generate', True) # Automatically generate path when parameterization is ready
         
-        self.d = self.get_parameter('spacing').value
+        self.point_spacing = self.get_parameter('point_spacing').value
+        self.line_spacing = self.get_parameter('line_spacing').value
         self.n_bezier = self.get_parameter('n_bezier').value
-        self.line_n = self.get_parameter('line_n').value
         self.auto_generate = self.get_parameter('auto_generate').value
-        self.bezier_curviture = self.d / 2
+        self.bezier_curvature = self.point_spacing / 2
         self.tau = np.linspace(0, 1, self.n_bezier)
+        self.test = TESTING
 
         # Data holders
         self.uv_bounds = None
@@ -90,36 +70,56 @@ class PathPlanner(Node):
         # Publishers
         self.uv_path_pub = self.create_publisher(Float64MultiArray, '/path/uv_path', 10)
         
+        # Debug info
         self.get_logger().info('Path Planner node initialized')
-        self.get_logger().info(f'  Spacing: {self.d}')
+        self.get_logger().info(f'  Point spacing (V direction): {self.point_spacing}')
+        self.get_logger().info(f'  Line spacing (U direction): {self.line_spacing}')
         self.get_logger().info(f'  Bezier points: {self.n_bezier}')
-        self.get_logger().info(f'  Number of lines: {self.line_n}')
         self.get_logger().info(f'  Auto-generate: {self.auto_generate}')
+        self.get_logger().info(f'  Test mode: {self.test}')
+
+        # Run test mode setup
+        if self.test:
+            self.last_uv_path = None  # Store the last generated path for republishing
+            self.create_timer(1.0, self.republish_path) # republish path periodically (for testing/late subscribers)
+
+            #  generate a path with x bounds
+            self.get_logger().info('Test mode enabled - generating path with default UV bounds')
+            self.uv_bounds = {'u_min': 0.0, 'u_max': 1.0, 'v_min': 0.0, 'v_max': 1.0}
+            self.generate_zigzag_paths()
+            self.publish_path()          
+
+
+    def republish_path(self):
+        """Periodically republish the last generated path (Only for testing)."""
+        if self.last_uv_path is not None:
+            uv_msg = Float64MultiArray()
+            uv_msg.data = self.last_uv_path.flatten().tolist()
+            self.uv_path_pub.publish(uv_msg)
 
 
     def status_callback(self, msg):
         """
         Callback for parameterization status.
-        When parameterization is ready, fetch UV bounds and generate path.
+        When parameterization becomes ready, fetch UV bounds and generate path.
         """
         try:
-            # Update readiness status
-            was_ready = self.parameterization_ready
+            # Track previous state to detect transitions
+            previously_ready = self.parameterization_ready
             self.parameterization_ready = msg.is_ready
             
             # Only process if we have valid data (num_points > 0)
             if not msg.is_ready or msg.num_points == 0:
-                if was_ready:
+                if previously_ready:
                     self.get_logger().warn('Parameterization no longer ready')
                 self.parameterization_ready = False
                 return
             
-            # If just became ready, generate path
-            if self.parameterization_ready and not was_ready:
+            # If just became ready (state transition), generate path
+            if self.parameterization_ready and not previously_ready:
                 self.get_logger().info(f'Parameterization is ready with {msg.num_points} points. Fetching UV bounds...')
                 
                 if self.auto_generate:
-                    # Initiate async service call
                     self.fetch_uv_bounds_async()
                 else:
                     self.get_logger().info('Auto-generate disabled. Call generate_path() manually.')
@@ -274,21 +274,44 @@ class PathPlanner(Node):
             v_min = self.uv_bounds['v_min']
             v_max = self.uv_bounds['v_max']
 
-            if self.line_n < 3:
-                raise ValueError("Error: generate_zigzag_paths(): line_n must be at least 3")
+            # Calculate number of lines based on line_spacing to ensure full coverage
+            u_range = u_max - u_min
+            line_n = int(np.ceil(u_range / (2 * self.line_spacing))) + 1
+            
+            if line_n < 2:
+                raise ValueError(f"Error: generate_zigzag_paths(): line_spacing {self.line_spacing} is too large for U range {u_range}")
 
-            u_lin = np.linspace(u_min, u_max, self.line_n)
-            v_lin = np.linspace(v_min, v_max, self.line_n)
+            # Calculate number of points per line based on point_spacing (radius in V direction)
+            v_range = v_max - v_min
+            points_per_line = int(np.ceil(v_range / (2 * self.point_spacing))) + 1
+
+            # Use linspace to ensure coverage from u_min to u_max
+            u_lin = np.linspace(u_min, u_max, line_n)
+            v_lin = np.linspace(v_min, v_max, points_per_line)
+            
+            # Calculate actual spacing achieved
+            actual_u_spacing = (u_max - u_min) / (line_n - 1) if line_n > 1 else 0
+            actual_v_spacing = (v_max - v_min) / (points_per_line - 1) if points_per_line > 1 else 0
+            max_distance_u = actual_u_spacing / 2  # Maximum distance from any point to nearest line
+            max_distance_v = actual_v_spacing / 2  # Maximum distance from any point to nearest point on line
 
             u_lines, v_lines = [], []
 
+            # If odd number of lines, start from max to ensure ending at top-right
+            start_reversed = (line_n % 2 == 0)
+            
             for i, u in enumerate(u_lin):
-                v_line = v_lin if i % 2 == 0 else v_lin[::-1]
+                # Alternate direction for zigzag
+                should_reverse = (i % 2 == 1) if not start_reversed else (i % 2 == 0)
+                v_line = v_lin[::-1] if should_reverse else v_lin
+                    
                 u_lines.append(np.full_like(v_line, u))
                 v_lines.append(v_line)
 
             self.paths_uv = (u_lines, v_lines)
-            self.get_logger().info(f'Generated zigzag path with {len(u_lines)} lines')
+            self.get_logger().info(f'Generated zigzag path with {line_n} lines, {points_per_line} points per line')
+            self.get_logger().info(f'Actual spacing: U={actual_u_spacing:.4f}, V={actual_v_spacing:.4f}')
+            self.get_logger().info(f'Max distance to coverage: U={max_distance_u:.4f} (≤{self.line_spacing}), V={max_distance_v:.4f} (≤{self.point_spacing})')
 
         except Exception as e:
             self.get_logger().error(f"Error: generate_zigzag_paths(): {e}")
@@ -306,11 +329,8 @@ class PathPlanner(Node):
             for i in range(n_lines):
                 u_line, v_line = self.paths_uv[0][i], self.paths_uv[1][i]
                 
-                # Add line (reversed every other iteration)
-                if i % 2 == 0:
-                    path.append(np.column_stack([u_line, v_line]))
-                else:
-                    path.append(np.column_stack([u_line[::-1], v_line[::-1]]))
+                # Add line - don't reverse the line, the zigzag is already in the data
+                path.append(np.column_stack([u_line, v_line]))
 
                 # Add Bézier curve to next line
                 if i < n_lines - 1:
@@ -326,8 +346,8 @@ class PathPlanner(Node):
 
                     if norm_curr > 1e-6 and norm_next > 1e-6:
                         b0 = end
-                        b1 = end + self.bezier_curviture * vec_curr / norm_curr
-                        b2 = next_start - self.bezier_curviture * vec_next / norm_next
+                        b1 = end + self.bezier_curvature * vec_curr / norm_curr
+                        b2 = next_start - self.bezier_curvature * vec_next / norm_next
                         b3 = next_start
 
                         path.append(self.cubic_bezier(b0, b1, b2, b3))
@@ -346,6 +366,9 @@ class PathPlanner(Node):
             if uv_path is None:
                 raise ValueError("Error: publish_path(): Path generation failed.")
             
+            if TESTING:
+                self.last_uv_path = uv_path  # Store path for republishing
+            
             # Publish UV path
             uv_msg = Float64MultiArray()
             uv_msg.data = uv_path.flatten().tolist()
@@ -354,6 +377,54 @@ class PathPlanner(Node):
         
         except Exception as e:
             self.get_logger().error(f"Error: publish_path(): {e}")
+
+
+def testing_mode():
+    """Test path generation without ROS2."""
+    # Create random UV data for testing
+    uv_data = np.random.rand(1000, 2)
+    
+    # Create a mock node without initializing ROS2
+    import unittest.mock as mock
+    with mock.patch('rclpy.node.Node.__init__', return_value=None):
+        planner = PathPlanner()
+        planner._logger = mock.MagicMock()  # Mock logger
+        
+        planner.uv_bounds = {
+            'u_min': np.min(uv_data[:, 0]),
+            'u_max': np.max(uv_data[:, 0]),
+            'v_min': np.min(uv_data[:, 1]),
+            'v_max': np.max(uv_data[:, 1])
+        }
+        planner.generate_zigzag_paths()
+        uv_path = planner.create_continuous_path()
+        
+        if uv_path is not None:
+            print(f"✓ Path generated successfully: {len(uv_path)} points")
+            if TESTING:
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=(10, 8))
+                
+                # Plot UV data points
+                ax.scatter(uv_data[:, 0], uv_data[:, 1], color='red', s=10, alpha=0.3, label='UV Data Points')
+                
+                # Plot generated path
+                ax.plot(uv_path[:, 0], uv_path[:, 1], color='blue', linewidth=2, label='Generated Path')
+                
+                ax.set_title('Generated UV Path with Data Points')
+                ax.set_xlabel('U')
+                ax.set_ylabel('V')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                ax.axis('equal')
+                plt.tight_layout()
+                plt.show()
+        else:
+            print("✗ Path generation failed")
+
+
+# Testing configuration
+TESTING = False
 
 
 def main():
@@ -365,6 +436,9 @@ def main():
     except Exception as e:
         print(f"Path - Error: main(): {e}")
 
-#if __name__ == '__main__':
-#    main()
+if __name__ == '__main__':
+    if TESTING:
+        testing_mode()
+    else:
+        main()
 
