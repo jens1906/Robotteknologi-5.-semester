@@ -72,16 +72,37 @@ class UserInterfaceNode(Node):
             self.ui_instance.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
             self.get_logger().info(f"Initialized corrosion_area_add and corrosion_area_remove with shape: {(h, w)} and {color_image.shape}")
         # Show color or depth based on camera_type
-        if self.ui_instance.camera_type == 0 and self.ui_instance.detection_state == 0:
+        if self.ui_instance.camerafeed[0] == 0 and self.ui_instance.camerafeed[1] == 0:
             self.signal_emitter.data_signal.emit(f"Color: {depth_image.shape[1]}x{depth_image.shape[0]}")
             self.signal_emitter.image_signal.emit(color_image)
-        elif self.ui_instance.camera_type == 1 and self.ui_instance.detection_state == 1:
+            self.ui_instance.ui.Reset.setStyleSheet("background-color: #ffffff;")
+            self.ui_instance.ui.Eraser.setStyleSheet("background-color: #ffffff;")
+            self.ui_instance.ui.Undo.setStyleSheet("background-color: #ffffff;")
+            self.ui_instance.ui.Small_Pen.setStyleSheet("background-color: #ffffff;")
+            self.ui_instance.ui.Medium_Pen.setStyleSheet("background-color: #ffffff;")
+            self.ui_instance.ui.Large_Pen.setStyleSheet("background-color: #ffffff;")
+            if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
+        elif self.ui_instance.camerafeed[0] == 1 and self.ui_instance.camerafeed[1] == 1:
             self.signal_emitter.data_signal.emit(f"Depth: {depth_image.shape[1]}x{depth_image.shape[0]}")
             self.signal_emitter.image_signal.emit(depth_image)
-        elif self.ui_instance.camera_type == 0 and self.ui_instance.detection_state == 1 and not self.ui_instance.is_painting:
+            self.ui_instance.ui.Reset.setStyleSheet("background-color: #B3B3B3;")
+            self.ui_instance.ui.Eraser.setStyleSheet("background-color: #B3B3B3;")
+            self.ui_instance.ui.Undo.setStyleSheet("background-color: #B3B3B3;")
+            self.ui_instance.ui.Small_Pen.setStyleSheet("background-color: #B3B3B3;")
+            self.ui_instance.ui.Medium_Pen.setStyleSheet("background-color: #B3B3B3;")
+            self.ui_instance.ui.Large_Pen.setStyleSheet("background-color: #B3B3B3;")
+            if printlogger: self.ros_node.get_logger().info('Switching to Depth Camera')
+        elif self.ui_instance.camerafeed[0] == 0 and self.ui_instance.camerafeed[1] == 1 and not self.ui_instance.is_painting:            
             self.signal_emitter.data_signal.emit(f"Thresholded: {self.last_Threshold_frame.shape[1]}x{self.last_Threshold_frame.shape[0]}")
             self.signal_emitter.image_signal.emit(self.last_Threshold_frame)
-        
+            self.ui_instance.ui.Reset.setStyleSheet("background-color: #ffffff;")
+            self.ui_instance.ui.Eraser.setStyleSheet("background-color: #ffffff;")
+            self.ui_instance.ui.Undo.setStyleSheet("background-color: #ffffff;")
+            self.ui_instance.ui.Small_Pen.setStyleSheet("background-color: #ffffff;")
+            self.ui_instance.ui.Medium_Pen.setStyleSheet("background-color: #ffffff;")
+            self.ui_instance.ui.Large_Pen.setStyleSheet("background-color: #ffffff;")
+            if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
+
 
     def corrosion_thresholding_callback(self, msg):
         self.get_logger().info('=== Corrosion thresholding callback CALLED ===')
@@ -129,8 +150,7 @@ class UserInterface(QMainWindow):
         super().__init__()
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
-        self.detection_state = 0 
-        self.camera_type = 0
+        self.camerafeed = [0,0]
         self.tabindex = 0  # Track current tab index
         self.pen_size_and_type = [0,1]  # [size, type]
         
@@ -232,29 +252,12 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info('Terminate pressed')
 
     def toggle_vision_state(self):
-        self.detection_state = 1 - self.detection_state  # Toggle between 0 and 1
-        if printlogger: self.ros_node.get_logger().info(f'Toggling Vision State {self.detection_state}')
+        self.camerafeed[1] = 1 - self.camerafeed[1]  # Toggle between 0 and 1
+        if printlogger: self.ros_node.get_logger().info(f'Toggling Vision State {self.camerafeed[1]}')
 
     def switch_camera_type(self):
-        self.camera_type = 1 - self.camera_type  # Toggle between 0 and 1
-        if self.camera_type == 0:
-            self.ui.Reset.setStyleSheet("background-color: #ffffff;")
-            self.ui.Eraser.setStyleSheet("background-color: #ffffff;")
-            self.ui.Undo.setStyleSheet("background-color: #ffffff;")
-            self.ui.Small_Pen.setStyleSheet("background-color: #ffffff;")
-            self.ui.Medium_Pen.setStyleSheet("background-color: #ffffff;")
-            self.ui.Large_Pen.setStyleSheet("background-color: #ffffff;")
-            if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
-        else:
-            self.ui.Reset.setStyleSheet("background-color: #B3B3B3;")
-            self.ui.Eraser.setStyleSheet("background-color: #B3B3B3;")
-            self.ui.Undo.setStyleSheet("background-color: #B3B3B3;")
-            self.ui.Small_Pen.setStyleSheet("background-color: #B3B3B3;")
-            self.ui.Medium_Pen.setStyleSheet("background-color: #B3B3B3;")
-            self.ui.Large_Pen.setStyleSheet("background-color: #B3B3B3;")
-            if printlogger: self.ros_node.get_logger().info('Switching to Depth Camera')
-
-        if printlogger: self.ros_node.get_logger().info(f'Switching Camera Type {self.camera_type}')
+        self.camerafeed[0] = 1 - self.camerafeed[0]  # Toggle between 0 and 1
+        if printlogger: self.ros_node.get_logger().info(f'Switching Camera Type {self.camerafeed[0]}')
 
     def reset_vision(self):
         self.ros_node.get_logger().info('Resetting vision areas')
@@ -304,11 +307,11 @@ class UserInterface(QMainWindow):
     def tab_difference(self, index):
         if printlogger: self.ros_node.get_logger().info(f'Tab changed to {index}')
         if index == 0:
-            self.camera_type = 0
-            self.detection_state = 0  # Show color feed on Movement tab
+            self.camerafeed[0] = 0
+            self.camerafeed[1] = 0  # Show color feed on Movement tab
             self.tabindex = index
         elif index == 1:
-            self.detection_state = 1  # Show thresholded feed on Vision tab
+            self.camerafeed[1] = 1  # Show thresholded feed on Vision tab
             self.tabindex = index
             # Display the last received threshold frame if available
             if self.ros_node.last_Threshold_frame is not None:
@@ -320,7 +323,8 @@ class UserInterface(QMainWindow):
                 if printlogger:
                     self.ros_node.get_logger().info('No cached threshold frame available yet')
         elif index == 2:
-            self.detection_state = 2  # Show color feed on System Information tab
+            self.camerafeed[0] = 0
+            self.camerafeed[1] = 0
             pass  # System Information tab
 
     def on_data(self, data):
@@ -383,7 +387,7 @@ class UserInterface(QMainWindow):
 
     def on_image_dragged(self, x, y, button):
         """Handle image drag events"""
-        if self.detection_state == 1 and self.camera_type == 0 and self.tabindex == 1 and self.pen_size_and_type[0] in [0, 1, 2] and (self.pen_size_and_type[0] and self.pen_size_and_type[1]) is not None:
+        if self.camerafeed[1] == 1 and self.camerafeed[0] == 0 and self.tabindex == 1 and self.pen_size_and_type[0] in [0, 1, 2] and (self.pen_size_and_type[0] and self.pen_size_and_type[1]) is not None:
             if printlogger: self.ros_node.get_logger().info(f'Pen size: {self.pen_size_and_type[0]}, Pen type: {self.pen_size_and_type[1]}')
             self.pen_kernel_sizes = [   np.ones((10, 10), np.uint8) * 255,   
                                         np.ones((25, 25), np.uint8) * 255,
@@ -415,7 +419,7 @@ class UserInterface(QMainWindow):
     
 
     def on_image_clicked(self, x, y, button):
-        if self.detection_state == 1 and self.camera_type == 0 and self.tabindex == 1:
+        if self.camerafeed[1] == 1 and self.camerafeed[0] == 0 and self.tabindex == 1:
             # Save state BEFORE first paint
             self.save_undo_state()
             self.is_painting = True  # Start painting mode
@@ -429,7 +433,7 @@ class UserInterface(QMainWindow):
             self.ros_node.get_logger().info(f'Released at ({x}, {y}), button={button}')
         
         # This fires AFTER dragging stops
-        if self.detection_state == 1 and self.camera_type == 0 and self.tabindex == 1:
+        if self.camerafeed[1] == 1 and self.camerafeed[0] == 0 and self.tabindex == 1:
             self.is_painting = False  # End painting mode - allow ROS updates again
             
             # Publish final state to ROS for processing
