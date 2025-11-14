@@ -35,16 +35,16 @@ class PathPlanner(Node):
         super().__init__('path_planner_node') # Initialize ROS2 node
 
         # Parameters
-        self.declare_parameter('point_spacing', 0.05)  # Resolution of points along lines (V direction) - every point within this distance
+        self.declare_parameter('point_spacing', 0.5)  # Resolution of points along lines (V direction) - every point within this distance
         self.declare_parameter('line_spacing', 0.1)  # Tool coverage radius between lines (U direction) - every point within this distance
-        self.declare_parameter('n_bezier', 50) # Number of points for generating connecting lines
+        self.declare_parameter('n_bezier', 25) # Number of points for generating connecting lines
         self.declare_parameter('auto_generate', True) # Automatically generate path when parameterization is ready
         
         self.point_spacing = self.get_parameter('point_spacing').value
         self.line_spacing = self.get_parameter('line_spacing').value
         self.n_bezier = self.get_parameter('n_bezier').value
         self.auto_generate = self.get_parameter('auto_generate').value
-        self.bezier_curvature = self.point_spacing / 2
+        self.bezier_curvature = self.point_spacing / 4
         self.tau = np.linspace(0, 1, self.n_bezier)
         self.test = TESTING
 
@@ -338,8 +338,18 @@ class PathPlanner(Node):
                     next_u, next_v = self.paths_uv[0][i+1], self.paths_uv[1][i+1]
                     next_start = np.array([next_u[0], next_v[0]])
 
-                    vec_curr = end - np.array([u_line[0], v_line[0]])
-                    vec_next = next_start - end
+                    # Calculate direction vectors for smooth transition
+                    # Use the direction from second-to-last to last point for current line
+                    if len(u_line) > 1:
+                        vec_curr = end - np.array([u_line[-2], v_line[-2]])
+                    else:
+                        vec_curr = np.array([1.0, 0.0])  # Default horizontal direction
+                    
+                    # Use the direction from first to second point for next line
+                    if len(next_u) > 1:
+                        vec_next = np.array([next_u[1], next_v[1]]) - next_start
+                    else:
+                        vec_next = np.array([1.0, 0.0])  # Default horizontal direction
                     
                     norm_curr = np.linalg.norm(vec_curr)
                     norm_next = np.linalg.norm(vec_next)
@@ -424,7 +434,7 @@ def testing_mode():
 
 
 # Testing configuration
-TESTING = False
+TESTING = True
 
 
 def main():
