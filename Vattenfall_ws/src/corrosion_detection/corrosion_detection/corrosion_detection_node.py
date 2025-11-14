@@ -161,6 +161,10 @@ class CorrosionDetector(Node):
 
                 # Edge detection on the cleaned, combined mask
                 edge = cv.Canny(cleaned_gray, 100, 200)
+                
+                # Dilate edges to make them thicker (5 pixels)
+                edge_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
+                edge = cv.dilate(edge, edge_kernel, iterations=2)
 
                 # Overlay green edges on original color image
                 color_threshold_image[edge > 0] = [0, 255, 0]
@@ -215,6 +219,11 @@ class CorrosionDetector(Node):
         img_final_erode = cv.cvtColor(self.clean_image(self.threshold_corrosion(image)), cv.COLOR_BGR2GRAY)
 
         edges = cv.Canny(img_final_erode, threshold1, threshold2)
+        
+        # Dilate edges to make them thicker (5 pixels)
+        edge_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
+        edges = cv.dilate(edges, edge_kernel, iterations=2)
+        
         contours, _ = cv.findContours(edges, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
         filled_mask = np.zeros_like(img_final_erode)
         cv.drawContours(filled_mask, contours, -1, 255, thickness=cv.FILLED)
@@ -233,7 +242,7 @@ class CorrosionDetector(Node):
 
     def destroy_node(self):
         
-        
+
 
         cv.destroyAllWindows()
         super().destroy_node()
