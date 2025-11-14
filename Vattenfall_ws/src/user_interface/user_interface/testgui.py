@@ -9,7 +9,8 @@ import cv2
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QStatusBar
 from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtCore import Qt, QtCore
+from PyQt6.QtCore import Qt
+from PyQt6 import QtCore
 from image_click_detector import ClickableImageLabel
 
 
