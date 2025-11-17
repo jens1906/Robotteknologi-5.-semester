@@ -434,7 +434,7 @@ def testing_mode():
 
 
 # Testing configuration
-TESTING = True
+TESTING = False
 
 
 def main():
