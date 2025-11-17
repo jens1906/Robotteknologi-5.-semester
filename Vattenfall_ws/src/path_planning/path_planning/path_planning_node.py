@@ -24,8 +24,6 @@ Publishers:
 Services:
 - /parameterization/get_uv_bounds (GetUVBounds): Get UV parameter space bounds.
 
-To test the path generation independently, set TESTING = True and run this file together with visualize_path.py.
-
 """
 
 class PathPlanner(Node):
@@ -36,7 +34,7 @@ class PathPlanner(Node):
 
         # Parameters
         self.declare_parameter('point_spacing', 0.5)  # Resolution of points along lines (V direction) - every point within this distance
-        self.declare_parameter('line_spacing', 0.1)  # Tool coverage radius between lines (U direction) - every point within this distance
+        self.declare_parameter('line_spacing', 5)  # Tool coverage radius between lines (U direction) - every point within this distance
         self.declare_parameter('n_bezier', 25) # Number of points for generating connecting lines
         self.declare_parameter('auto_generate', True) # Automatically generate path when parameterization is ready
         
@@ -44,9 +42,8 @@ class PathPlanner(Node):
         self.line_spacing = self.get_parameter('line_spacing').value
         self.n_bezier = self.get_parameter('n_bezier').value
         self.auto_generate = self.get_parameter('auto_generate').value
-        self.bezier_curvature = self.point_spacing / 4
+        self.bezier_curvature = self.line_spacing*1.25
         self.tau = np.linspace(0, 1, self.n_bezier)
-        self.test = TESTING
 
         # Data holders
         self.uv_bounds = None
@@ -76,26 +73,6 @@ class PathPlanner(Node):
         self.get_logger().info(f'  Line spacing (U direction): {self.line_spacing}')
         self.get_logger().info(f'  Bezier points: {self.n_bezier}')
         self.get_logger().info(f'  Auto-generate: {self.auto_generate}')
-        self.get_logger().info(f'  Test mode: {self.test}')
-
-        # Run test mode setup
-        if self.test:
-            self.last_uv_path = None  # Store the last generated path for republishing
-            self.create_timer(1.0, self.republish_path) # republish path periodically (for testing/late subscribers)
-
-            #  generate a path with x bounds
-            self.get_logger().info('Test mode enabled - generating path with default UV bounds')
-            self.uv_bounds = {'u_min': 0.0, 'u_max': 1.0, 'v_min': 0.0, 'v_max': 1.0}
-            self.generate_zigzag_paths()
-            self.publish_path()          
-
-
-    def republish_path(self):
-        """Periodically republish the last generated path (Only for testing)."""
-        if self.last_uv_path is not None:
-            uv_msg = Float64MultiArray()
-            uv_msg.data = self.last_uv_path.flatten().tolist()
-            self.uv_path_pub.publish(uv_msg)
 
 
     def status_callback(self, msg):
@@ -376,9 +353,6 @@ class PathPlanner(Node):
             if uv_path is None:
                 raise ValueError("Error: publish_path(): Path generation failed.")
             
-            if TESTING:
-                self.last_uv_path = uv_path  # Store path for republishing
-            
             # Publish UV path
             uv_msg = Float64MultiArray()
             uv_msg.data = uv_path.flatten().tolist()
@@ -387,54 +361,6 @@ class PathPlanner(Node):
         
         except Exception as e:
             self.get_logger().error(f"Error: publish_path(): {e}")
-
-
-def testing_mode():
-    """Test path generation without ROS2."""
-    # Create random UV data for testing
-    uv_data = np.random.rand(1000, 2)
-    
-    # Create a mock node without initializing ROS2
-    import unittest.mock as mock
-    with mock.patch('rclpy.node.Node.__init__', return_value=None):
-        planner = PathPlanner()
-        planner._logger = mock.MagicMock()  # Mock logger
-        
-        planner.uv_bounds = {
-            'u_min': np.min(uv_data[:, 0]),
-            'u_max': np.max(uv_data[:, 0]),
-            'v_min': np.min(uv_data[:, 1]),
-            'v_max': np.max(uv_data[:, 1])
-        }
-        planner.generate_zigzag_paths()
-        uv_path = planner.create_continuous_path()
-        
-        if uv_path is not None:
-            print(f"✓ Path generated successfully: {len(uv_path)} points")
-            if TESTING:
-                import matplotlib.pyplot as plt
-                fig, ax = plt.subplots(figsize=(10, 8))
-                
-                # Plot UV data points
-                ax.scatter(uv_data[:, 0], uv_data[:, 1], color='red', s=10, alpha=0.3, label='UV Data Points')
-                
-                # Plot generated path
-                ax.plot(uv_path[:, 0], uv_path[:, 1], color='blue', linewidth=2, label='Generated Path')
-                
-                ax.set_title('Generated UV Path with Data Points')
-                ax.set_xlabel('U')
-                ax.set_ylabel('V')
-                ax.legend()
-                ax.grid(True, alpha=0.3)
-                ax.axis('equal')
-                plt.tight_layout()
-                plt.show()
-        else:
-            print("✗ Path generation failed")
-
-
-# Testing configuration
-TESTING = False
 
 
 def main():
@@ -447,8 +373,5 @@ def main():
         print(f"Path - Error: main(): {e}")
 
 if __name__ == '__main__':
-    if TESTING:
-        testing_mode()
-    else:
-        main()
+    main()
 
