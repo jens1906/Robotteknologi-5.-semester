@@ -177,6 +177,9 @@ class UserInterface(QMainWindow):
         self.ui.Medium_Pen.clicked.connect(lambda: self.set_custom_pen(1))
         self.ui.Large_Pen.clicked.connect(lambda: self.set_custom_pen(2))
         self.ui.Switch_Camera_Type.clicked.connect(self.switch_camera_type)#switch between threshold and depth
+        self.ui.infoButton.toggled.connect(self.toggle_info_panel)  # Connect info button
+        self.ui.infoButton.setEnabled(True)  # Make sure it's enabled
+        self.ui.infoButton.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Ensure focus can reach it
 
         self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
         self.signal_emitter = RosSignalEmitter()
@@ -190,7 +193,47 @@ class UserInterface(QMainWindow):
         
         # Hide statusLabel
         self.ui.statusLabel.hide()
-    
+        self.ui.stackedWidget_Info.hide()
+        self.ui.frame_5.hide()
+
+
+
+        self.ui.Info_Movement_Label.setWordWrap(True)  # Enable auto word wrap
+        self.ui.Info_Movement_Label.setText("<b>Emergency Stop</b><br>"
+                                            "Perform an emergency stop<br>"
+                                            "<b>Home Position</b><br>"
+                                            "Home robot arm<br>"
+                                            "<b>Vision State</b><br>"
+                                            "Change between image view and detection view<br>"
+                                            "<b>Run</b><br>"
+                                            "Approve/begin operation<br>"
+                                            "<b>Joystick and Z+/-</b><br>"
+                                            "Adjust robot arm position<br>"
+                                            "<b>Terminate</b><br>"
+                                            "Stop current operation")
+
+        self.ui.Info_Vision_Label.setWordWrap(True)  # Enable auto word wrap
+        self.ui.Info_Vision_Label.setText("<b>Emergency Stop</b><br>"
+                                            "Perform an emergency stop<br>"
+                                            "<b> Switch Camera Type</b><br>"
+                                            "Switch detection/depth camera view<br>"
+                                            "<b>Painting features</b><br>"
+                                            "<b>- Reset:</b> painted adjustments on image<br>"
+                                            "<b>- Undo:</b> last adjustment on image<br>"
+                                            "<b>- Erase:</b> Toggle erase mode<br>"      
+                                            "<b>- Pen size:</b> adjust size of pen<br>"                                                                                                                                                                           
+                                            "<b>Run</b><br>"
+                                            "Approve/begin operation<br>")
+
+        self.ui.Info_System_Label.setWordWrap(True)  # Enable auto word wrap
+        self.ui.Info_System_Label.setText("<b>Emergency Stop</b><br>"
+                                            "Perform an emergency stop<br>"
+                                            "<b>Joystick and Z+/-</b><br>"
+                                            "Adjust robot arm position<br>"
+                                            "<b>Terminate</b><br>"
+                                            "Stop current operation")
+
+
     def customize_tabs(self):
         tabbar = self.ui.tabWidget.tabBar()
         tabbar.setExpanding(True)
@@ -239,6 +282,15 @@ class UserInterface(QMainWindow):
             self.ui.stackedWidget.setCurrentIndex(0)
         elif not state:
             self.ui.stackedWidget.setCurrentIndex(1)
+
+    def toggle_info_panel(self, checked):
+        """Toggle info panel visibility when radio button is clicked"""
+        if checked:
+            self.ui.stackedWidget_Info.show()
+            if printlogger: self.ros_node.get_logger().info('Info panel shown')
+        else:
+            self.ui.stackedWidget_Info.hide()
+            if printlogger: self.ros_node.get_logger().info('Info panel hidden')
 
     def terminate(self):
         msg = Bool()
@@ -310,9 +362,11 @@ class UserInterface(QMainWindow):
             self.camerafeed[0] = 0
             self.camerafeed[1] = 0  # Show color feed on Movement tab
             self.tabindex = index
+            self.ui.stackedWidget_Info.setCurrentIndex(0)  # Show Movement info
         elif index == 1:
             self.camerafeed[1] = 1  # Show thresholded feed on Vision tab
             self.tabindex = index
+            self.ui.stackedWidget_Info.setCurrentIndex(1)  # Show Vision info
             # Display the last received threshold frame if available
             if self.ros_node.last_Threshold_frame is not None:
                 self.signal_emitter.data_signal.emit(f"Thresholded: {self.ros_node.last_Threshold_frame.shape[1]}x{self.ros_node.last_Threshold_frame.shape[0]}")
@@ -325,6 +379,7 @@ class UserInterface(QMainWindow):
         elif index == 2:
             self.camerafeed[0] = 0
             self.camerafeed[1] = 0
+            self.ui.stackedWidget_Info.setCurrentIndex(2)  # Show System info
             pass  # System Information tab
 
     def on_data(self, data):
