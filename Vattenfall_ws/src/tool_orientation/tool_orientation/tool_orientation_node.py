@@ -60,9 +60,27 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
     centroid = np.mean(local_points, axis=0)
     centered = local_points - centroid
     
+    #Check if points are too close together (degenerate case)
+    max_distance = np.max(np.linalg.norm(centered, axis=1))
+    if max_distance < 1e-10:
+        #Points are essentially identical, return default normal
+        return np.array([0, 0, 1])
+    
     #Use SVD to find the normal (smallest singular value direction)
-    _, _, vh = np.linalg.svd(centered)
-    normal = vh[-1, :]  #Last row is normal direction
+    try:
+        _, s, vh = np.linalg.svd(centered, full_matrices=False)
+        
+        #Check if the data is degenerate (collinear points)
+        #If smallest singular value is too small relative to largest, points are nearly collinear
+        if len(s) < 3 or s[-1] < 1e-10 * s[0]:
+            #Points are collinear or nearly so, use default normal
+            return np.array([0, 0, 1])
+        
+        normal = vh[-1, :]  #Last row is normal direction
+        
+    except np.linalg.LinAlgError:
+        #SVD failed to converge, return default normal
+        return np.array([0, 0, 1])
     
     #Ensure normal points "upward" (positive z component)
     if normal[2] < 0:
