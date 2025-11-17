@@ -53,8 +53,24 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
     local_points = path_xyz[start:end]
     
     if len(local_points) < 3:
-        #Not enough neighbors, return default upward normal
-        return np.array([0, 0, 1])
+        #Not enough neighbors, estimate from velocity direction
+        #Normal is perpendicular to path tangent
+        if index > 0 and index < n_points - 1:
+            tangent = path_xyz[index + 1] - path_xyz[index - 1]
+        elif index == 0 and n_points > 1:
+            tangent = path_xyz[1] - path_xyz[0]
+        elif index == n_points - 1 and n_points > 1:
+            tangent = path_xyz[index] - path_xyz[index - 1]
+        else:
+            return np.array([0, 0, 1])  #Fallback for single point
+        
+        #Create perpendicular vector in XY plane if possible
+        tangent_norm = normalize(tangent)
+        if abs(tangent_norm[2]) < 0.99:  #Not vertical
+            normal = np.array([0, 0, 1])
+        else:  #Nearly vertical tangent
+            normal = np.array([1, 0, 0])
+        return normalize(normal)
     
     #Center the points
     centroid = np.mean(local_points, axis=0)
@@ -63,24 +79,62 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
     #Check if points are too close together (degenerate case)
     max_distance = np.max(np.linalg.norm(centered, axis=1))
     if max_distance < 1e-10:
-        #Points are essentially identical, return default normal
-        return np.array([0, 0, 1])
+        #Points are essentially identical, estimate from path direction
+        if index > 0:
+            tangent = normalize(path_xyz[index] - path_xyz[index - 1])
+        elif index < n_points - 1:
+            tangent = normalize(path_xyz[index + 1] - path_xyz[index])
+        else:
+            tangent = np.array([1, 0, 0])
+        
+        #Normal perpendicular to tangent, prefer upward direction
+        if abs(tangent[2]) < 0.99:
+            normal = np.array([0, 0, 1])
+        else:
+            normal = np.array([1, 0, 0])
+        return normalize(normal)
     
     #Use SVD to find the normal (smallest singular value direction)
     try:
         _, s, vh = np.linalg.svd(centered, full_matrices=False)
         
         #Check if the data is degenerate (collinear points)
-        #If smallest singular value is too small relative to largest, points are nearly collinear
         if len(s) < 3 or s[-1] < 1e-10 * s[0]:
-            #Points are collinear or nearly so, use default normal
-            return np.array([0, 0, 1])
+            #Points are collinear - normal should be perpendicular to the line
+            #Use the dominant direction (first singular vector) as tangent
+            tangent = vh[0, :]
+            
+            #Create a normal perpendicular to tangent
+            #Try Z-up first, if tangent is too vertical, use X
+            if abs(tangent[2]) < 0.99:
+                normal = np.array([0, 0, 1]) - tangent[2] * tangent
+            else:
+                normal = np.array([1, 0, 0]) - tangent[0] * tangent
+            
+            normal = normalize(normal)
+            
+            #Ensure upward preference
+            if normal[2] < 0:
+                normal = -normal
+            
+            return normal
         
         normal = vh[-1, :]  #Last row is normal direction
         
     except np.linalg.LinAlgError:
-        #SVD failed to converge, return default normal
-        return np.array([0, 0, 1])
+        #SVD failed to converge, estimate from local geometry
+        if index > 0 and index < n_points - 1:
+            #Use two vectors to compute cross product
+            v1 = path_xyz[index] - path_xyz[index - 1]
+            v2 = path_xyz[index + 1] - path_xyz[index]
+            normal = np.cross(v1, v2)
+            norm = np.linalg.norm(normal)
+            if norm > 1e-10:
+                normal = normal / norm
+            else:
+                normal = np.array([0, 0, 1])
+        else:
+            normal = np.array([0, 0, 1])
     
     #Ensure normal points "upward" (positive z component)
     if normal[2] < 0:
@@ -113,26 +167,50 @@ def orientation_matrix_from_path(x, y, z, velocity, normal):
     #Compute orientation matrix at a point
     #Args: x,y,z position, velocity (3,) vector, normal (3,) vector
     #Returns: R (3, 3) rotation matrix
+    
     #Tool z-axis points into surface (opposite of normal)
-    ez = -normal
+    ez = normalize(-normal)
     
     #Tool feed direction (tangent to path)
-    e_gamma = normalize(velocity)
+    vel_norm = np.linalg.norm(velocity)
+    if vel_norm < 1e-10:
+        #Zero velocity (stationary point or duplicate)
+        #Use a default feed direction perpendicular to normal
+        if abs(ez[2]) < 0.99:  #Normal not vertical
+            e_gamma = np.array([1, 0, 0])  #Default to X direction
+        else:  #Normal is vertical
+            e_gamma = np.array([0, 1, 0])  #Default to Y direction
+        e_gamma = normalize(e_gamma - np.dot(e_gamma, ez) * ez)  #Make perpendicular to ez
+    else:
+        e_gamma = velocity / vel_norm
     
     #Tool y-axis perpendicular to tool axis and feed direction
-    ey = normalize(np.cross(-ez, e_gamma))
+    ey_cross = np.cross(-ez, e_gamma)
+    ey_norm = np.linalg.norm(ey_cross)
+    
+    if ey_norm < 1e-10:
+        #e_gamma and ez are parallel/antiparallel
+        #Choose arbitrary perpendicular direction
+        if abs(ez[0]) < 0.99:
+            ey = normalize(np.cross(ez, np.array([1, 0, 0])))
+        else:
+            ey = normalize(np.cross(ez, np.array([0, 1, 0])))
+    else:
+        ey = ey_cross / ey_norm
     
     #Tool x-axis completes right-handed frame
     ex = np.cross(ey, ez)
+    ex = normalize(ex)  #Ensure unit length
     
     #Construct rotation matrix (columns are basis vectors)
     R = np.column_stack([ex, ey, ez])
     
     return R
 
-def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3):
+def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_orientations=True):
     #Main function: compute tool orientations from cartesian XYZ points
     #Args: path_xyz (N,3) array of [x,y,z] in sequence, dt time step, neighbor_range for normal estimation
+    #      smooth_orientations if True, check for discontinuous jumps and smooth them
     #Returns: positions (N,3) array, orientations (N,3,3) array of rotation matrices
     n_points = len(path_xyz)
     
@@ -152,6 +230,25 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3):
         
         #Compute orientation matrix
         R = orientation_matrix_from_path(x, y, z, velocity, normal)
+        
+        #Check for discontinuous orientation change
+        if smooth_orientations and i > 0:
+            #Compute angle difference between consecutive orientations
+            R_prev = orientations[i-1]
+            R_diff = R_prev.T @ R
+            trace_diff = np.trace(R_diff)
+            angle_diff = np.arccos(np.clip((trace_diff - 1) / 2, -1, 1))
+            
+            #If orientation changes by more than 90 degrees, likely a sign flip
+            if angle_diff > np.pi / 2:
+                #Check if flipping the normal reduces the discontinuity
+                R_flipped = orientation_matrix_from_path(x, y, z, velocity, -normal)
+                R_diff_flipped = R_prev.T @ R_flipped
+                trace_flipped = np.trace(R_diff_flipped)
+                angle_flipped = np.arccos(np.clip((trace_flipped - 1) / 2, -1, 1))
+                
+                if angle_flipped < angle_diff:
+                    R = R_flipped
         
         """
         If ijk is needed, then run this to convert to ijk!
