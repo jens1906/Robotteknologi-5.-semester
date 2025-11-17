@@ -26,7 +26,8 @@ class ParameterizationNode(Node):
     ROS 2 Node for surface parameterization using Amersdorfer et al. (2021) approach.
     
     Implements conformal parameterization with metric tensor computation for
-    equidistant path planning on curved surfaces.
+    equidistant path planning on curved surfaces. Uses cubic spline interpolation
+    for smooth surface reconstruction.
     
     Subscribes to:
         - /corrosion/scatter_plot_pub (std_msgs/Float32MultiArray): Input XYZ points from corrosion detection
@@ -39,11 +40,9 @@ class ParameterizationNode(Node):
         - /parameterization/get_uv_bounds (GetUVBounds): Get parameter space bounds
         
     Parameters:
-        - interpolation_method (string): 'rbf' for radial basis function
-        - neighbors (int): Number of neighbors for local RBF interpolation and metric computation
         - quality_sample_size (int): Sample size for quality evaluation
         - status_publish_rate (float): Rate to publish status (Hz)
-        - conformal_iterations (int): Number of conformal correction iterations (default: 5)
+        - conformal_iterations (int): Number of conformal correction iterations (default: 1)
         - conformal_alpha (float): Conformal correction step size (default: 0.5)
         - metric_neighbors (int): Number of neighbors for metric tensor computation (default: 20)
     """
@@ -52,8 +51,6 @@ class ParameterizationNode(Node):
         super().__init__('parameterization_node')
         
         # Declare parameters
-        self.declare_parameter('interpolation_method', 'rbf')
-        self.declare_parameter('neighbors', 50)
         self.declare_parameter('quality_sample_size', 1000)
         self.declare_parameter('status_publish_rate', 1.0)
         self.declare_parameter('conformal_iterations', 1)
@@ -61,17 +58,15 @@ class ParameterizationNode(Node):
         self.declare_parameter('metric_neighbors', 20)
         
         # Get parameters
-        self.interpolation_method = self.get_parameter('interpolation_method').value
-        self.neighbors = self.get_parameter('neighbors').value
         self.quality_sample_size = self.get_parameter('quality_sample_size').value
         status_rate = self.get_parameter('status_publish_rate').value
         self.conformal_iterations = self.get_parameter('conformal_iterations').value
         self.conformal_alpha = self.get_parameter('conformal_alpha').value
         self.metric_neighbors = self.get_parameter('metric_neighbors').value
         
-        # Initialize conformal parameterization (Amersdorfer et al. 2021)
+        # Initialize conformal parameterization
         self.surf = ConformalParameterization()
-        self.get_logger().info('Using Conformal Parameterization')
+        self.get_logger().info('Using Conformal Parameterization with Cubic Spline Interpolation')
 
         
         # Create subscriber for corrosion scatter plot
@@ -129,8 +124,7 @@ class ParameterizationNode(Node):
         )
         
         self.get_logger().info('Parameterization node initialized')
-        self.get_logger().info(f'  Interpolation method: {self.interpolation_method}')
-        self.get_logger().info(f'  Interpolation neighbors: {self.neighbors}')
+        self.get_logger().info(f'  Interpolation method: cubic splines (CloughTocher2D)')
         self.get_logger().info(f'  Metric neighbors: {self.metric_neighbors}')
         self.get_logger().info(f'  Conformal iterations: {self.conformal_iterations}')
         self.get_logger().info(f'  Conformal alpha: {self.conformal_alpha}')
@@ -184,12 +178,9 @@ class ParameterizationNode(Node):
             )
             self.get_logger().info('Conformal correction applied')
             
-            # Build inverse interpolation
-            self.surf.build_inverse_interpolation(
-                method=self.interpolation_method,
-                neighbors=self.neighbors
-            )
-            self.get_logger().info('Inverse interpolation built')
+            # Build cubic spline inverse interpolation
+            self.surf.build_inverse_interpolation()
+            self.get_logger().info('Cubic spline inverse interpolation built')
             
             # Evaluate quality
             metrics = self.surf.evaluate_quality(

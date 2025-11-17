@@ -4,7 +4,7 @@ preserves distances, enabling equidistant path planning on curved surfaces.
 """
 
 import numpy as np
-from scipy.interpolate import RBFInterpolator
+from scipy.interpolate import CloughTocher2DInterpolator
 from scipy.spatial import cKDTree
 from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import spsolve
@@ -35,7 +35,6 @@ class ConformalParameterization:
         self.points_local = None
         self.kdtree_uv = None
         self.kdtree_xyz = None
-        self.neighbors = None
         self.is_ready = False
         
         # Surface derivatives for metric computation
@@ -211,33 +210,35 @@ class ConformalParameterization:
         
         return self.uv_corrected
     
-    def build_inverse_interpolation(self, method='rbf', neighbors=50):
+    def build_inverse_interpolation(self):
         """
-        Build inverse interpolation from (u,v) → (x,y,z).
+        Build cubic spline inverse interpolation from (u,v) → (x,y,z).
         
-        Args:
-            method: 'rbf' for radial basis function interpolation
-            neighbors: Number of neighbors for local RBF
+        Uses CloughTocher2D interpolation which provides:
+        - Piecewise cubic spline interpolation
+        - C1 continuity (continuous first derivatives)
+        - Good balance of smoothness and computational efficiency
         """
         if self.uv_params is None:
             self.compute_initial_parameterization()
         
-        self.neighbors = neighbors
+        # CloughTocher2D provides piecewise cubic spline interpolation
+        # C1 continuous (continuous first derivatives)
+        print("Building cubic spline interpolators (CloughTocher2D)...")
+        self.interpolator_x = CloughTocher2DInterpolator(self.uv_params, self.points[:, 0])
+        self.interpolator_y = CloughTocher2DInterpolator(self.uv_params, self.points[:, 1])
+        self.interpolator_z = CloughTocher2DInterpolator(self.uv_params, self.points[:, 2])
         
-        if method == 'rbf':
-            kernel = 'thin_plate_spline'
-            
-            # Use local RBF for efficiency
+        # Build KD-tree for utility functions
+        if self.kdtree_uv is None:
             self.kdtree_uv = cKDTree(self.uv_params)
-            
-            # Store points for local interpolation
-            self.stored_points = self.points.copy()
         
         self.is_ready = True
+        print("Cubic spline interpolation ready.")
     
     def interpolate(self, uv_query):
         """
-        Interpolate Cartesian coordinates from parameter space.
+        Interpolate Cartesian coordinates from parameter space using cubic splines.
         Maps (u,v) → (x,y,z).
         
         Args:
@@ -250,19 +251,12 @@ class ConformalParameterization:
             raise ValueError("Interpolation not ready. Call build_inverse_interpolation() first.")
         
         uv_query = np.atleast_2d(uv_query)
-        xyz = np.zeros((len(uv_query), 3))
         
-        for i, uv in enumerate(uv_query):
-            distances, indices = self.kdtree_uv.query(uv, k=min(self.neighbors, len(self.uv_params)))
-            
-            if distances[0] < 1e-10:
-                # Exact match
-                xyz[i] = self.stored_points[indices[0]]
-            else:
-                # Weighted interpolation using inverse distance
-                weights = 1.0 / (distances + 1e-10)
-                weights = weights / weights.sum()
-                xyz[i] = (self.stored_points[indices].T @ weights).T
+        # Use cubic spline interpolators
+        x = self.interpolator_x(uv_query)
+        y = self.interpolator_y(uv_query)
+        z = self.interpolator_z(uv_query)
+        xyz = np.column_stack([x, y, z])
         
         return xyz
     
@@ -298,8 +292,6 @@ class ConformalParameterization:
     def compute_equidistant_uv_spacing(self, desired_spacing, uv_direction='u'):
         """
         Compute UV spacing that produces equidistant spacing on the surface.
-        
-        This is the key function for implementing Amersdorfer's approach.
         
         Args:
             desired_spacing: Desired spacing on the surface (in meters)
