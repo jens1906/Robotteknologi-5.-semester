@@ -12,7 +12,7 @@ from sensor_msgs.msg import Image
 from PyQt6.QtGui import QImage, QPixmap, QFont
 from user_interface.GUI import Ui_MainWindow
 from PyQt6.QtCore import pyqtSignal, QObject, Qt
-from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel
+from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QMessageBox
 import signal
 
 Test = True
@@ -277,11 +277,13 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
     
     def joystick_terminate_change_page(self, state = bool):
-        self.ros_node.get_logger().info(f'Changing page to {state}')
+
         if state:
             self.ui.stackedWidget.setCurrentIndex(0)
+            if printlogger: self.ros_node.get_logger().info(f'Swithing to terminate page')
         elif not state:
             self.ui.stackedWidget.setCurrentIndex(1)
+            if printlogger: self.ros_node.get_logger().info(f'Swithing to joystick page')
 
     def toggle_info_panel(self, checked):
         """Toggle info panel visibility when radio button is clicked"""
@@ -293,15 +295,25 @@ class UserInterface(QMainWindow):
             if printlogger: self.ros_node.get_logger().info('Info panel hidden')
 
     def terminate(self):
-        msg = Bool()
-        msg.data = True
-        self.ros_node.ui_terminate_pub.publish(msg)
-        '''
-        CHANGE THIS LATER
-        '''
-        self.joystick_terminate_change_page(False)
+        """Show confirmation dialog and handle termination"""
+        reply = QMessageBox.question(
+            self, 
+            'Confirm Terminate', 
+            'Are you sure you want to terminate?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No  # Default to No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.joystick_terminate_change_page(False)
+            msg = Bool()
+            msg.data = True
+            self.ros_node.ui_terminate_pub.publish(msg)
+            if printlogger: self.ros_node.get_logger().info('Terminate confirmed')
+        else:
+            if printlogger: self.ros_node.get_logger().info('Terminate cancelled')
 
-        if printlogger: self.ros_node.get_logger().info('Terminate pressed')
+
 
     def toggle_vision_state(self):
         self.camerafeed[1] = 1 - self.camerafeed[1]  # Toggle between 0 and 1
