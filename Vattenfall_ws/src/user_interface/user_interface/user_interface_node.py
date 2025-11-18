@@ -12,7 +12,8 @@ from sensor_msgs.msg import Image
 from PyQt6.QtGui import QImage, QPixmap, QFont
 from user_interface.GUI import Ui_MainWindow
 from PyQt6.QtCore import pyqtSignal, QObject, Qt
-from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel
+from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QMessageBox
+from user_interface.joystick import Joystick
 import signal
 
 Test = True
@@ -191,6 +192,11 @@ class UserInterface(QMainWindow):
         self.ui.videoLabel.dragged.connect(self.on_image_dragged)
         self.ui.videoLabel.released.connect(self.on_image_released)
         
+        # Connect joystick signals
+        self.ui.Joystick.touched.connect(self.on_joystick_touched)
+        self.ui.Joystick.released.connect(self.on_joystick_released)
+        self.ui.Joystick.moved.connect(self.on_joystick_moved)
+        
         # Hide statusLabel
         self.ui.statusLabel.hide()
         self.ui.stackedWidget_Info.hide()
@@ -269,6 +275,28 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info('Home Position pressed')
     
     def run_robot(self):
+        reply = QMessageBox.question(
+            self, 
+            'Confirm Action', 
+            'Are you sure you want to confirm the corrosion area and start process?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No  # Default to No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            msg = Bool()
+            msg.data = True
+            self.ui.stackedWidget.setCurrentIndex(0)
+            self.joystick_terminate_change_page(True)
+            self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
+            if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
+        else:
+            if printlogger: self.ros_node.get_logger().info('Run robot pressed cancelled')
+
+
+
+
+
         msg = Bool()
         msg.data = True
         self.ui.stackedWidget.setCurrentIndex(0)
@@ -277,11 +305,12 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
     
     def joystick_terminate_change_page(self, state = bool):
-        self.ros_node.get_logger().info(f'Changing page to {state}')
         if state:
             self.ui.stackedWidget.setCurrentIndex(0)
+            if printlogger: self.ros_node.get_logger().info(f'Swithing to terminate page')
         elif not state:
             self.ui.stackedWidget.setCurrentIndex(1)
+            if printlogger: self.ros_node.get_logger().info(f'Swithing to joystick page')
 
     def toggle_info_panel(self, checked):
         """Toggle info panel visibility when radio button is clicked"""
@@ -293,15 +322,24 @@ class UserInterface(QMainWindow):
             if printlogger: self.ros_node.get_logger().info('Info panel hidden')
 
     def terminate(self):
-        msg = Bool()
-        msg.data = True
-        self.ros_node.ui_terminate_pub.publish(msg)
-        '''
-        CHANGE THIS LATER
-        '''
-        self.joystick_terminate_change_page(False)
+        reply = QMessageBox.question(
+            self, 
+            'Confirm Terminate', 
+            'Are you sure you want to terminate?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No  # Default to No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.joystick_terminate_change_page(False)
+            msg = Bool()
+            msg.data = True
+            self.ros_node.ui_terminate_pub.publish(msg)
+            if printlogger: self.ros_node.get_logger().info('Terminate confirmed')
+        else:
+            if printlogger: self.ros_node.get_logger().info('Terminate cancelled')
 
-        if printlogger: self.ros_node.get_logger().info('Terminate pressed')
+
 
     def toggle_vision_state(self):
         self.camerafeed[1] = 1 - self.camerafeed[1]  # Toggle between 0 and 1
@@ -381,6 +419,43 @@ class UserInterface(QMainWindow):
             self.camerafeed[1] = 0
             self.ui.stackedWidget_Info.setCurrentIndex(2)  # Show System info
             pass  # System Information tab
+
+    def on_joystick_touched(self):
+        """Handle joystick touch event"""
+        if printlogger: self.ros_node.get_logger().info('Joystick touched!')
+        
+        # Check if anything has been drawn in corrosion_area_add or corrosion_area_remove
+        if self.corrosion_area_add is not None and self.corrosion_area_remove is not None:
+            has_add = np.any(self.corrosion_area_add > 0)
+            has_remove = np.any(self.corrosion_area_remove > 0)
+            
+            if has_add or has_remove:
+                # Show confirmation dialog
+                reply = QMessageBox.question(
+                    self,
+                    'Confirm movement', 
+                    'Are you sure you want make a movement?\n This will result in all corrosion area markings being lost.',
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.reset_vision()
+                    if printlogger: self.ros_node.get_logger().info('Adjustments reset by joystick touch')
+
+    def on_joystick_released(self):
+        """Handle joystick release event"""
+        if printlogger: self.ros_node.get_logger().info('Joystick released!')
+        # Add your custom logic here
+        pass
+
+    def on_joystick_moved(self, direction_tuple):
+        """Handle joystick move event"""
+        if direction_tuple != 0:
+            direction, distance = direction_tuple
+            self.ros_node.get_logger().info(f'Joystick moved: {direction.name}, distance: {distance:.2f}')
+        # Add your custom logic here (e.g., send motor commands, update display, etc.)
+        pass
 
     def on_data(self, data):
         self.ui.videoLabel.setText(data)
@@ -538,10 +613,18 @@ def main():
     window.customize_tabs()
     ros_thread = threading.Thread(target=lambda: rclpy.spin(window.ros_node), daemon=True)
     ros_thread.start()
-    sys.exit(app.exec())
+    
+    exit_code = app.exec()
+    
+    # Cleanup when app exits
+    window.cleanup()
     window.ros_node.destroy_node()
     rclpy.shutdown()
+    
+    sys.exit(exit_code)
 
 
 if __name__ == '__main__':
     main()
+
+

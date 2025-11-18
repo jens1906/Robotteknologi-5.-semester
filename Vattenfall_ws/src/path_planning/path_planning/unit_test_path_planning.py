@@ -1,6 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+"""
+Unit test for path planning module.
+Tests the generation of a 2D path from UV bounds input.
+
+This test uses the same path generation logic as the main path planning module without ROS compatibilities.
+
+"""
 
 def cubic_bezier(b0, b1, b2, b3, n_points=25):
     """Cubic Bézier curve - standalone testable function."""
@@ -114,10 +121,10 @@ def test_path_generation():
     assert path.shape[1] == 2, "Path should have 2 columns [u, v]"
     assert path.shape[0] > 0, "Path should have points"
     
-    print(f"✓ Output: 2D path with shape {path.shape} ({path.shape[0]} points)")
-    print(f"✓ First point: [{path[0, 0]:.3f}, {path[0, 1]:.3f}]")
-    print(f"✓ Last point:  [{path[-1, 0]:.3f}, {path[-1, 1]:.3f}]")
-    print("✓ Test passed!")
+    print(f"Output: 2D path with shape {path.shape} ({path.shape[0]} points)")
+    print(f"First point: [{path[0, 0]:.3f}, {path[0, 1]:.3f}]")
+    print(f"Last point:  [{path[-1, 0]:.3f}, {path[-1, 1]:.3f}]")
+    print("Test passed!")
     
     # Plot the path
     plot_path(path, uv_bounds)
@@ -152,7 +159,7 @@ def plot_path(path, uv_bounds):
     # Save to file
     output_file = 'path_planning_output.png'
     plt.savefig(output_file, dpi=150, bbox_inches='tight')
-    print(f"✓ Plot saved to: {output_file}")
+    print(f"Plot saved to: {output_file}")
     plt.close()
 
 
@@ -164,7 +171,7 @@ if __name__ == '__main__':
     try:
         result_path = test_path_generation()
         print("\n" + "=" * 50)
-        print("✓ SUCCESS: Test passed")
+        print("SUCCESS: Test passed")
         print("=" * 50)
         exit(0)
     except AssertionError as e:

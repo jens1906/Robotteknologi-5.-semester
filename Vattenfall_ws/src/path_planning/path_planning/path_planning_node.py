@@ -13,16 +13,22 @@ The functionality of the Path Planner Node
 - Subscribes to parameterization status to know when it's ready.
 - Uses the GetUVBounds service to get UV parameter space bounds.
 - Generates zigzag paths in UV space with interconnection between Bézier curves.
-- Publishes the generated UV path data.
+- Publishes the generated UV path data for conversion to XYZ by parameterization node.
 
 Subscribers:
 - /parameterization/status (ParameterizationStatus): Parameterization status and readiness.
 
 Publishers:
-- /path/uv_path (Float64MultiArray): Generated UV path data.
+- /path/uv_path (Float64MultiArray): Generated UV path data (flattened Nx2 array).
 
-Services:
+Services Used:
 - /parameterization/get_uv_bounds (GetUVBounds): Get UV parameter space bounds.
+
+Parameters:
+- point_spacing (float): Spacing between points along scan lines in UV units (default: 0.5)
+- line_spacing (float): Spacing between parallel scan lines in UV units (default: 5.0)
+- n_bezier (int): Number of points in Bézier curves connecting lines (default: 25)
+- auto_generate (bool): Auto-generate path when parameterization ready (default: True)
 
 """
 
@@ -32,17 +38,17 @@ class PathPlanner(Node):
     def __init__(self):
         super().__init__('path_planner_node') # Initialize ROS2 node
 
-        # Parameters
-        self.declare_parameter('point_spacing', 0.5)  # Resolution of points along lines (V direction) - every point within this distance
-        self.declare_parameter('line_spacing', 5)  # Tool coverage radius between lines (U direction) - every point within this distance
-        self.declare_parameter('n_bezier', 25) # Number of points for generating connecting lines
-        self.declare_parameter('auto_generate', True) # Automatically generate path when parameterization is ready
+        # Parameters (values are in UV space, typically 0-100 range)
+        self.declare_parameter('point_spacing', 0.5)  # Spacing between points along lines (V direction)
+        self.declare_parameter('line_spacing', 5.0)  # Spacing between scan lines (U direction)
+        self.declare_parameter('n_bezier', 25)  # Number of points for generating connecting curves
+        self.declare_parameter('auto_generate', True)  # Automatically generate path when parameterization is ready
         
         self.point_spacing = self.get_parameter('point_spacing').value
         self.line_spacing = self.get_parameter('line_spacing').value
         self.n_bezier = self.get_parameter('n_bezier').value
         self.auto_generate = self.get_parameter('auto_generate').value
-        self.bezier_curvature = self.line_spacing*1.25
+        self.bezier_curvature = self.line_spacing * 0.75  # Smoother curves
         self.tau = np.linspace(0, 1, self.n_bezier)
 
         # Data holders
@@ -253,14 +259,14 @@ class PathPlanner(Node):
 
             # Calculate number of lines based on line_spacing to ensure full coverage
             u_range = u_max - u_min
-            line_n = int(np.ceil(u_range / (2 * self.line_spacing))) + 1
+            line_n = max(2, int(np.ceil(u_range / self.line_spacing)) + 1)
             
-            if line_n < 2:
-                raise ValueError(f"Error: generate_zigzag_paths(): line_spacing {self.line_spacing} is too large for U range {u_range}")
+            self.get_logger().info(f'UV bounds: U=[{u_min:.3f}, {u_max:.3f}] (range={u_range:.3f}), '
+                                 f'V=[{v_min:.3f}, {v_max:.3f}] (range={v_max - v_min:.3f})')
 
-            # Calculate number of points per line based on point_spacing (radius in V direction)
+            # Calculate number of points per line based on point_spacing
             v_range = v_max - v_min
-            points_per_line = int(np.ceil(v_range / (2 * self.point_spacing))) + 1
+            points_per_line = max(2, int(np.ceil(v_range / self.point_spacing)) + 1)
 
             # Use linspace to ensure coverage from u_min to u_max
             u_lin = np.linspace(u_min, u_max, line_n)
@@ -286,9 +292,9 @@ class PathPlanner(Node):
                 v_lines.append(v_line)
 
             self.paths_uv = (u_lines, v_lines)
-            self.get_logger().info(f'Generated zigzag path with {line_n} lines, {points_per_line} points per line')
-            self.get_logger().info(f'Actual spacing: U={actual_u_spacing:.4f}, V={actual_v_spacing:.4f}')
-            self.get_logger().info(f'Max distance to coverage: U={max_distance_u:.4f} (≤{self.line_spacing}), V={max_distance_v:.4f} (≤{self.point_spacing})')
+            self.get_logger().info(f'Generated zigzag path: {line_n} lines × {points_per_line} points = {line_n * points_per_line} total points')
+            self.get_logger().info(f'Actual spacing: U={actual_u_spacing:.4f} (target={self.line_spacing}), '
+                                 f'V={actual_v_spacing:.4f} (target={self.point_spacing})')
 
         except Exception as e:
             self.get_logger().error(f"Error: generate_zigzag_paths(): {e}")

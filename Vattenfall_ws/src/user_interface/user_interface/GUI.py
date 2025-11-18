@@ -72,7 +72,7 @@ class Ui_MainWindow(object):
         self.Info_Movement = QtWidgets.QWidget()
         self.Info_Movement.setObjectName("Info_Movement")
         self.Info_Movement_Label = QtWidgets.QLabel(parent=self.Info_Movement)
-        self.Info_Movement_Label.setGeometry(QtCore.QRect(5, 20, 175, 300))
+        self.Info_Movement_Label.setGeometry(QtCore.QRect(5, 14, 175, 275))
         self.Info_Movement_Label.setObjectName("Info_Movement_Label")
         self.stackedWidget_Info.addWidget(self.Info_Movement)
         self.Info_Vision = QtWidgets.QWidget()
@@ -84,7 +84,7 @@ class Ui_MainWindow(object):
         self.Info_System = QtWidgets.QWidget()
         self.Info_System.setObjectName("Info_System")
         self.Info_System_Label = QtWidgets.QLabel(parent=self.Info_System)
-        self.Info_System_Label.setGeometry(QtCore.QRect(5, 20, 175, 350))
+        self.Info_System_Label.setGeometry(QtCore.QRect(5, 13, 175, 150))
         self.Info_System_Label.setObjectName("Info_System_Label")
         self.stackedWidget_Info.addWidget(self.Info_System)
         self.infoButton = QtWidgets.QRadioButton(parent=self.centralwidget)
@@ -398,6 +398,8 @@ class Ui_MainWindow(object):
         self.frame_5.setFrameShape(QtWidgets.QFrame.Shape.StyledPanel)
         self.frame_5.setFrameShadow(QtWidgets.QFrame.Shadow.Raised)
         self.frame_5.setObjectName("frame_5")
+        # Make the popup have a white background so it stands out over the video
+        self.frame_5.setStyleSheet("background-color: white;")
         self.frame_5.raise_()  # Bring to front
         self.verticalLayout_8 = QtWidgets.QVBoxLayout(self.frame_5)
         self.verticalLayout_8.setContentsMargins(-1, -1, -1, 0)
@@ -461,7 +463,7 @@ class Ui_MainWindow(object):
         self.RUN_2.setText(_translate("MainWindow", "RUN"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab), _translate("MainWindow", "Movement"))
         self.Switch_Camera_Type.setText(_translate("MainWindow", "Switch\n"
-"Camera Type"))
+"Camera"))
         self.Reset.setText(_translate("MainWindow", "Reset"))
         self.Undo.setText(_translate("MainWindow", "Undo"))
         self.Eraser.setText(_translate("MainWindow", "Eraser"))
