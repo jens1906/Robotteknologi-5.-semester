@@ -1,6 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+"""
+Unit test for path planning module.
+Tests the generation of a 2D path from UV bounds input.
+
+This test uses the same path generation logic as the main path planning module without ROS compatibilities.
+
+"""
+
+
 
 def cubic_bezier(b0, b1, b2, b3, n_points=25):
     """Cubic Bézier curve - standalone testable function."""
