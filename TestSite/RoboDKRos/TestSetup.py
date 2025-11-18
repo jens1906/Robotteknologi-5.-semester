@@ -102,7 +102,7 @@ def main():
         tool_pose = robomath.Mat([
             [1, 0, 0, 0],
             [0, 1, 0, 0],
-            [0, 0, 1, 0],
+            [0, 0, 1, -25],
             [0, 0, 0, 1]
         ])
         tool_frame.setPose(tool_pose)
