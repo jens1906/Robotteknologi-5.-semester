@@ -124,8 +124,8 @@ def main():
 
             # Adjust relative position/orientation as needed
             rsd435_pose = robomath.Mat([
-                [1, 0, 0, 0],     # Rotate/translate to align properly
-                [0, 1, 0, 44],
+                [-1, 0, 0, 0],     # Rotate/translate to align properly
+                [0, -1, 0, 44],
                 [0, 0, 1, 75],    # Move camera slightly in front of holder
                 [0, 0, 0, 1]
             ])
