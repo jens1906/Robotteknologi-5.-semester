@@ -41,15 +41,15 @@ HANDEYE_FOLDER = 'Hand-Eye-Data'  # Default folder to load robot poses and image
 # You can find this chessboard here: https://docs.opencv.org/4.x/charucoboard.png
 INTRINSIC_BOARD_TYPE = MarkerTypes.CHESSBOARD
 INTRINSIC_CHESS_SIZE = (5, 7)  # X/Y
-INTRINSIC_SQUARE_SIZE = 35  # mm
-INTRINSIC_MARKER_SIZE = 21  # mm
+INTRINSIC_SQUARE_SIZE = 25  # mm
+INTRINSIC_MARKER_SIZE = 15  # mm
 
 # Hand-eye calibration board parameters
 # You can find this charucoboard here: https://docs.opencv.org/4.x/charucoboard.png
 HANDEYE_BOARD_TYPE = MarkerTypes.CHARUCOBOARD
 HANDEYE_CHESS_SIZE = (5, 7)  # X/Y
-HANDEYE_SQUARE_SIZE = 35  # mm
-HANDEYE_MARKER_SIZE = 21  # mm
+HANDEYE_SQUARE_SIZE = 25  # mm
+HANDEYE_MARKER_SIZE = 15  # mm
 
 
 def pose_2_Rt(pose: robomath.Mat):
@@ -71,7 +71,9 @@ def Rt_2_pose(R, t):
     cam_pose.setVZ(vz)
 
     pose = cam_pose.inv()
-    pose.setPos(t.tolist())
+    # Flatten the translation vector (from [[x], [y], [z]] to [x, y, z])
+    t_flat = t.flatten().tolist()
+    pose.setPos(t_flat)
 
     return pose
 
@@ -88,14 +90,15 @@ def find_chessboard(img, mtx, dist, chess_size, squares_edge, refine=True, draw_
     if len(img.shape) > 2:
         _img = cv.cvtColor(img, cv.COLOR_RGB2GRAY)
 
-    # Find the chessboard's corners
-    success, corners = cv.findChessboardCorners(_img, pattern)
+    # Find the chessboard's corners with faster flags
+    flags = cv.CALIB_CB_FAST_CHECK + cv.CALIB_CB_ADAPTIVE_THRESH + cv.CALIB_CB_NORMALIZE_IMAGE
+    success, corners = cv.findChessboardCorners(_img, pattern, flags=flags)
     if not success:
         raise Exception("No chessboard found")
 
-    # Refine
+    # Refine with reduced iterations
     if refine:
-        criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+        criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 15, 0.01)  # Reduced from 30 iterations to 15
         search_size = (11, 11)
         zero_size = (-1, -1)
         corners = cv.cornerSubPix(_img, corners, search_size, zero_size, criteria)
@@ -126,19 +129,51 @@ def find_charucoboard(img, mtx, dist, chess_size, squares_edge, markers_edge, pr
 
     # Note that for chessboards, the pattern size is the number of "inner corners", while charucoboards are the number of chessboard squares
 
-    # Charuco board and dictionary
-    charuco_board = cv.aruco.CharucoBoard_create(chess_size[0], chess_size[1], squares_edge, markers_edge, cv.aruco.getPredefinedDictionary(predefined_dict))
-    charuco_dict = charuco_board.dictionary
+    # Get ArUco dictionary
+    aruco_dict = cv.aruco.getPredefinedDictionary(predefined_dict)
+    
+    # Create CharucoBoard (compatible with both OpenCV 4.5 and 4.8+)
+    try:
+        # OpenCV 4.5 and earlier
+        charuco_board = cv.aruco.CharucoBoard_create(chess_size[0], chess_size[1], squares_edge, markers_edge, aruco_dict)
+        charuco_dict = charuco_board.dictionary
+    except AttributeError:
+        # OpenCV 4.8+ (new API)
+        charuco_board = cv.aruco.CharucoBoard((chess_size[0], chess_size[1]), squares_edge, markers_edge, aruco_dict)
+        charuco_dict = charuco_board.getDictionary()
+
+    # Create detector parameters
+    try:
+        # OpenCV 4.7+
+        detector_params = cv.aruco.DetectorParameters()
+    except:
+        # OpenCV 4.5 and earlier
+        detector_params = cv.aruco.DetectorParameters_create()
 
     # Find the markers first
-    marker_corners, marker_ids, _ = cv.aruco.detectMarkers(img, charuco_dict, None, None, None, None)
+    try:
+        # OpenCV 4.7+
+        detector = cv.aruco.ArucoDetector(charuco_dict, detector_params)
+        marker_corners, marker_ids, _ = detector.detectMarkers(img)
+    except:
+        # OpenCV 4.5 and earlier
+        marker_corners, marker_ids, _ = cv.aruco.detectMarkers(img, charuco_dict, parameters=detector_params)
+    
     if marker_ids is None or len(marker_ids) < 1:
-        raise Exception("No charucoboard found")
+        raise Exception("No charucoboard markers found")
 
-    # Then the charuco
-    count, corners, ids = cv.aruco.interpolateCornersCharuco(marker_corners, marker_ids, img, charuco_board, None, None, mtx, dist, 2)  # mtx and dist are optional here
-    if count < 1 or len(ids) < 1:
-        raise Exception("No charucoboard found")
+    # Then interpolate the charuco corners
+    try:
+        # OpenCV 4.7+
+        charuco_detector = cv.aruco.CharucoDetector(charuco_board)
+        corners, ids, marker_corners, marker_ids = charuco_detector.detectBoard(img)
+        count = len(corners) if corners is not None else 0
+    except:
+        # OpenCV 4.5 and earlier
+        count, corners, ids = cv.aruco.interpolateCornersCharuco(marker_corners, marker_ids, img, charuco_board, cameraMatrix=mtx, distCoeffs=dist)
+    
+    if count < 1 or ids is None or len(ids) < 1:
+        raise Exception("No charucoboard corners found")
 
     if draw_img is not None:
         cv.aruco.drawDetectedCornersCharuco(draw_img, corners, ids)
@@ -147,12 +182,28 @@ def find_charucoboard(img, mtx, dist, chess_size, squares_edge, markers_edge, pr
     if mtx is None or dist is None:
         return corners, None, None
 
-    success, rot_vec, trans_vec = cv.aruco.estimatePoseCharucoBoard(corners, ids, charuco_board, mtx, dist, None, None, False)  # mtx and dist are mandatory here
+    # Estimate pose
+    try:
+        # Try newer OpenCV 4.8+ CharucoBoard method
+        obj_points, img_points = charuco_board.matchImagePoints(corners, ids)
+        success, rot_vec, trans_vec = cv.solvePnP(obj_points, img_points, mtx, dist)
+    except AttributeError:
+        try:
+            # OpenCV 4.7 (returns object, rvec, tvec)
+            success, rot_vec, trans_vec = cv.aruco.estimatePoseCharucoBoard(corners, ids, charuco_board, mtx, dist, None, None)
+        except:
+            # OpenCV 4.5 and earlier
+            success, rot_vec, trans_vec = cv.aruco.estimatePoseCharucoBoard(corners, ids, charuco_board, mtx, dist, None, None, False)
+    
     if not success:
         raise Exception("Charucoboard pose not found")
 
     if draw_img is not None:
-        cv.drawFrameAxes(draw_img, mtx, dist, rot_vec, trans_vec, max(1.5 * squares_edge, 5))
+        try:
+            cv.drawFrameAxes(draw_img, mtx, dist, rot_vec, trans_vec, max(1.5 * squares_edge, 5))
+        except:
+            # Older OpenCV versions
+            cv.aruco.drawAxis(draw_img, mtx, dist, rot_vec, trans_vec, max(1.5 * squares_edge, 5))
 
     R_target2cam = cv.Rodrigues(rot_vec)[0]
 
@@ -199,7 +250,7 @@ def calibrate_static(chessboard_images, board_type: MarkerTypes, chess_size, squ
         if show_images:
             cv.imshow(WDW_NAME, draw_img)
             cv.resizeWindow(WDW_NAME, MAX_W, MAX_H)
-            cv.waitKey(500)
+            cv.waitKey(100)  # Reduced from 500ms to 100ms
         img_corners.append(corners)
 
         # Check if we processed enough images
@@ -249,6 +300,10 @@ def calibrate_handeye(robot_poses, chessboard_images, camera_matrix, camera_dist
         WDW_NAME = 'Charucoboard'
         MAX_W, MAX_H = 640, 480
         cv.namedWindow(WDW_NAME, cv.WINDOW_NORMAL)
+        cv.resizeWindow(WDW_NAME, MAX_W, MAX_H)  # Resize once before loop
+
+    successful_detections = 0
+    failed_detections = []
 
     for i in chessboard_images.keys():
         robot_pose = robot_poses[i]
@@ -261,14 +316,18 @@ def calibrate_handeye(robot_poses, chessboard_images, camera_matrix, camera_dist
                 _, R_target2cam, t_target2cam = find_chessboard(image, camera_matrix, camera_distortion, chess_size, squares_edge, draw_img=draw_img)
             else:
                 _, R_target2cam, t_target2cam = find_charucoboard(image, camera_matrix, camera_distortion, chess_size, squares_edge, markers_edge, draw_img=draw_img)
-        except:
-            print(f'Unable to find chessboard in {i}!')
+            
+            successful_detections += 1
+            print(f'✓ Image {i}: Board detected')
+            
+        except Exception as e:
+            print(f'✗ Image {i}: Unable to find board - {e}')
+            failed_detections.append(i)
             continue
 
         if show_images:
             cv.imshow(WDW_NAME, draw_img)
-            cv.resizeWindow(WDW_NAME, MAX_W, MAX_H)
-            cv.waitKey(500)
+            cv.waitKey(50)  # Reduced from 500ms to 50ms
 
         R_target2cam_list.append(R_target2cam)
         t_target2cam_list.append(t_target2cam)
@@ -279,6 +338,15 @@ def calibrate_handeye(robot_poses, chessboard_images, camera_matrix, camera_dist
 
     if show_images:
         cv.destroyAllWindows()
+
+    print(f'\nDetection summary:')
+    print(f'  Successful: {successful_detections}')
+    print(f'  Failed: {len(failed_detections)}')
+    if failed_detections:
+        print(f'  Failed images: {failed_detections}')
+
+    if successful_detections < 3:
+        raise Exception(f'Not enough successful detections! Got {successful_detections}, need at least 3.')
 
     R_cam2gripper, t_cam2gripper = cv.calibrateHandEye(R_gripper2base_list, t_gripper2base_list, R_target2cam_list, t_target2cam_list)
     return Rt_2_pose(R_cam2gripper, t_cam2gripper)
@@ -341,14 +409,36 @@ def runmain():
     image_files = sorted(handeye_folder.glob('*.png'))
     robot_files = sorted(handeye_folder.glob('*.json'))
 
-    images, poses, joints = {}, {}, {}
-    for image_file, robot_file in zip(image_files, robot_files):
-        if int(image_file.stem) != int(robot_file.stem):
-            raise
+    if len(image_files) == 0:
+        raise Exception(f"No images found in {handeye_folder}")
+    if len(robot_files) == 0:
+        raise Exception(f"No robot pose files found in {handeye_folder}")
 
-        id = int(image_file.stem)
+    print(f"\nFound {len(image_files)} images and {len(robot_files)} robot poses")
+
+    # Create dictionaries indexed by ID for easier matching
+    image_dict = {int(f.stem): f for f in image_files if f.stem.isdigit()}
+    robot_dict = {int(f.stem): f for f in robot_files if f.stem.isdigit()}
+
+    # Find matching pairs (images that have corresponding robot poses)
+    matching_ids = sorted(set(image_dict.keys()) & set(robot_dict.keys()))
+    
+    if len(matching_ids) == 0:
+        raise Exception("No matching image/pose pairs found!")
+
+    print(f"Found {len(matching_ids)} matching image/pose pairs: {matching_ids}")
+
+    # Load only the matching pairs
+    images, poses, joints = {}, {}, {}
+    for id in matching_ids:
+        image_file = image_dict[id]
+        robot_file = robot_dict[id]
 
         image = cv.imread(image_file.as_posix(), cv.IMREAD_GRAYSCALE)
+        if image is None:
+            print(f"Warning: Could not load image {image_file.name}")
+            continue
+            
         images[id] = image
 
         with open(robot_file.as_posix(), 'r') as f:
@@ -356,9 +446,31 @@ def runmain():
             joints[id] = robot_data['joints']
             poses[id] = robomath.TxyzRxyz_2_Pose(robot_data['pose_flange'])
 
+    print(f"Successfully loaded {len(images)} valid image/pose pairs")
+    print(f"\nStarting hand-eye calibration...")
+    print(f"Board type: {HANDEYE_BOARD_TYPE.name}")
+    print(f"Board size: {HANDEYE_CHESS_SIZE}")
+    print(f"Square size: {HANDEYE_SQUARE_SIZE} mm")
+    print(f"Marker size: {HANDEYE_MARKER_SIZE} mm")
+
     # Perform hand-eye calibration
-    camera_pose = calibrate_handeye(poses, images, mtx, dist, HANDEYE_BOARD_TYPE, HANDEYE_CHESS_SIZE, HANDEYE_SQUARE_SIZE, HANDEYE_MARKER_SIZE)
-    print(f'Camera pose (wrt to the robot flange):\n{camera_pose}')
+    try:
+        camera_pose = calibrate_handeye(poses, images, mtx, dist, HANDEYE_BOARD_TYPE, HANDEYE_CHESS_SIZE, HANDEYE_SQUARE_SIZE, HANDEYE_MARKER_SIZE, show_images=True)
+        print(f'\n{"="*60}')
+        print('SUCCESS - Hand-Eye Calibration Complete!')
+        print(f'{"="*60}')
+        print(f'Camera pose (wrt to the robot flange):\n{camera_pose}')
+    except Exception as e:
+        print(f'\n{"="*60}')
+        print('ERROR - Hand-Eye Calibration Failed!')
+        print(f'{"="*60}')
+        print(f'Error: {e}')
+        print(f'\nPossible issues:')
+        print(f'1. Board parameters incorrect (check HANDEYE_CHESS_SIZE, HANDEYE_SQUARE_SIZE, HANDEYE_MARKER_SIZE)')
+        print(f'2. Not enough valid detections (need at least 3-4 images with visible board)')
+        print(f'3. Wrong board type (CHESSBOARD vs CHARUCOBOARD)')
+        print(f'4. Board not clearly visible in images')
+        raise
 
     RDK.ShowMessage('Hand-Eye location:\n' + str(camera_pose))
 

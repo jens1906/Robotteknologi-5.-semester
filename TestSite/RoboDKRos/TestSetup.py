@@ -84,7 +84,7 @@ def main():
         pose_testplade = robomath.Mat([
             [1, 0, 0, 0],
             [0, 1, 0, 0],
-            [0, 0, 1, -2973.5],
+            [0, 0, 1, -2943.5],
             [0, 0, 0, 1]
         ])
         testplade.setPose(pose_testplade)

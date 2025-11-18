@@ -48,8 +48,9 @@ CAMERA_ROBODK_NAME = ''  # [Optional] Default name to use for the RoboDK camera
 ROBOT_NAME = ''  # [Optional] Default name to use for the robot
 
 # Intel RealSense settings
-REALSENSE_WIDTH = 1280  # Resolution width
-REALSENSE_HEIGHT = 720  # Resolution height
+# Common D435 resolutions: 1920x1080, 1280x720, 960x540, 848x480, 640x480, 640x360, 424x240
+REALSENSE_WIDTH = 1920  # Resolution width
+REALSENSE_HEIGHT = 1080  # Resolution height
 REALSENSE_FPS = 30  # Frames per second
 
 # Station variables shared with the main program to interact with this script
@@ -122,32 +123,39 @@ def get_camera_handle(camera_type: CameraTypes, camera_name: str, RDK: robolink.
         
         # Enable only color stream (simpler, more reliable)
         print("Configuring RealSense pipeline...")
-        config.enable_stream(rs.stream.color, REALSENSE_WIDTH, REALSENSE_HEIGHT, rs.format.bgr8, REALSENSE_FPS)
         
-        # Start the pipeline
-        try:
-            print("Starting RealSense pipeline...")
-            profile = pipeline.start(config)
-            
-            # Get the actual stream info
-            color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
-            intrinsics = color_stream.get_intrinsics()
-            print(f"RealSense started: {intrinsics.width}x{intrinsics.height} @ {color_stream.fps()}fps")
-            
-        except Exception as e:
-            print(f"Failed to start with {REALSENSE_WIDTH}x{REALSENSE_HEIGHT}: {e}")
-            print("Trying with auto-configuration...")
-            
-            # Reset and try with auto settings
-            pipeline = rs.pipeline()
-            config = rs.config()
-            # Just enable color stream without specifying resolution
-            config.enable_stream(rs.stream.color)
-            
-            profile = pipeline.start(config)
-            color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
-            intrinsics = color_stream.get_intrinsics()
-            print(f"RealSense started: {intrinsics.width}x{intrinsics.height} @ {color_stream.fps()}fps")
+        # List of resolutions to try (highest to lowest)
+        resolutions_to_try = [
+            (REALSENSE_WIDTH, REALSENSE_HEIGHT, REALSENSE_FPS),
+            (1920, 1080, 30),
+            (1280, 720, 30),
+            (1280, 720, 15),
+            (960, 540, 30),
+            (848, 480, 30),
+            (640, 480, 30),
+        ]
+        
+        profile = None
+        for width, height, fps in resolutions_to_try:
+            try:
+                print(f"Trying {width}x{height} @ {fps}fps...")
+                config = rs.config()
+                config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
+                profile = pipeline.start(config)
+                
+                # Get the actual stream info
+                color_stream = profile.get_stream(rs.stream.color).as_video_stream_profile()
+                intrinsics = color_stream.get_intrinsics()
+                print(f"✓ RealSense started: {intrinsics.width}x{intrinsics.height} @ {color_stream.fps()}fps")
+                break
+                
+            except Exception as e:
+                print(f"  ✗ Failed: {e}")
+                pipeline = rs.pipeline()  # Reset pipeline for next attempt
+                continue
+        
+        if profile is None:
+            raise RuntimeError("Could not start RealSense with any supported resolution")
         
         # Wait for camera to stabilize (capture and discard initial frames)
         print("Warming up Intel RealSense camera...")
@@ -249,15 +257,35 @@ def runmain():
     if ids:
         id = ids[-1] + 1
 
-    # Start the main loop, and wait for requests
+    # Initialize the station variables
     RDK.setParam(RECORD_READY, 0)
+    RDK.setParam(RECORD_ACKNOWLEDGE, 0)
+    RDK.setParam(RECORD_STOP, 0)
+    
+    print(f"\n{'='*60}")
+    print("Hand-Eye Acquisition Script Ready!")
+    print(f"{'='*60}")
+    print(f"Camera: Intel RealSense")
+    print(f"Robot: {robot_item.Name()}")
+    print(f"Save folder: {record_folder}")
+    print(f"\nTo record a pose:")
+    print(f"  1. Move robot to desired position")
+    print(f"  2. Set '{RECORD_READY}' = 1 in RoboDK")
+    print(f"  3. Wait for '{RECORD_ACKNOWLEDGE}' = 1")
+    print(f"\nTo stop: Set '{RECORD_STOP}' = 1")
+    print(f"{'='*60}\n")
 
+    # Start the main loop, and wait for requests
     while True:
         time.sleep(0.01)
 
-        # Read the requests set by the main program
-        ready = int(RDK.getParam(RECORD_READY)) == 1
-        stop = int(RDK.getParam(RECORD_STOP)) == 1
+        # Read the requests set by the main program (with safe defaults)
+        ready_param = RDK.getParam(RECORD_READY)
+        stop_param = RDK.getParam(RECORD_STOP)
+        
+        ready = int(ready_param) == 1 if ready_param is not None else False
+        stop = int(stop_param) == 1 if stop_param is not None else False
+        
         if stop:
             break
 
