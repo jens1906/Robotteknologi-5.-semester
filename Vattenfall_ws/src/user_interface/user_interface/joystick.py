@@ -70,7 +70,6 @@ class Joystick(QWidget):
         # In PyQt6 use position() to get QPointF
         self.grabCenter = self._centerEllipse().contains(ev.position())
         if self.grabCenter:
-            print("Joystick touched!")
             self.touched.emit()  # Emit signal
         return super().mousePressEvent(ev)
 
@@ -86,7 +85,6 @@ class Joystick(QWidget):
             self.movingOffset = self._boundJoystick(event.position())
             self.moved.emit(self.joystickDirection())  # Emit signal with direction
             self.update()
-        print(self.joystickDirection())
 
 
 if __name__ == "__main__":

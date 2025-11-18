@@ -275,6 +275,28 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info('Home Position pressed')
     
     def run_robot(self):
+        reply = QMessageBox.question(
+            self, 
+            'Confirm Action', 
+            'Are you sure you want to confirm the corrosion area and start process?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No  # Default to No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            msg = Bool()
+            msg.data = True
+            self.ui.stackedWidget.setCurrentIndex(0)
+            self.joystick_terminate_change_page(True)
+            self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
+            if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
+        else:
+            if printlogger: self.ros_node.get_logger().info('Run robot pressed cancelled')
+
+
+
+
+
         msg = Bool()
         msg.data = True
         self.ui.stackedWidget.setCurrentIndex(0)
@@ -300,7 +322,6 @@ class UserInterface(QMainWindow):
             if printlogger: self.ros_node.get_logger().info('Info panel hidden')
 
     def terminate(self):
-        """Show confirmation dialog and handle termination"""
         reply = QMessageBox.question(
             self, 
             'Confirm Terminate', 
@@ -412,8 +433,8 @@ class UserInterface(QMainWindow):
                 # Show confirmation dialog
                 reply = QMessageBox.question(
                     self,
-                    'Clear Adjustments',
-                    'Adjustments have been made. Do you want to reset them?',
+                    'Confirm movement', 
+                    'Are you sure you want make a movement?\n This will result in all corrosion area markings being lost.',
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No
                 )
@@ -432,7 +453,7 @@ class UserInterface(QMainWindow):
         """Handle joystick move event"""
         if direction_tuple != 0:
             direction, distance = direction_tuple
-            if printlogger: self.ros_node.get_logger().info(f'Joystick moved: {direction.name}, distance: {distance:.2f}')
+            self.ros_node.get_logger().info(f'Joystick moved: {direction.name}, distance: {distance:.2f}')
         # Add your custom logic here (e.g., send motor commands, update display, etc.)
         pass
 
@@ -607,16 +628,3 @@ if __name__ == '__main__':
     main()
 
 
-'''
-        if self.corrosion_area_add is not None and np.any(self.corrosion_area_add) or self.corrosion_area_remove is not None and np.any(self.corrosion_area_remove):
-            reply = QMessageBox.question(
-                self, 
-                'Confirm movement', 
-                'Are you sure you want make a movement?',
-                'This will result in all unsaved corrosion area markings being lost.',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No  # Default to No
-            )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-'''
