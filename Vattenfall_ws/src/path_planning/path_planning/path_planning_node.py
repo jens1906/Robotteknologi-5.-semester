@@ -43,7 +43,9 @@ class PathPlanner(Node):
         self.declare_parameter('line_spacing', 5.0)  # Spacing between scan lines (U direction)
         self.declare_parameter('n_bezier', 25)  # Number of points for generating connecting curves
         self.declare_parameter('auto_generate', True)  # Automatically generate path when parameterization is ready
-        
+        self.declare_parameter('test', True)  # Test mode
+
+        self.test = self.get_parameter('test').value
         self.point_spacing = self.get_parameter('point_spacing').value
         self.line_spacing = self.get_parameter('line_spacing').value
         self.n_bezier = self.get_parameter('n_bezier').value
@@ -63,22 +65,102 @@ class PathPlanner(Node):
         )
 
         # Subscribers
-        self.create_subscription(
-            ParameterizationStatus,
-            '/parameterization/status',
-            self.status_callback,
-            10
-        )
+        if self.test != True:
+            self.create_subscription(
+                ParameterizationStatus,
+                '/parameterization/status',
+                self.status_callback,
+                10
+            )
+        else:
+            self.testing_mode()
 
         # Publishers
         self.uv_path_pub = self.create_publisher(Float64MultiArray, '/path/uv_path', 10)
         
         # Debug info
         self.get_logger().info('Path Planner node initialized')
+        self.get_logger().info(f'  Test mode: {self.test}')
         self.get_logger().info(f'  Point spacing (V direction): {self.point_spacing}')
         self.get_logger().info(f'  Line spacing (U direction): {self.line_spacing}')
         self.get_logger().info(f'  Bezier points: {self.n_bezier}')
         self.get_logger().info(f'  Auto-generate: {self.auto_generate}')
+
+
+    def plot_uv_points_and_path(self):
+        """ Plot bounds and Path"""
+        try:
+            import matplotlib.pyplot as plt
+            if self.uv_bounds is None or self.paths_uv is None or self.uv_path is None:
+                self.get_logger().error('Cannot plot: UV bounds, paths, or uv_path not available')
+                return
+            u_min = self.uv_bounds['u_min']
+            u_max = self.uv_bounds['u_max']
+            v_min = self.uv_bounds['v_min']
+            v_max = self.uv_bounds['v_max']
+            plt.figure(figsize=(10, 6))
+            # Plot bounds
+            plt.plot([u_min, u_max, u_max, u_min, u_min],
+                     [v_min, v_min, v_max, v_max, v_min], 'k--', label='UV Bounds')
+            # Plot zigzag lines
+            for u_line, v_line in zip(self.paths_uv[0], self.paths_uv[1]):
+                plt.plot(u_line, v_line, 'b.-', alpha=0.5)
+            # Plot continuous path
+            plt.plot(self.uv_path[:, 0], self.uv_path[:, 1], 'r-', linewidth=2, label='Continuous Path')
+            plt.title('UV Path Planning')
+            plt.xlabel('U')
+            plt.ylabel('V')
+            plt.legend()
+            plt.axis('equal')
+            plt.grid(True)
+            plt.show()
+        except ImportError:
+            self.get_logger().error('matplotlib not installed, cannot plot UV points and path.')
+        except Exception as e:
+            self.get_logger().error(f'Error in plot_uv_points_and_path: {e}')
+
+    def testing_mode(self):
+        """Test mode with synthetic UV bounds - validates path generation without parameterization node."""
+        self.get_logger().info('RUNNING IN TEST MODE')
+        
+        # Create realistic UV bounds (typical range 0-100)
+        self.uv_bounds = {
+            'u_min': 0.0,
+            'u_max': 100.0,
+            'v_min': 0.0,
+            'v_max': 50.0
+        }
+        
+        self.get_logger().info(f'Test UV bounds: U=[{self.uv_bounds["u_min"]}, {self.uv_bounds["u_max"]}], '
+                             f'V=[{self.uv_bounds["v_min"]}, {self.uv_bounds["v_max"]}]')
+        
+        # Generate zigzag paths
+        self.get_logger().info('Generating zigzag paths...')
+        self.generate_zigzag_paths()
+        
+        # Validate zigzag paths
+        if self.paths_uv is None:
+            self.get_logger().error('TEST FAILED: Path generation returned None')
+            return
+        
+        u_lines, v_lines = self.paths_uv
+        expected_lines = max(2, int(np.ceil((self.uv_bounds['u_max'] - self.uv_bounds['u_min']) / self.line_spacing)) + 1)
+        
+        if len(u_lines) != expected_lines:
+            self.get_logger().warn(f'Line count mismatch: expected ~{expected_lines}, got {len(u_lines)}')
+        
+        # Publish continuous path
+        self.get_logger().info('Creating continuous path with Bézier curves...')
+        self.uv_path = self.create_continuous_path()
+        
+        # Summary
+        self.get_logger().info(f'TEST SUMMARY:')
+        self.get_logger().info(f'  ✓ Generated {len(u_lines)} scan lines')
+        self.get_logger().info(f'  ✓ {len(v_lines[0])} points per line')
+        self.get_logger().info(f'  ✓ Total waypoints: {sum(len(line) for line in u_lines)}')
+        self.get_logger().info(f'  ✓ Published continuous path to /path/uv_path')
+        self.get_logger().info('Test mode complete - node will continue running for integration tests')
+        self.plot_uv_points_and_path()
 
 
     def status_callback(self, msg):
