@@ -10,8 +10,8 @@ from sensor_msgs.msg import Image
 import cv2 as cv
 
 printlogger = True
-test_image = cv.imread('src/realsense_publisher/image/realsense_capture_20251027_142056_color.png')
-test_depth = np.load('src/realsense_publisher/image/realsense_capture_20251027_142056_depth.npy')
+test_image = cv.imread('src/realsense_publisher/image/realsense_capture_20251118_115022_color.png')
+test_depth = np.load('src/realsense_publisher/image/realsense_capture_20251118_115022_depth.npy')
 
 
 class RealSensePublisher(Node):
