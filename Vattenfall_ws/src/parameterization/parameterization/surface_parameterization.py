@@ -263,21 +263,7 @@ class Parameterization:
         
         self.metric_tensor = metric_tensor
         return metric_tensor
-    
-    def apply_conformal_correction(self, iterations=0, alpha=0.5):
-        """
-        Deprecated: Arc-length parameterization already provides isometric mapping.
-        
-        This method is kept for backward compatibility but does nothing since
-        arc-length parameterization already achieves E ≈ 1, G ≈ 1, F ≈ 0.
-        
-        Args:
-            iterations: Ignored (kept for compatibility)
-            alpha: Ignored (kept for compatibility)
-        """
-        # Arc-length parameterization is already isometric, no correction needed
-        return self.uv_params
-    
+       
     def build_inverse_interpolation(self):
         """
         Build cubic spline inverse interpolation from (u,v) → (x,y,z).
