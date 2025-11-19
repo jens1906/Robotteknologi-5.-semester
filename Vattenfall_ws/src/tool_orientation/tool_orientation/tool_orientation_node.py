@@ -276,7 +276,7 @@ if ROS2_AVAILABLE:
             #Subscriber for input path points
             self.path_sub = self.create_subscription(
                 Float64MultiArray,
-                '/path/xyz_path',
+                '/parameterization/xyz_path',
                 self.path_callback,
                 10
             )
