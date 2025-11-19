@@ -47,7 +47,6 @@ set(PYTHON_INSTALL_DIR "lib/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MIN
 install(FILES
   parameterization/__init__.py
   parameterization/surface_parameterization.py
-  parameterization/conformal_parameterization.py
   parameterization/parameterization_node.py
   DESTINATION "${PYTHON_INSTALL_DIR}/${PROJECT_NAME}"
 )

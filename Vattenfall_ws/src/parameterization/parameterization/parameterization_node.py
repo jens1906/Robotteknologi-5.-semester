@@ -19,7 +19,7 @@ from parameterization.msg import ParameterizationStatus, UVPoint
 from parameterization.srv import InterpolatePoint, GetUVBounds
 
 # Import the parameterization module
-from parameterization.conformal_parameterization import ConformalParameterization
+from parameterization.surface_parameterization import Parameterization
 
 class ParameterizationNode(Node):
     """
@@ -59,7 +59,7 @@ class ParameterizationNode(Node):
         self.metric_neighbors = self.get_parameter('metric_neighbors').value
         
         # Initialize arc-length-based parameterization
-        self.surf = ConformalParameterization()
+        self.surf = Parameterization()
         self.get_logger().info('Using Arc-Length-Based Isometric Parameterization')
         self.get_logger().info('Interpolation: Cubic Spline (CloughTocher2D)')
 

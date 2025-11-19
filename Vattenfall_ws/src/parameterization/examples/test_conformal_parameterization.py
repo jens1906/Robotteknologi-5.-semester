@@ -15,7 +15,7 @@ from mpl_toolkits.mplot3d import Axes3D
 sys.path.insert(0, '../parameterization')
 
 from surface_parameterization import SurfaceParameterization
-from conformal_parameterization import ConformalParameterization
+from parameterization.surface_parameterization import Parameterization
 
 
 def generate_curved_surface(n_points=500):
@@ -75,20 +75,20 @@ def test_simple_vs_conformal():
     
     # Test conformal parameterization
     print("\n3. Testing CONFORMAL parameterization (Amersdorfer)...")
-    surf_conformal = ConformalParameterization()
-    surf_conformal.set_points(points)
-    surf_conformal.compute_local_frame()
-    surf_conformal.compute_initial_parameterization(method='projection')
+    surf = Parameterization()
+    surf.set_points(points)
+    surf.compute_local_frame()
+    surf.compute_initial_parameterization(method='projection')
     
     print("   Computing surface metric tensor...")
-    surf_conformal.compute_surface_metric(k_neighbors=20)
+    surf.compute_surface_metric(k_neighbors=20)
     
     print("   Applying conformal correction...")
-    surf_conformal.apply_conformal_correction(iterations=5, alpha=0.5)
+    surf.apply_conformal_correction(iterations=5, alpha=0.5)
     
-    surf_conformal.build_inverse_interpolation(method='rbf', neighbors=50)
+    surf.build_inverse_interpolation(method='rbf', neighbors=50)
     
-    metrics_conformal = surf_conformal.evaluate_quality(sample_size=200)
+    metrics_conformal = surf.evaluate_quality(sample_size=200)
     print(f"   Reconstruction RMSE: {metrics_conformal['rmse']:.6f} m")
     print(f"   Mean error: {metrics_conformal['mean_error']:.6f} m")
     print(f"   Max error: {metrics_conformal['max_error']:.6f} m")
@@ -103,9 +103,9 @@ def test_simple_vs_conformal():
     print("\n4. Testing equidistant spacing...")
     desired_spacing = 0.05  # 5cm
     
-    if surf_conformal.metric_tensor is not None:
-        spacing_u = surf_conformal.compute_equidistant_uv_spacing(desired_spacing, 'u')
-        spacing_v = surf_conformal.compute_equidistant_uv_spacing(desired_spacing, 'v')
+    if surf.metric_tensor is not None:
+        spacing_u = surf.compute_equidistant_uv_spacing(desired_spacing, 'u')
+        spacing_v = surf.compute_equidistant_uv_spacing(desired_spacing, 'v')
         
         print(f"   Desired surface spacing: {desired_spacing:.4f} m")
         print(f"   Required UV spacing in u-direction: {spacing_u:.6f}")
@@ -116,7 +116,7 @@ def test_simple_vs_conformal():
     
     # Visualization
     print("\n5. Creating visualization...")
-    visualize_comparison(points, surf_simple, surf_conformal)
+    visualize_comparison(points, surf_simple, surf)
     
     print("\n" + "=" * 80)
     print("SUMMARY:")
@@ -134,7 +134,7 @@ def test_simple_vs_conformal():
     print("=" * 80)
 
 
-def visualize_comparison(points, surf_simple, surf_conformal):
+def visualize_comparison(points, surf_simple, surf):
     """
     Visualize the differences between simple and conformal parameterization.
     """
@@ -160,7 +160,7 @@ def visualize_comparison(points, surf_simple, surf_conformal):
     
     # Conformal UV space
     ax3 = fig.add_subplot(2, 3, 3)
-    uv_conformal = surf_conformal.uv_params
+    uv_conformal = surf.uv_params
     ax3.scatter(uv_conformal[:, 0], uv_conformal[:, 1], c='red', alpha=0.5, s=1)
     ax3.set_title('Conformal UV Space (Amersdorfer)')
     ax3.set_xlabel('U')
@@ -169,9 +169,9 @@ def visualize_comparison(points, surf_simple, surf_conformal):
     ax3.set_aspect('equal')
     
     # Metric tensor visualization for conformal
-    if surf_conformal.metric_tensor is not None:
+    if surf.metric_tensor is not None:
         ax4 = fig.add_subplot(2, 3, 4)
-        E_values = surf_conformal.metric_tensor[:, 0]
+        E_values = surf.metric_tensor[:, 0]
         scale_u = np.sqrt(E_values)
         scatter = ax4.scatter(uv_conformal[:, 0], uv_conformal[:, 1], 
                             c=scale_u, cmap='viridis', s=5)
@@ -181,7 +181,7 @@ def visualize_comparison(points, surf_simple, surf_conformal):
         plt.colorbar(scatter, ax=ax4)
         
         ax5 = fig.add_subplot(2, 3, 5)
-        G_values = surf_conformal.metric_tensor[:, 2]
+        G_values = surf.metric_tensor[:, 2]
         scale_v = np.sqrt(G_values)
         scatter = ax5.scatter(uv_conformal[:, 0], uv_conformal[:, 1], 
                             c=scale_v, cmap='viridis', s=5)
@@ -226,7 +226,7 @@ def test_equidistant_paths():
     points = generate_curved_surface()
     
     # Create conformal parameterization
-    surf = ConformalParameterization()
+    surf = Parameterization()
     surf.set_points(points)
     surf.compute_local_frame()
     surf.compute_initial_parameterization(method='projection')
