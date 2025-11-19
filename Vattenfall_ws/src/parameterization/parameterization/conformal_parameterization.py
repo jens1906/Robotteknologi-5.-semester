@@ -30,6 +30,9 @@ class ConformalParameterization:
         self.interpolator_x = None
         self.interpolator_y = None
         self.interpolator_z = None
+        self.interpolator_E = None
+        self.interpolator_F = None
+        self.interpolator_G = None
         self.principal_axes = None
         self.centroid = None
         self.points_local = None
@@ -229,6 +232,17 @@ class ConformalParameterization:
         self.interpolator_y = CloughTocher2DInterpolator(self.uv_params, self.points[:, 1])
         self.interpolator_z = CloughTocher2DInterpolator(self.uv_params, self.points[:, 2])
         
+        # Build metric tensor interpolators if metric has been computed
+        if self.metric_tensor is not None:
+            print("Building metric tensor interpolators...")
+            self.interpolator_E = CloughTocher2DInterpolator(self.uv_params, self.metric_tensor[:, 0])
+            self.interpolator_F = CloughTocher2DInterpolator(self.uv_params, self.metric_tensor[:, 1])
+            self.interpolator_G = CloughTocher2DInterpolator(self.uv_params, self.metric_tensor[:, 2])
+        else:
+            self.interpolator_E = None
+            self.interpolator_F = None
+            self.interpolator_G = None
+        
         # Build KD-tree for utility functions
         if self.kdtree_uv is None:
             self.kdtree_uv = cKDTree(self.uv_params)
@@ -260,6 +274,36 @@ class ConformalParameterization:
         
         return xyz
     
+    def get_metric_at_uv(self, uv_query):
+        """
+        Get metric tensor components at arbitrary UV coordinates.
+        
+        Args:
+            uv_query: Nx2 array of (u,v) coordinates
+            
+        Returns:
+            metric: Nx3 array where each row is [E, F, G] at that UV point
+        """
+        if not self.is_ready:
+            raise ValueError("Interpolation not ready. Call build_inverse_interpolation() first.")
+        
+        uv_query = np.atleast_2d(uv_query)
+        
+        # Use interpolators if available, otherwise use nearest neighbor
+        if self.interpolator_E is not None:
+            E = self.interpolator_E(uv_query)
+            F = self.interpolator_F(uv_query)
+            G = self.interpolator_G(uv_query)
+            metric = np.column_stack([E, F, G])
+        else:
+            # Fallback to nearest neighbor
+            metric = np.zeros((len(uv_query), 3))
+            for i, uv in enumerate(uv_query):
+                _, idx = self.kdtree_uv.query(uv, k=1)
+                metric[i] = self.metric_tensor[idx]
+        
+        return metric
+    
     def get_surface_distance(self, uv1, uv2):
         """
         Compute approximate surface distance between two UV points.
@@ -268,7 +312,7 @@ class ConformalParameterization:
             ds² = E du² + 2F du dv + G dv²
         
         Args:
-            uv1, uv2: UV coordinates (2D arrays)
+            uv1, uv2: UV coordinates (2D arrays or lists)
             
         Returns:
             distance: Approximate surface distance
@@ -276,13 +320,14 @@ class ConformalParameterization:
         if self.metric_tensor is None:
             self.compute_surface_metric()
         
-        # Find nearest point in parameterization to uv1
-        _, idx = self.kdtree_uv.query(uv1, k=1)
-        E, F, G = self.metric_tensor[idx]
+        # Get metric at uv1 (uses interpolation if available)
+        uv1 = np.atleast_2d(uv1)
+        metric = self.get_metric_at_uv(uv1)
+        E, F, G = metric[0]
         
         # Compute differential
-        du = uv2[0] - uv1[0]
-        dv = uv2[1] - uv1[1]
+        du = uv2[0] - uv1[0, 0]
+        dv = uv2[1] - uv1[0, 1]
         
         # Apply metric tensor
         ds_squared = E * du**2 + 2 * F * du * dv + G * dv**2
