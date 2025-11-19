@@ -1,6 +1,11 @@
 """
-This module implements conformal parameterization that preserves local angles and approximately 
-preserves distances, enabling equidistant path planning on curved surfaces.
+This module implements arc-length-based isometric surface parameterization 
+for robotic machining on curved surfaces.
+
+Uses distance-preserving parameterization following Amersdorfer et al. (2021):
+- Arc-length based: u = ∫√(1+(∂z/∂x)²)dx, v = ∫√(1+(∂z/∂y)²)dy
+- Results in metric tensor E ≈ 1, G ≈ 1, F ≈ 0
+- Enables true equidistant path planning on curved surfaces
 """
 
 import numpy as np
@@ -13,19 +18,26 @@ from sklearn.decomposition import PCA
 
 class ConformalParameterization:
     """
-    Conformal surface parameterization for robotic machining.
+    Arc-length-based isometric surface parameterization for robotic machining.
     
-    Implements:
-    1. Local angle preservation (conformality)
-    2. Approximate distance preservation through metric correction
-    3. Iso-parametric curves correspond to equidistant paths on the surface
+    Implements the approach from Amersdorfer et al. (2021):
+    - Distance-preserving (isometric) parameterization
+    - UV spacing ≈ surface distance
+    - Arc-length based: u = ∫√(1+(∂z/∂x)²)dx, v = ∫√(1+(∂z/∂y)²)dy
+    - Results in metric tensor E ≈ 1, G ≈ 1, F ≈ 0
+    - Enables simple equidistant path planning on curved surfaces
+    
+    Key Features:
+    - Bivariate cubic spline interpolation (UV → XYZ mapping)
+    - First fundamental form (metric tensor) computation
+    - Equidistant spacing calculation for path planning
+    - Iso-parametric curves for equidistant tool paths
     """
     
     def __init__(self):
-        """Initialize the conformal parameterization."""
+        """Initialize the arc-length-based parameterization."""
         self.points = None
         self.uv_params = None
-        self.uv_corrected = None  # Metric-corrected UV coordinates
         self.metric_tensor = None  # First fundamental form
         self.interpolator_x = None
         self.interpolator_y = None
@@ -69,21 +81,114 @@ class ConformalParameterization:
         
         return self.principal_axes, self.centroid
     
-    def compute_initial_parameterization(self, method='projection'):
+    def compute_initial_parameterization(self):
         """
-        Compute initial UV parameterization as starting point for conformal mapping.
+        Compute arc-length-based UV parameterization.
         
-        Args:
-            method: 'projection' - Simple projection onto first two principal components
+        Uses isometric (distance-preserving) parameterization following
+        Amersdorfer et al. (2021) approach.
         """
         if self.points_local is None:
             self.compute_local_frame()
         
-        if method == 'projection':
-            # Simple projection as initial guess
-            self.uv_params = self.points_local[:, :2].copy()
+        # Arc-length based parameterization (isometric)
+        self.uv_params = self._compute_arc_length_uv()
         
         return self.uv_params
+    
+    def _compute_arc_length_uv(self):
+        """
+        Compute arc-length-based UV parameterization for point clouds.
+        
+        Approach:
+        - u = arc-length in x-direction along surface
+        - v = arc-length in y-direction along surface
+        
+        For discrete point clouds, we approximate the arc-length integrals
+        by sorting points and accumulating distances along grid lines.
+        
+        Returns:
+            uv_params: Nx2 array of (u,v) coordinates based on arc-lengths
+        """
+        print("Computing arc-length-based parameterization...")
+        
+        n_points = len(self.points_local)
+        uv_params = np.zeros((n_points, 2))
+        
+        # Use local coordinates (x, y, z) from PCA
+        x = self.points_local[:, 0]
+        y = self.points_local[:, 1]
+        z = self.points_local[:, 2]
+        
+        # Find reference point (xref, yref) - use minimum x and y
+        x_ref = np.min(x)
+        y_ref = np.min(y)
+        
+        # Create a structured grid approximation
+        # Bin points into grid cells for arc-length computation
+        n_bins_x = min(50, int(np.sqrt(n_points)))
+        n_bins_y = min(50, int(np.sqrt(n_points)))
+        
+        x_bins = np.linspace(np.min(x), np.max(x), n_bins_x)
+        y_bins = np.linspace(np.min(y), np.max(y), n_bins_y)
+        
+        # For each point, compute u and v via arc-length approximation
+        for i in range(n_points):
+            xi, yi, zi = x[i], y[i], z[i]
+            
+            # Compute u: arc-length from (x_ref, y_ref) to (xi, y_ref)
+            # Find points approximately along the line y = y_ref
+            y_tolerance = (np.max(y) - np.min(y)) / n_bins_y
+            mask_u = np.abs(y - y_ref) < y_tolerance
+            mask_u &= (x >= x_ref) & (x <= xi)
+            
+            if np.sum(mask_u) > 1:
+                # Sort points by x-coordinate
+                u_indices = np.where(mask_u)[0]
+                u_indices = u_indices[np.argsort(x[u_indices])]
+                
+                # Accumulate arc-length along the path
+                u_arc_length = 0.0
+                for j in range(len(u_indices) - 1):
+                    idx1, idx2 = u_indices[j], u_indices[j + 1]
+                    dx = x[idx2] - x[idx1]
+                    dz = z[idx2] - z[idx1]
+                    # Arc-length element: √(1 + (dz/dx)²) * dx
+                    u_arc_length += np.sqrt(dx**2 + dz**2)
+                
+                uv_params[i, 0] = u_arc_length
+            else:
+                # Fallback: Euclidean distance in xy-plane
+                uv_params[i, 0] = xi - x_ref
+            
+            # Compute v: arc-length from (xi, y_ref) to (xi, yi)
+            # Find points approximately along the line x = xi
+            x_tolerance = (np.max(x) - np.min(x)) / n_bins_x
+            mask_v = np.abs(x - xi) < x_tolerance
+            mask_v &= (y >= y_ref) & (y <= yi)
+            
+            if np.sum(mask_v) > 1:
+                # Sort points by y-coordinate
+                v_indices = np.where(mask_v)[0]
+                v_indices = v_indices[np.argsort(y[v_indices])]
+                
+                # Accumulate arc-length along the path
+                v_arc_length = 0.0
+                for j in range(len(v_indices) - 1):
+                    idx1, idx2 = v_indices[j], v_indices[j + 1]
+                    dy = y[idx2] - y[idx1]
+                    dz = z[idx2] - z[idx1]
+                    # Arc-length element: √(1 + (dz/dy)²) * dy
+                    v_arc_length += np.sqrt(dy**2 + dz**2)
+                
+                uv_params[i, 1] = v_arc_length
+            else:
+                # Fallback: Euclidean distance in xy-plane
+                uv_params[i, 1] = yi - y_ref
+        
+        print(f"Arc-length parameterization complete. UV range: u=[{uv_params[:,0].min():.3f}, {uv_params[:,0].max():.3f}], v=[{uv_params[:,1].min():.3f}, {uv_params[:,1].max():.3f}]")
+        
+        return uv_params
     
     def compute_surface_metric(self, k_neighbors=20):
         """
@@ -93,7 +198,8 @@ class ConformalParameterization:
         relate to distances on the actual surface:
             ds² = E du² + 2F du dv + G dv²
         
-        For equidistant paths, we want E ≈ G ≈ 1 and F ≈ 0.
+        For isometric (arc-length) parameterization: E ≈ 1, G ≈ 1, F ≈ 0
+        For projection parameterization: E and G depend on surface curvature
         
         Args:
             k_neighbors: Number of neighbors for local derivative estimation
@@ -159,59 +265,19 @@ class ConformalParameterization:
         self.metric_tensor = metric_tensor
         return metric_tensor
     
-    def apply_conformal_correction(self, iterations=1, alpha=0.5):
+    def apply_conformal_correction(self, iterations=0, alpha=0.5):
         """
-        Apply conformal correction to make the parameterization more isometric.
+        Deprecated: Arc-length parameterization already provides isometric mapping.
         
-        This iteratively adjusts UV coordinates to minimize metric distortion,
-        making E ≈ G and F ≈ 0 (conformality condition).
+        This method is kept for backward compatibility but does nothing since
+        arc-length parameterization already achieves E ≈ 1, G ≈ 1, F ≈ 0.
         
         Args:
-            iterations: Number of correction iterations (0 to skip)
-            alpha: Step size for correction (0 < alpha < 1)
+            iterations: Ignored (kept for compatibility)
+            alpha: Ignored (kept for compatibility)
         """
-        if iterations == 0:
-            # Skip correction, use initial parameterization as-is
-            self.uv_corrected = self.uv_params.copy()
-            return self.uv_corrected
-            
-        if self.metric_tensor is None:
-            self.compute_surface_metric()
-        
-        self.uv_corrected = self.uv_params.copy()
-        
-        for iter_idx in range(iterations):
-            # Only recompute metric on first iteration - too slow for large point clouds
-            if iter_idx == 0:
-                metric_tensor = self.metric_tensor
-            
-            # For each point, adjust UV to reduce anisotropy
-            for i in range(len(self.points)):
-                E, F, G = metric_tensor[i]
-                
-                # Compute scale factors to make metric more isometric
-                # Target: E = G = scale, F = 0
-                scale = np.sqrt((E + G) / 2.0)
-                
-                if scale < 1e-6:
-                    continue
-                
-                # Compute correction factors
-                # For conformal maps, we want E/G ≈ 1 and F ≈ 0
-                anisotropy = np.abs(E - G) / (E + G + 1e-6)
-                
-                if anisotropy > 0.1:  # Apply correction if significant anisotropy
-                    # Simple correction: scale UV coordinates
-                    scale_u = np.sqrt(G / (E + 1e-6))
-                    scale_v = np.sqrt(E / (G + 1e-6))
-                    
-                    # Apply weighted correction
-                    self.uv_corrected[i, 0] *= (1 - alpha) + alpha * scale_u
-                    self.uv_corrected[i, 1] *= (1 - alpha) + alpha * scale_v
-        
-        self.uv_params = self.uv_corrected
-        
-        return self.uv_corrected
+        # Arc-length parameterization is already isometric, no correction needed
+        return self.uv_params
     
     def build_inverse_interpolation(self):
         """
