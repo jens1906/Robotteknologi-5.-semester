@@ -87,7 +87,7 @@ class ParameterizationNode(Node):
 
         self.xyz_path_pub = self.create_publisher(
             Float64MultiArray,
-            '/path/xyz_path',
+            '/parameterization/xyz_path',
             10
         )
         
