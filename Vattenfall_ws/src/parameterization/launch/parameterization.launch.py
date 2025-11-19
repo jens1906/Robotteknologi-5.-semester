@@ -1,7 +1,7 @@
 """
 Launch file for parameterization node.
 
-Uses Amersdorfer et al. (2021) conformal parameterization approach
+Uses Amersdorfer et al. (2021) isometric parameterization approach
 for equidistant path planning on curved surfaces.
 """
 from launch import LaunchDescription
@@ -11,7 +11,7 @@ from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
-    """Generate launch description with conformal parameterization node"""
+    """Generate launch description with isometric parameterization node"""
     
     # Declare launch arguments
     interpolation_method_arg = DeclareLaunchArgument(
@@ -32,14 +32,14 @@ def generate_launch_description():
         description='Number of neighbors for metric tensor computation'
     )
     
-    conformal_iterations_arg = DeclareLaunchArgument(
-        'conformal_iterations',
+    deprecated_iterations_arg = DeclareLaunchArgument(
+        'deprecated_iterations',
         default_value='5',
         description='Number of conformal correction iterations'
     )
     
-    conformal_alpha_arg = DeclareLaunchArgument(
-        'conformal_alpha',
+    deprecated_alpha_arg = DeclareLaunchArgument(
+        'deprecated_alpha',
         default_value='0.5',
         description='Conformal correction step size (0 < alpha < 1)'
     )
@@ -55,8 +55,8 @@ def generate_launch_description():
             'metric_neighbors': LaunchConfiguration('metric_neighbors'),
             'quality_sample_size': 1000,
             'status_publish_rate': 1.0,
-            'conformal_iterations': LaunchConfiguration('conformal_iterations'),
-            'conformal_alpha': LaunchConfiguration('conformal_alpha'),
+            'deprecated_iterations': LaunchConfiguration('deprecated_iterations'),
+            'deprecated_alpha': LaunchConfiguration('deprecated_alpha'),
         }]
     )
     
@@ -64,7 +64,7 @@ def generate_launch_description():
         interpolation_method_arg,
         neighbors_arg,
         metric_neighbors_arg,
-        conformal_iterations_arg,
-        conformal_alpha_arg,
+        deprecated_iterations_arg,
+        deprecated_alpha_arg,
         parameterization_node
     ])

@@ -11,7 +11,7 @@ DOI: 10.1109/TASE.2021.3117691
 
 ## Features
 
-- **Conformal parameterization** with metric tensor computation
+- **arc-length-based isometric parameterization** with metric tensor computation
 - Maps 3D Cartesian points (x,y,z) to 2D parameter space (u,v) 
 - **Preserves distances** through surface metric correction
 - Enables **equidistant path planning** on curved surfaces
@@ -123,7 +123,7 @@ ros2 service call /parameterization/get_uv_bounds parameterization/srv/GetUVBoun
 
 ## Python API
 
-You can also use the conformal parameterization module directly in your Python code:
+You can also use the arc-length-based isometric parameterization module directly in your Python code:
 
 ```python
 from parameterization.conformal_parameterization import ConformalParameterization
@@ -139,7 +139,7 @@ surf.set_points(points)
 # Compute local frame
 surf.compute_local_frame()
 
-# Compute conformal parameterization (Amersdorfer et al. 2021)
+# Compute arc-length-based isometric parameterization (Amersdorfer et al. 2021)
 surf.compute_initial_parameterization(method='projection')
 surf.compute_surface_metric(k_neighbors=20)
 surf.apply_conformal_correction(iterations=5, alpha=0.5)
@@ -270,7 +270,7 @@ Good metrics mean equidistant paths in UV space = equidistant paths on the surfa
 
 ## Notes
 
-- Uses **conformal parameterization** following Amersdorfer et al. (2021)
+- Uses **arc-length-based isometric parameterization** following Amersdorfer et al. (2021)
 - Computes surface metric tensor for distance preservation
 - Enables **equidistant path planning** on curved surfaces
 - Quality metrics include isotropy and orthogonality

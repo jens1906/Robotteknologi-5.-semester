@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
-Surface Parameterization ROS 2 No        self.declare_parameter('quality_sample_size', 1000)
-        self.declare_parameter('status_publish_rate', 1.0)
-        self.declare_parameter('conformal_iterations', 0)  # Set to 0 to skip (too slow for large clouds)
-        self.declare_parameter('conformal_alpha', 0.5)
-        self.declare_parameter('metric_neighbors', 20)his node receives point clouds and provides surface parameterization services.
-It computes a 2D parameter space (u,v) mapping from 3D points (x,y,z) and offers
+Surface Parameterization ROS 2 Node
 interpolation and surface normal computation services.
 """
 
@@ -19,7 +14,7 @@ from parameterization.msg import ParameterizationStatus, UVPoint
 from parameterization.srv import InterpolatePoint, GetUVBounds
 
 # Import the parameterization module
-from parameterization.conformal_parameterization import ConformalParameterization
+from parameterization.surface_parameterization import Parameterization
 
 class ParameterizationNode(Node):
     """
@@ -59,7 +54,7 @@ class ParameterizationNode(Node):
         self.metric_neighbors = self.get_parameter('metric_neighbors').value
         
         # Initialize arc-length-based parameterization
-        self.surf = ConformalParameterization()
+        self.surf = Parameterization()
         self.get_logger().info('Using Arc-Length-Based Isometric Parameterization')
         self.get_logger().info('Interpolation: Cubic Spline (CloughTocher2D)')
 
@@ -161,8 +156,8 @@ class ParameterizationNode(Node):
             self.get_logger().info('Arc-length UV parameterization computed')
             
             # Compute surface metric tensor (E, F, G)
-            self.surf.compute_surface_metric(k_neighbors=self.metric_neighbors)
-            self.get_logger().info('Surface metric tensor computed')
+            #self.surf.compute_surface_metric(k_neighbors=self.metric_neighbors)
+            #self.get_logger().info('Surface metric tensor computed')
             
             # Build cubic spline inverse interpolation
             self.surf.build_inverse_interpolation()
