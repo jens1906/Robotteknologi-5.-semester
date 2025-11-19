@@ -283,17 +283,6 @@ class Parameterization:
         self.interpolator_y = CloughTocher2DInterpolator(self.uv_params, self.points[:, 1])
         self.interpolator_z = CloughTocher2DInterpolator(self.uv_params, self.points[:, 2])
         
-        # Build metric tensor interpolators if metric has been computed
-        if self.metric_tensor is not None:
-            print("Building metric tensor interpolators...")
-            self.interpolator_E = CloughTocher2DInterpolator(self.uv_params, self.metric_tensor[:, 0])
-            self.interpolator_F = CloughTocher2DInterpolator(self.uv_params, self.metric_tensor[:, 1])
-            self.interpolator_G = CloughTocher2DInterpolator(self.uv_params, self.metric_tensor[:, 2])
-        else:
-            self.interpolator_E = None
-            self.interpolator_F = None
-            self.interpolator_G = None
-        
         # Build KD-tree for utility functions
         if self.kdtree_uv is None:
             self.kdtree_uv = cKDTree(self.uv_params)
