@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
-Surface Parameterization ROS 2 No        self.declare_parameter('quality_sample_size', 1000)
-        self.declare_parameter('status_publish_rate', 1.0)
-        self.declare_parameter('conformal_iterations', 0)  # Set to 0 to skip (too slow for large clouds)
-        self.declare_parameter('conformal_alpha', 0.5)
-        self.declare_parameter('metric_neighbors', 20)his node receives point clouds and provides surface parameterization services.
-It computes a 2D parameter space (u,v) mapping from 3D points (x,y,z) and offers
+Surface Parameterization ROS 2 Node
 interpolation and surface normal computation services.
 """
 
@@ -161,8 +156,8 @@ class ParameterizationNode(Node):
             self.get_logger().info('Arc-length UV parameterization computed')
             
             # Compute surface metric tensor (E, F, G)
-            self.surf.compute_surface_metric(k_neighbors=self.metric_neighbors)
-            self.get_logger().info('Surface metric tensor computed')
+            #self.surf.compute_surface_metric(k_neighbors=self.metric_neighbors)
+            #self.get_logger().info('Surface metric tensor computed')
             
             # Build cubic spline inverse interpolation
             self.surf.build_inverse_interpolation()
