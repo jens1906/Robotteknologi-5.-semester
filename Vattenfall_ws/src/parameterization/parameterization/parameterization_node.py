@@ -60,9 +60,16 @@ class ParameterizationNode(Node):
 
         
         # Create subscriber for corrosion scatter plot
+        self.corrosion_plot_sub = self.create_subscription(
+            Float32MultiArray,
+            '/corrosion/corrosion',
+            self.scatter_plot_callback,
+            10
+        )
+
         self.scatter_plot_sub = self.create_subscription(
             Float32MultiArray,
-            '/corrosion/scatter_plot_pub',
+            '/corrosion/workspace',
             self.scatter_plot_callback,
             10
         )
