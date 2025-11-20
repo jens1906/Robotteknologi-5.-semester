@@ -21,6 +21,7 @@ showImages = True
 printlogger = False
 
 
+
 class RosSignalEmitter(QObject):
     data_signal = pyqtSignal(str)           
     image_signal = pyqtSignal(object)       
@@ -402,6 +403,7 @@ class UserInterface(QMainWindow):
             self.tabindex = index
             self.ui.stackedWidget_Info.setCurrentIndex(0)  # Show Movement info
         elif index == 1:
+            self.camerafeed[0] = 0
             self.camerafeed[1] = 1  # Show thresholded feed on Vision tab
             self.tabindex = index
             self.ui.stackedWidget_Info.setCurrentIndex(1)  # Show Vision info

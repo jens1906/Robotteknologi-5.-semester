@@ -27,7 +27,8 @@ class CorrosionDetector(Node):
         )
         
         self.corrosion_thresholding = self.create_publisher(Image, '/corrosion/thresholding_pub', image_qos)
-        self.corrosion_scatter_plot = self.create_publisher(Float32MultiArray, '/corrosion/scatter_plot_pub', 10)
+        self.corrosion_corrosion = self.create_publisher(Float32MultiArray, '/corrosion/corrosion', 10)
+        self.corrosion_workspace = self.create_publisher(Float32MultiArray, '/corrosion/workspace', 10)
         self.ui_corrosion_add = np.zeros((480, 640), np.uint8)
         self.ui_corrosion_remove = np.zeros((480, 640), np.uint8)
         # Subscribers
@@ -52,6 +53,7 @@ class CorrosionDetector(Node):
         self.first_frame_received = False
         self.last_subscriber_count = 0  # Track subscriber count changes
         self.ui_connected_state = False
+        self.last_corrosion_threshold_image = None
 
         if printlogger: self.get_logger().info('Initialized Corrosion Detector Node')
 
@@ -162,9 +164,9 @@ class CorrosionDetector(Node):
                 # Edge detection on the cleaned, combined mask
                 edge = cv.Canny(cleaned_gray, 100, 200)
                 
-                # Dilate edges to make them thicker (5 pixels)
-                edge_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
-                edge = cv.dilate(edge, edge_kernel, iterations=2)
+                # Dilate edges to create an offset/buffer (expand outward by ~5 pixels)
+                edge_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))  # Larger kernel for bigger offset
+                edge = cv.dilate(edge, edge_kernel, iterations=1)  # 1 iteration with large kernel
 
                 # Overlay green edges on original color image
                 color_threshold_image[edge > 0] = [0, 255, 0]
@@ -181,10 +183,14 @@ class CorrosionDetector(Node):
 
         elif self.corrosion_accepted and self.running_status == False:
             self.running_status = True
-            xyz_data = self.combine_and_transform(self.edge_to_scatter_plot(color_image), depth_image)
+            xyz_data, xyz_offset = self.combine_and_transform(self.edge_to_scatter_plot(color_image), depth_image)
             msg = Float32MultiArray()
             msg.data = xyz_data.flatten().tolist()
-            self.corrosion_scatter_plot.publish(msg)
+            self.corrosion_corrosion.publish(msg)
+
+            msg = Float32MultiArray()
+            msg.data = xyz_offset.flatten().tolist()
+            self.corrosion_workspace.publish(msg)
             if printlogger: self.get_logger().info('Corrosion area accepted')
         else:
             if printlogger: self.get_logger().info(f'Corrosion detection is already running, wait for ROBODK to complete {self.corrosion_accepted} {self.running_status}')
@@ -215,30 +221,65 @@ class CorrosionDetector(Node):
         return img_final_erode
 
     def edge_to_scatter_plot(self, image, threshold1=100, threshold2=200):
-        # Detect edges and convert to scatter plot data
-        img_final_erode = cv.cvtColor(self.clean_image(self.threshold_corrosion(image)), cv.COLOR_BGR2GRAY)
+        thresholded_image = self.threshold_corrosion(image)
 
-        edges = cv.Canny(img_final_erode, threshold1, threshold2)
-        
-        # Dilate edges to make them thicker (5 pixels)
-        edge_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))
-        edges = cv.dilate(edges, edge_kernel, iterations=2)
+        # Convert threshold to grayscale (single channel)
+        thresh_gray = cv.cvtColor(thresholded_image, cv.COLOR_BGR2GRAY)
+
+        # Combine: add UI painted areas, remove UI erased areas
+        combined_mask = cv.bitwise_or(thresh_gray, self.ui_corrosion_add)
+        combined_mask = cv.bitwise_and(combined_mask, cv.bitwise_not(self.ui_corrosion_remove))
+
+        # Clean the combined mask (your existing morphology)
+        cleaned_mask = self.clean_image(cv.merge([combined_mask, combined_mask, combined_mask]))
+        cleaned_gray = cv.cvtColor(cleaned_mask, cv.COLOR_BGR2GRAY)
+        edges = cv.Canny(cleaned_gray, 100, 200)
         
         contours, _ = cv.findContours(edges, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-        filled_mask = np.zeros_like(img_final_erode)
+        filled_mask = np.zeros_like(image[:, :, 0])
         cv.drawContours(filled_mask, contours, -1, 255, thickness=cv.FILLED)
+        
+        # Apply 30mm offset by dilating the filled mask
+        # Calculate kernel size: 30mm / (pixel_size_in_mm)
+        # Assuming depth ~500mm and focal length factor, pixel size ~0.8mm
+        # So 30mm ≈ 37 pixels, use kernel of 75x75 (radius ~37)
+        offset_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (75, 75))
+        filled_mask_offset = cv.dilate(filled_mask, offset_kernel, iterations=1)
 
-        y_indices, x_indices = np.where(filled_mask > 0)
+        # Return both original and offset masks for visualization
+        y_indices_orig, x_indices_orig = np.where(filled_mask > 0)
+        scatter_data_original = np.column_stack((x_indices_orig, y_indices_orig))
+        
+        y_indices, x_indices = np.where(filled_mask_offset > 0)
         scatter_data = np.column_stack((x_indices, y_indices))
-        return scatter_data
+        
+        # Store original for visualization
+        self.scatter_data_original = scatter_data_original
+        
+        return scatter_data_original, scatter_data
 
-    def combine_and_transform(self, scatter_data, depth, depthFiles=None):
-        # Combine scatter plot data with depth to get XYZ coordinates
-        depth_values = depth[scatter_data[:, 1], scatter_data[:, 0]]
-        xyz_data = np.column_stack(((scatter_data[:, 0] - c[0]) * depth_values / (1.93/0.003), 
-                                    (scatter_data[:, 1] - c[1]) * depth_values / (1.93/0.003), 
-                                    depth_values))
-        return xyz_data
+    def combine_and_transform(self, scatter_data_tuple, depth, depthFiles=None):
+        # Unpack the tuple (original, offset)
+        scatter_data_original, scatter_data_offset = scatter_data_tuple
+        
+        # Check if scatter_data is empty
+        if scatter_data_offset is None or len(scatter_data_offset) == 0:
+            if printlogger: self.get_logger().warn('No scatter data to transform')
+            return np.array([]), np.array([])
+        
+        # Transform ORIGINAL data
+        depth_values_orig = depth[scatter_data_original[:, 1], scatter_data_original[:, 0]]
+        xyz_original = np.column_stack(((scatter_data_original[:, 0] - c[0]) * depth_values_orig / (1.93/0.003), 
+                                        (scatter_data_original[:, 1] - c[1]) * depth_values_orig / (1.93/0.003), 
+                                        depth_values_orig))
+        
+        # Transform OFFSET data
+        depth_values_offset = depth[scatter_data_offset[:, 1], scatter_data_offset[:, 0]]
+        xyz_offset = np.column_stack(((scatter_data_offset[:, 0] - c[0]) * depth_values_offset / (1.93/0.003), 
+                                      (scatter_data_offset[:, 1] - c[1]) * depth_values_offset / (1.93/0.003), 
+                                      depth_values_offset))
+        
+        return xyz_original, xyz_offset
 
     def destroy_node(self):
         
