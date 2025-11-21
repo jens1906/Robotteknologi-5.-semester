@@ -17,6 +17,7 @@ find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ParameterizationStatus.msg"
   "msg/UVPoint.msg"
+  "msg/UVBoundary.msg"
   "srv/InterpolatePoint.srv"
   "srv/GetUVBounds.srv"
   DEPENDENCIES sensor_msgs geometry_msgs std_msgs

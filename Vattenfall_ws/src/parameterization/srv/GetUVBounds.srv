@@ -5,5 +5,9 @@ float64 u_min
 float64 u_max
 float64 v_min
 float64 v_max
+
+# Boundary points of corrosion area in UV space
+parameterization/UVBoundary boundary
+
 bool success
 string message
