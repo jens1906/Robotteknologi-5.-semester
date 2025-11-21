@@ -1,0 +1,148 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ur3e_workstation">
+
+  <!-- Arguments -->
+  <xacro:arg name="ur_type" default="ur3e"/>
+  <xacro:arg name="robot_ip" default="192.168.56.101"/>
+  <xacro:arg name="use_mock_hardware" default="true"/>
+  <xacro:arg name="mock_sensor_commands" default="false"/>
+  <xacro:arg name="headless_mode" default="false"/>
+  <xacro:arg name="initial_positions_file" default="$(find ur_description)/config/initial_positions.yaml"/>
+  <xacro:arg name="script_filename" default=""/>
+  <xacro:arg name="output_recipe_filename" default=""/>
+  <xacro:arg name="input_recipe_filename" default=""/>
+
+  <!-- ==================== World ==================== -->
+  <link name="world"/>
+
+  <!-- ==================== Table / Bordplade ==================== -->
+  <link name="bordplade">
+    <visual>
+      <geometry>
+        <mesh filename="package://ur3e_workstation/urdf/Bundplade.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://ur3e_workstation/urdf/Bundplade.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </collision>
+  </link>
+  <joint name="world_to_bordplade" type="fixed">
+    <parent link="world"/>
+    <child link="bordplade"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== Mount ==================== -->
+  <link name="mount">
+    <visual>
+      <geometry>
+        <mesh filename="package://ur3e_workstation/urdf/UR3e_mount.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://ur3e_workstation/urdf/UR3e_mount.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </collision>
+  </link>
+  <joint name="bordplade_to_mount" type="fixed">
+    <parent link="bordplade"/>
+    <child link="mount"/>
+    <origin xyz="0.200 0.0 0.250" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== UR3e Robot with ros2_control ==================== -->
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <xacro:ur_robot
+    name="$(arg ur_type)"
+    tf_prefix=""
+    parent="mount"
+    joint_limits_parameters_file="$(find ur_description)/config/$(arg ur_type)/joint_limits.yaml"
+    kinematics_parameters_file="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"
+    physical_parameters_file="$(find ur_description)/config/$(arg ur_type)/physical_parameters.yaml"
+    visual_parameters_file="$(find ur_description)/config/$(arg ur_type)/visual_parameters.yaml"
+    transmission_hw_interface="hardware_interface/PositionJointInterface"
+    safety_limits="false"
+    safety_pos_margin="0.15"
+    safety_k_position="20"
+    use_mock_hardware="$(arg use_mock_hardware)"
+    mock_sensor_commands="$(arg mock_sensor_commands)"
+    headless_mode="$(arg headless_mode)"
+    robot_ip="$(arg robot_ip)"
+    script_filename="$(arg script_filename)"
+    output_recipe_filename="$(arg output_recipe_filename)"
+    input_recipe_filename="$(arg input_recipe_filename)"
+    initial_positions_file="$(arg initial_positions_file)">
+    <origin xyz="0 -0.218 0" rpy="-1.5708 0 3.1416"/>
+  </xacro:ur_robot>
+
+  <!-- ==================== Test Plate ==================== -->
+  <link name="testpladekurve">
+    <visual>
+      <geometry>
+        <mesh filename="package://ur3e_workstation/urdf/TestpladeKurve_v3.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0.200 2.94 -0.4" rpy="1.5708 0 0"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://ur3e_workstation/urdf/TestpladeKurve_v3.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0.200 0 0" rpy="1.5708 0 0"/>
+    </collision>
+  </link>
+  <joint name="bordplade_to_testpladekurve" type="fixed">
+    <parent link="bordplade"/>
+    <child link="testpladekurve"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== Realsense Holder ==================== -->
+  <link name="realsense_holder">
+    <visual>
+      <geometry>
+        <mesh filename="package://ur3e_workstation/urdf/RealsenseHolder.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://ur3e_workstation/urdf/RealsenseHolder.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </collision>
+  </link>
+  <joint name="ee_to_holder" type="fixed">
+    <parent link="tool0"/>
+    <child link="realsense_holder"/>
+    <origin xyz="0 0 -0.085" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ==================== RSD435 Camera ==================== -->
+  <link name="rsd435">
+    <visual>
+      <geometry>
+        <mesh filename="package://ur3e_workstation/urdf/RSD435.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://ur3e_workstation/urdf/RSD435.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </collision>
+  </link>
+  <joint name="holder_to_camera" type="fixed">
+    <parent link="realsense_holder"/>
+    <child link="rsd435"/>
+    <origin xyz="0 0.044 0.072" rpy="0 0 0"/>
+  </joint>
+
+</robot>

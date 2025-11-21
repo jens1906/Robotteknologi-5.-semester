@@ -24,7 +24,8 @@ printlogger = False
 
 class RosSignalEmitter(QObject):
     data_signal = pyqtSignal(str)           
-    image_signal = pyqtSignal(object)       
+    image_signal = pyqtSignal(object)
+    painting_color_signal = pyqtSignal(str)  # Signal to change painting button colors       
 
 class UserInterfaceNode(Node):
     def __init__(self, signal_emitter, ui_instance=None):
@@ -49,7 +50,6 @@ class UserInterfaceNode(Node):
         self.ui_connected_pub = self.create_publisher(Bool, '/ui/connected_pub', 10)
         self.ui_connected_pub_state = False
 
-
         self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
         color_sub = message_filters.Subscriber(self, Image, '/realsense/camera_color_pub', qos_profile=image_qos)
@@ -66,45 +66,28 @@ class UserInterfaceNode(Node):
         color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
         
-
         # Allocate corrosion_area_add and corrosion_area_remove only once on first image match
         if self.ui_instance.corrosion_area_add is None:
             h, w = color_image.shape[:2]
             self.ui_instance.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
             self.ui_instance.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
             self.get_logger().info(f"Initialized corrosion_area_add and corrosion_area_remove with shape: {(h, w)} and {color_image.shape}")
+        
         # Show color or depth based on camera_type
         if self.ui_instance.camerafeed[0] == 0 and self.ui_instance.camerafeed[1] == 0:
             self.signal_emitter.data_signal.emit(f"Color: {depth_image.shape[1]}x{depth_image.shape[0]}")
             self.signal_emitter.image_signal.emit(color_image)
-            self.ui_instance.ui.Reset.setStyleSheet("background-color: #ffffff;")
-            self.ui_instance.ui.Eraser.setStyleSheet("background-color: #ffffff;")
-            self.ui_instance.ui.Undo.setStyleSheet("background-color: #ffffff;")
-            self.ui_instance.ui.Small_Pen.setStyleSheet("background-color: #ffffff;")
-            self.ui_instance.ui.Medium_Pen.setStyleSheet("background-color: #ffffff;")
-            self.ui_instance.ui.Large_Pen.setStyleSheet("background-color: #ffffff;")
+            self.signal_emitter.painting_color_signal.emit("ffffff")  # White for color view
             if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
         elif self.ui_instance.camerafeed[0] == 1 and self.ui_instance.camerafeed[1] == 1:
             self.signal_emitter.data_signal.emit(f"Depth: {depth_image.shape[1]}x{depth_image.shape[0]}")
             self.signal_emitter.image_signal.emit(depth_image)
-            self.ui_instance.ui.Reset.setStyleSheet("background-color: #B3B3B3;")
-            self.ui_instance.ui.Eraser.setStyleSheet("background-color: #B3B3B3;")
-            self.ui_instance.ui.Undo.setStyleSheet("background-color: #B3B3B3;")
-            self.ui_instance.ui.Small_Pen.setStyleSheet("background-color: #B3B3B3;")
-            self.ui_instance.ui.Medium_Pen.setStyleSheet("background-color: #B3B3B3;")
-            self.ui_instance.ui.Large_Pen.setStyleSheet("background-color: #B3B3B3;")
-            if printlogger: self.ros_node.get_logger().info('Switching to Depth Camera')
+            self.signal_emitter.painting_color_signal.emit("B3B3B3")  # Gray for depth view
         elif self.ui_instance.camerafeed[0] == 0 and self.ui_instance.camerafeed[1] == 1 and not self.ui_instance.is_painting:            
             self.signal_emitter.data_signal.emit(f"Thresholded: {self.last_Threshold_frame.shape[1]}x{self.last_Threshold_frame.shape[0]}")
             self.signal_emitter.image_signal.emit(self.last_Threshold_frame)
-            self.ui_instance.ui.Reset.setStyleSheet("background-color: #ffffff;")
-            self.ui_instance.ui.Eraser.setStyleSheet("background-color: #ffffff;")
-            self.ui_instance.ui.Undo.setStyleSheet("background-color: #ffffff;")
-            self.ui_instance.ui.Small_Pen.setStyleSheet("background-color: #ffffff;")
-            self.ui_instance.ui.Medium_Pen.setStyleSheet("background-color: #ffffff;")
-            self.ui_instance.ui.Large_Pen.setStyleSheet("background-color: #ffffff;")
+            self.signal_emitter.painting_color_signal.emit("ffffff")  # White for threshold view
             if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
-
 
     def corrosion_thresholding_callback(self, msg):
         self.get_logger().info('=== Corrosion thresholding callback CALLED ===')
@@ -117,16 +100,7 @@ class UserInterfaceNode(Node):
 
         corrosion_image = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
         self.last_Threshold_frame = corrosion_image
-        self.get_logger().info(f'Saved threshold frame with shape: {corrosion_image.shape}')
-
-            
-    def ROBODK_completion_notification_callback(self, msg):
-        if msg.data == True:
-            self.currently_running = False
-            if printlogger: self.get_logger().info('ROBODK has completed the path, ready for new corrosion area')
-        elif msg.data == False:
-            self.currently_running = True
-            if printlogger: self.get_logger().info('ROBODK has started the path')
+        self.get_logger().info(f'Saved threshold frame with shape: {corrosion_image.shape}')            
 
     def accept_corrosion_area(self, accept: bool):
         # Logic to accept or reject corrosion area
@@ -135,17 +109,13 @@ class UserInterfaceNode(Node):
         self.ui_corrosion_area_accept_pub.publish(accept_msg)
         if printlogger: self.get_logger().info(f'Accepting corrosion area: {accept}')
 
-    def erase_corrosion_area(self):
-        # Logic to erase corrosion area
-        erase_msg = Image()
-        self.ui_corrosion_area_remove_pub.publish(erase_msg)
-        if printlogger: self.get_logger().info('Erasing corrosion area')
-
-    def add_corrosion_area(self):
-        # Logic to add corrosion area
-        add_msg = Image()
-        self.ui_corrosion_area_add_pub.publish(add_msg)
-        if printlogger: self.get_logger().info('Adding corrosion area')
+    def ROBODK_completion_notification_callback(self, msg):
+        if msg.data == True:
+            self.currently_running = False
+            if printlogger: self.get_logger().info('ROBODK has completed the path, ready for new corrosion area')
+        elif msg.data == False:
+            self.currently_running = True
+            if printlogger: self.get_logger().info('ROBODK has started the path')
 
 class UserInterface(QMainWindow):
     def __init__(self):
@@ -174,19 +144,20 @@ class UserInterface(QMainWindow):
         self.ui.Home_Position.clicked.connect(self.home_position)
         self.ui.Emergency_Stop.clicked.connect(self.emergency_stop)
         self.ui.videoLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ui.Vision_State.clicked.connect(self.toggle_vision_state) # Turn on and off threshold view on tab 1
+        self.ui.Vision_State.clicked.connect(lambda: self.feed_toggle(1)) # Turn on and off threshold view on tab 1
         self.ui.Small_Pen.clicked.connect(lambda: self.set_custom_pen(0))
         self.ui.Medium_Pen.clicked.connect(lambda: self.set_custom_pen(1))
         self.ui.Large_Pen.clicked.connect(lambda: self.set_custom_pen(2))
-        self.ui.Switch_Camera_Type.clicked.connect(self.switch_camera_type)#switch between threshold and depth
-        self.ui.infoButton.toggled.connect(self.toggle_info_panel)  # Connect info button
+        self.ui.Switch_Camera_Type.clicked.connect(lambda: self.feed_toggle(0))#switch between threshold and depth
+        self.ui.infoButton.toggled.connect(self.ui.stackedWidget_Info.setVisible)  # Connect info button
         self.ui.infoButton.setEnabled(True)  # Make sure it's enabled
         self.ui.infoButton.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # Ensure focus can reach it
 
         self.ui.tabWidget.currentChanged.connect(lambda index: self.tab_difference(index))
         self.signal_emitter = RosSignalEmitter()
-        self.signal_emitter.data_signal.connect(self.on_data)
+        self.signal_emitter.data_signal.connect(self.ui.videoLabel.setText)
         self.signal_emitter.image_signal.connect(self.update_video_frame)
+        self.signal_emitter.painting_color_signal.connect(self.update_painting_button_colors)
         self.ros_node = UserInterfaceNode(self.signal_emitter, self)  # Pass self for state access
     
         self.ui.videoLabel.clicked.connect(self.on_image_clicked)
@@ -195,8 +166,6 @@ class UserInterface(QMainWindow):
         
         # Connect joystick signals
         self.ui.Joystick.touched.connect(self.on_joystick_touched)
-        self.ui.Joystick.released.connect(self.on_joystick_released)
-        self.ui.Joystick.moved.connect(self.on_joystick_moved)
         
         # Hide statusLabel
         self.ui.statusLabel.hide()
@@ -244,23 +213,18 @@ class UserInterface(QMainWindow):
     def customize_tabs(self):
         tabbar = self.ui.tabWidget.tabBar()
         tabbar.setExpanding(True)
-        
-        # Calculate equal width for each tab based on actual widget width
-        tab_count = self.ui.tabWidget.count()
-        if tab_count > 0:
-            tabbar.setTabsClosable(False)
-            
-            # Get the actual width of the tab widget
-            tab_widget_width = self.ui.tabWidget.width()//3
-            width_per_tab = tab_widget_width // tab_count
-            
-            # Apply stylesheet with calculated pixel width
-            self.ui.tabWidget.setStyleSheet(f"""
-                QTabBar::tab {{
-                    width: {tab_widget_width}px;
-                    min-width: {width_per_tab}px;
-                }}
-            """)
+        tabbar.setTabsClosable(False)
+        tab_width = self.ui.tabWidget.width() // 3
+        self.ui.tabWidget.setStyleSheet(f"QTabBar::tab {{width: {tab_width}px; min-width: {tab_width // self.ui.tabWidget.count()}px;}}")
+
+    def update_painting_button_colors(self, color):
+        """Update painting button colors - called from Qt thread via signal"""
+        self.ui.Reset.setStyleSheet(f"background-color: #{color};")
+        self.ui.Eraser.setStyleSheet(f"background-color: #{color};")
+        self.ui.Undo.setStyleSheet(f"background-color: #{color};")
+        self.ui.Small_Pen.setStyleSheet(f"background-color: #{color};")
+        self.ui.Medium_Pen.setStyleSheet(f"background-color: #{color};")
+        self.ui.Large_Pen.setStyleSheet(f"background-color: #{color};")
 
     def emergency_stop(self):
         msg = Bool()
@@ -294,10 +258,6 @@ class UserInterface(QMainWindow):
         else:
             if printlogger: self.ros_node.get_logger().info('Run robot pressed cancelled')
 
-
-
-
-
         msg = Bool()
         msg.data = True
         self.ui.stackedWidget.setCurrentIndex(0)
@@ -305,22 +265,13 @@ class UserInterface(QMainWindow):
         self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
         if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
     
-    def joystick_terminate_change_page(self, state = bool):
+    def joystick_terminate_change_page(self, state):
         if state:
             self.ui.stackedWidget.setCurrentIndex(0)
             if printlogger: self.ros_node.get_logger().info(f'Swithing to terminate page')
         elif not state:
             self.ui.stackedWidget.setCurrentIndex(1)
             if printlogger: self.ros_node.get_logger().info(f'Swithing to joystick page')
-
-    def toggle_info_panel(self, checked):
-        """Toggle info panel visibility when radio button is clicked"""
-        if checked:
-            self.ui.stackedWidget_Info.show()
-            if printlogger: self.ros_node.get_logger().info('Info panel shown')
-        else:
-            self.ui.stackedWidget_Info.hide()
-            if printlogger: self.ros_node.get_logger().info('Info panel hidden')
 
     def terminate(self):
         reply = QMessageBox.question(
@@ -340,34 +291,24 @@ class UserInterface(QMainWindow):
         else:
             if printlogger: self.ros_node.get_logger().info('Terminate cancelled')
 
-
-
-    def toggle_vision_state(self):
-        self.camerafeed[1] = 1 - self.camerafeed[1]  # Toggle between 0 and 1
-        if printlogger: self.ros_node.get_logger().info(f'Toggling Vision State {self.camerafeed[1]}')
-
-    def switch_camera_type(self):
-        self.camerafeed[0] = 1 - self.camerafeed[0]  # Toggle between 0 and 1
-        if printlogger: self.ros_node.get_logger().info(f'Switching Camera Type {self.camerafeed[0]}')
+    def feed_toggle(self, index):
+        self.camerafeed[index] = 1 - self.camerafeed[index]  # Toggle between 0 and 1
+        if printlogger: self.ros_node.get_logger().info(f'Toggling camera feed {index} to {self.camerafeed[index]}')
 
     def reset_vision(self):
         self.ros_node.get_logger().info('Resetting vision areas')
         h,w = self.corrosion_area_add.shape
         self.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
         self.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
-        msg = Image()
-        msg = self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8')
-        self.ros_node.ui_corrosion_area_remove_pub.publish(msg)
-        msg = Image()
-        msg = self.numpy_to_image_msg(self.corrosion_area_add, 'mono8')
-        self.ros_node.ui_corrosion_area_add_pub.publish(msg)
+        self.undo_add_stack.clear() 
+        self.undo_remove_stack.clear()
+        self.ros_node.ui_corrosion_area_remove_pub.publish(self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8'))
+        self.ros_node.ui_corrosion_area_add_pub.publish(self.numpy_to_image_msg(self.corrosion_area_add, 'mono8'))
 
-        # Reset vision logic
         if printlogger: self.ros_node.get_logger().info('Resetting Vision')
 
     def undo_action(self):
         if len(self.undo_add_stack) > 0:
-            # Restore previous state
             self.corrosion_area_add = self.undo_add_stack.pop()
             self.corrosion_area_remove = self.undo_remove_stack.pop()
             
@@ -398,16 +339,14 @@ class UserInterface(QMainWindow):
     def tab_difference(self, index):
         if printlogger: self.ros_node.get_logger().info(f'Tab changed to {index}')
         if index == 0:
-            self.camerafeed[0] = 0
-            self.camerafeed[1] = 0  # Show color feed on Movement tab
+            self.camerafeed = [0,0]
             self.tabindex = index
-            self.ui.stackedWidget_Info.setCurrentIndex(0)  # Show Movement info
+            self.ui.stackedWidget_Info.setCurrentIndex(0) 
         elif index == 1:
-            self.camerafeed[0] = 0
-            self.camerafeed[1] = 1  # Show thresholded feed on Vision tab
+            self.camerafeed = [0,1]
             self.tabindex = index
-            self.ui.stackedWidget_Info.setCurrentIndex(1)  # Show Vision info
-            # Display the last received threshold frame if available
+            self.ui.stackedWidget_Info.setCurrentIndex(1) 
+
             if self.ros_node.last_Threshold_frame is not None:
                 self.signal_emitter.data_signal.emit(f"Thresholded: {self.ros_node.last_Threshold_frame.shape[1]}x{self.ros_node.last_Threshold_frame.shape[0]}")
                 self.signal_emitter.image_signal.emit(self.ros_node.last_Threshold_frame)
@@ -417,16 +356,14 @@ class UserInterface(QMainWindow):
                 if printlogger:
                     self.ros_node.get_logger().info('No cached threshold frame available yet')
         elif index == 2:
-            self.camerafeed[0] = 0
-            self.camerafeed[1] = 0
+            self.camerafeed = [0,0]
             self.ui.stackedWidget_Info.setCurrentIndex(2)  # Show System info
             pass  # System Information tab
 
     def on_joystick_touched(self):
-        """Handle joystick touch event"""
         if printlogger: self.ros_node.get_logger().info('Joystick touched!')
         
-        # Check if anything has been drawn in corrosion_area_add or corrosion_area_remove
+        #Check if there are any markings to be lost
         if self.corrosion_area_add is not None and self.corrosion_area_remove is not None:
             has_add = np.any(self.corrosion_area_add > 0)
             has_remove = np.any(self.corrosion_area_remove > 0)
@@ -444,23 +381,6 @@ class UserInterface(QMainWindow):
                 if reply == QMessageBox.StandardButton.Yes:
                     self.reset_vision()
                     if printlogger: self.ros_node.get_logger().info('Adjustments reset by joystick touch')
-
-    def on_joystick_released(self):
-        """Handle joystick release event"""
-        if printlogger: self.ros_node.get_logger().info('Joystick released!')
-        # Add your custom logic here
-        pass
-
-    def on_joystick_moved(self, direction_tuple):
-        """Handle joystick move event"""
-        if direction_tuple != 0:
-            direction, distance = direction_tuple
-            self.ros_node.get_logger().info(f'Joystick moved: {direction.name}, distance: {distance:.2f}')
-        # Add your custom logic here (e.g., send motor commands, update display, etc.)
-        pass
-
-    def on_data(self, data):
-        self.ui.videoLabel.setText(data)
     
     def update_video_frame(self, img):
         """Convert numpy BGR array to QPixmap and display in videoLabel"""
@@ -468,7 +388,6 @@ class UserInterface(QMainWindow):
             return
         self.last_frame = img.copy()
 
-        # Handle both color (3D) and grayscale (2D) images
         if len(img.shape) == 3:
             h, w, ch = img.shape
             bytes_per_line = ch * w

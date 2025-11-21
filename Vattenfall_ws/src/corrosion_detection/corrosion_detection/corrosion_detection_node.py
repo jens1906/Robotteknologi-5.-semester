@@ -26,9 +26,13 @@ class CorrosionDetector(Node):
             depth=5
         )
         
+        self.toolsizes = [30, 25]  # Example tool sizes in mm
+
         self.corrosion_thresholding = self.create_publisher(Image, '/corrosion/thresholding_pub', image_qos)
         self.corrosion_corrosion = self.create_publisher(Float32MultiArray, '/corrosion/corrosion', 10)
         self.corrosion_workspace = self.create_publisher(Float32MultiArray, '/corrosion/workspace', 10)
+        self.corrosion_tool_size = self.create_publisher(Float32MultiArray, '/corrosion/tool_size', 10)
+
         self.ui_corrosion_add = np.zeros((480, 640), np.uint8)
         self.ui_corrosion_remove = np.zeros((480, 640), np.uint8)
         # Subscribers
@@ -192,6 +196,10 @@ class CorrosionDetector(Node):
             msg.data = xyz_offset.flatten().tolist()
             self.corrosion_workspace.publish(msg)
             if printlogger: self.get_logger().info('Corrosion area accepted')
+
+            msg = Float32MultiArray()
+            msg.data = self.toolsizes
+            self.corrosion_tool_size.publish(msg)
         else:
             if printlogger: self.get_logger().info(f'Corrosion detection is already running, wait for ROBODK to complete {self.corrosion_accepted} {self.running_status}')
 
@@ -240,10 +248,8 @@ class CorrosionDetector(Node):
         cv.drawContours(filled_mask, contours, -1, 255, thickness=cv.FILLED)
         
         # Apply 30mm offset by dilating the filled mask
-        # Calculate kernel size: 30mm / (pixel_size_in_mm)
-        # Assuming depth ~500mm and focal length factor, pixel size ~0.8mm
-        # So 30mm ≈ 37 pixels, use kernel of 75x75 (radius ~37)
-        offset_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (75, 75))
+        offset_kernel_size = int(max(self.toolsizes) / 0.8) * 2 + 1  # Convert mm to pixels and ensure odd size
+        offset_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (offset_kernel_size, offset_kernel_size))
         filled_mask_offset = cv.dilate(filled_mask, offset_kernel, iterations=1)
 
         # Return both original and offset masks for visualization
