@@ -11,7 +11,7 @@ from std_msgs.msg import Header, Float64MultiArray, Float32MultiArray
 import numpy as np
 from scipy.spatial import cKDTree, ConvexHull
 
-from parameterization.msg import ParameterizationStatus, UVPoint
+from parameterization.msg import ParameterizationStatus, UVPoint, UVBoundary
 from parameterization.srv import InterpolatePoint, GetUVBounds
 
 # Import the parameterization module
@@ -389,17 +389,26 @@ class ParameterizationNode(Node):
                 bounds = self.corrosion_uv_bounds
                 self.get_logger().info('Returning corrosion UV bounds')
                 
-                # Add boundary points if available
+                # Add boundary points if available using custom message type
                 if self.corrosion_boundary_uv is not None:
-                    # Flatten the Nx2 array to a 1D list [u1, v1, u2, v2, ...]
-                    response.boundary_points = self.corrosion_boundary_uv.flatten().tolist()
+                    response.boundary = UVBoundary()
+                    response.boundary.points = []
+                    
+                    for uv in self.corrosion_boundary_uv:
+                        point = UVPoint()
+                        point.u = float(uv[0])
+                        point.v = float(uv[1])
+                        response.boundary.points.append(point)
+                    
                     self.get_logger().info(f'Returning {len(self.corrosion_boundary_uv)} boundary points')
                 else:
-                    response.boundary_points = []
+                    response.boundary = UVBoundary()
+                    response.boundary.points = []
             else:
                 bounds = self.surf.get_uv_bounds()
                 self.get_logger().info('Returning workspace UV bounds (corrosion bounds not available)')
-                response.boundary_points = []  # No boundary points for workspace
+                response.boundary = UVBoundary()
+                response.boundary.points = []  # No boundary points for workspace
             
             response.u_min = bounds['u_min']
             response.u_max = bounds['u_max']
