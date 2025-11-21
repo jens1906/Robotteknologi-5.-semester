@@ -9,6 +9,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import Point
 from std_msgs.msg import Header, Float64MultiArray, Float32MultiArray
 import numpy as np
+from scipy.spatial import cKDTree, ConvexHull
 
 from parameterization.msg import ParameterizationStatus, UVPoint
 from parameterization.srv import InterpolatePoint, GetUVBounds
@@ -58,12 +59,16 @@ class ParameterizationNode(Node):
         self.get_logger().info('Using Arc-Length-Based Isometric Parameterization')
         self.get_logger().info('Interpolation: Cubic Spline (CloughTocher2D)')
 
+        # Storage for corrosion points and their UV bounds
+        self.corrosion_points = None
+        self.corrosion_uv_bounds = None
+        self.corrosion_boundary_uv = None  # Boundary points in UV space
         
         # Create subscriber for corrosion scatter plot
         self.corrosion_plot_sub = self.create_subscription(
             Float32MultiArray,
             '/corrosion/corrosion',
-            self.scatter_plot_callback,
+            self.scatter_plot_corrosion_callback,
             10
         )
 
@@ -197,6 +202,102 @@ class ParameterizationNode(Node):
             self.get_logger().error(traceback.format_exc())
     
 
+    def scatter_plot_corrosion_callback(self, msg):
+        """
+        Callback for corrosion scatter plot messages.
+        Maps corrosion points to UV coordinates and computes their bounds.
+        """
+        try:
+            self.get_logger().info('Received corrosion scatter plot data')
+            
+            # Convert Float32MultiArray to numpy array
+            data = np.array(msg.data, dtype=np.float64)
+            
+            if len(data) == 0:
+                self.get_logger().warn('Received empty corrosion data')
+                return
+            
+            # Reshape to Nx3 array (each row is [x, y, z])
+            if len(data) % 3 != 0:
+                self.get_logger().error(f'Invalid corrosion data length: {len(data)} (must be multiple of 3)')
+                return
+            
+            self.corrosion_points = data.reshape(-1, 3)
+            self.get_logger().info(f'Received {len(self.corrosion_points)} corrosion points')
+            
+            # Check if workspace parameterization is ready
+            if not self.surf.is_ready:
+                self.get_logger().warn('Workspace parameterization not ready yet. Cannot map corrosion points to UV.')
+                return
+            
+            # Map corrosion points to UV coordinates using the workspace parameterization
+            corrosion_uv = self._map_xyz_to_uv(self.corrosion_points)
+            
+            # Compute UV bounds of the corrosion area
+            self.corrosion_uv_bounds = {
+                'u_min': float(np.min(corrosion_uv[:, 0])),
+                'u_max': float(np.max(corrosion_uv[:, 0])),
+                'v_min': float(np.min(corrosion_uv[:, 1])),
+                'v_max': float(np.max(corrosion_uv[:, 1]))
+            }
+            
+            # Compute boundary/perimeter points using ConvexHull
+            if len(corrosion_uv) >= 3:  # Need at least 3 points for convex hull
+                try:
+                    hull = ConvexHull(corrosion_uv)
+                    # Get the boundary points in order (hull.vertices gives indices)
+                    self.corrosion_boundary_uv = corrosion_uv[hull.vertices]
+                    self.get_logger().info(f'Computed {len(self.corrosion_boundary_uv)} boundary points from convex hull')
+                except Exception as e:
+                    self.get_logger().warn(f'Could not compute convex hull: {str(e)}. Using all points as boundary.')
+                    self.corrosion_boundary_uv = corrosion_uv
+            else:
+                # Not enough points for convex hull, use all points
+                self.corrosion_boundary_uv = corrosion_uv
+            
+            self.get_logger().info(f'Corrosion UV bounds: U=[{self.corrosion_uv_bounds["u_min"]:.3f}, {self.corrosion_uv_bounds["u_max"]:.3f}], '
+                                 f'V=[{self.corrosion_uv_bounds["v_min"]:.3f}, {self.corrosion_uv_bounds["v_max"]:.3f}]')
+            
+        except Exception as e:
+            self.get_logger().error(f'Error processing corrosion scatter plot: {str(e)}')
+            import traceback
+            self.get_logger().error(traceback.format_exc())
+    
+    
+    def _map_xyz_to_uv(self, xyz_points):
+        """
+        Map XYZ points to UV coordinates using the workspace parameterization.
+        
+        This finds the nearest point in the parameterized workspace and returns its UV coordinates.
+        
+        Args:
+            xyz_points: Nx3 array of XYZ coordinates
+            
+        Returns:
+            Nx2 array of UV coordinates
+        """
+        if not self.surf.is_ready:
+            raise ValueError("Parameterization not ready")
+        
+        # Transform points to local frame (same as workspace)
+        centered_points = xyz_points - self.surf.centroid
+        points_local = centered_points @ self.surf.principal_axes.T
+        
+        # Build KD-tree from workspace points in local frame if not already built
+        if self.surf.kdtree_xyz is None:
+            self.surf.kdtree_xyz = cKDTree(self.surf.points_local)
+        
+        # Find nearest neighbors in workspace
+        distances, indices = self.surf.kdtree_xyz.query(points_local, k=1)
+        
+        # Get UV coordinates of nearest workspace points
+        uv_coords = self.surf.uv_params[indices]
+        
+        self.get_logger().info(f'Mapped {len(xyz_points)} XYZ points to UV (mean distance: {np.mean(distances):.4f})')
+        
+        return uv_coords
+    
+
     def uv_path_callback(self, msg):
         """Convert UV path to XYZ path."""
         try:
@@ -275,6 +376,7 @@ class ParameterizationNode(Node):
     def get_uv_bounds_callback(self, request, response):
         """
         Service callback for getting UV parameter space bounds.
+        Returns corrosion UV bounds and boundary points if available, otherwise workspace bounds.
         """
         try:
             if not self.surf.is_ready:
@@ -282,7 +384,22 @@ class ParameterizationNode(Node):
                 response.message = 'Parameterization not ready. No point cloud received yet.'
                 return response
             
-            bounds = self.surf.get_uv_bounds()
+            # Use corrosion bounds if available, otherwise use full workspace bounds
+            if self.corrosion_uv_bounds is not None:
+                bounds = self.corrosion_uv_bounds
+                self.get_logger().info('Returning corrosion UV bounds')
+                
+                # Add boundary points if available
+                if self.corrosion_boundary_uv is not None:
+                    # Flatten the Nx2 array to a 1D list [u1, v1, u2, v2, ...]
+                    response.boundary_points = self.corrosion_boundary_uv.flatten().tolist()
+                    self.get_logger().info(f'Returning {len(self.corrosion_boundary_uv)} boundary points')
+                else:
+                    response.boundary_points = []
+            else:
+                bounds = self.surf.get_uv_bounds()
+                self.get_logger().info('Returning workspace UV bounds (corrosion bounds not available)')
+                response.boundary_points = []  # No boundary points for workspace
             
             response.u_min = bounds['u_min']
             response.u_max = bounds['u_max']

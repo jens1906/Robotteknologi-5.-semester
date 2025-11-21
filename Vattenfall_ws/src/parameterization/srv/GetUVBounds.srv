@@ -5,5 +5,11 @@ float64 u_min
 float64 u_max
 float64 v_min
 float64 v_max
+
+# Boundary points of corrosion area in UV space (Nx2 array, flattened)
+# Format: [u1, v1, u2, v2, u3, v3, ...]
+# Reshape to (-1, 2) to get Nx2 array
+float64[] boundary_points
+
 bool success
 string message
