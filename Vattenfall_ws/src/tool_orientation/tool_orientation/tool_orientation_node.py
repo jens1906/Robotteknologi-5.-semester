@@ -25,6 +25,10 @@ def compute_velocity(path_xyz, dt=0.1):
     n_points = len(path_xyz)
     velocities = np.zeros((n_points, 3))
     
+    #Handle edge case of single point
+    if n_points == 1:
+        return velocities
+    
     for i in range(n_points):
         if i == 0:
             #Forward difference for first point
@@ -207,6 +211,27 @@ def orientation_matrix_from_path(x, y, z, velocity, normal):
     
     return R
 
+def apply_off_surface_offset(positions, orientations, on_surface, offset_distance=0.05):
+    #Apply offset to positions where robot should be off surface
+    #Args: positions (N,3) array, orientations (N,3,3) array of rotation matrices
+    #      on_surface (N,) boolean array, offset_distance in meters (default 5 cm)
+    #Returns: adjusted_positions (N,3) array with offsets applied
+    
+    adjusted_positions = positions.copy()
+    
+    for i in range(len(positions)):
+        if not on_surface[i]:
+            #Get the surface normal from the orientation matrix
+            #The tool z-axis (3rd column) points INTO the surface (negative normal)
+            #So the surface normal (outward) is the negative of the z-axis
+            tool_z_axis = orientations[i][:, 2]  # Third column
+            surface_normal = -tool_z_axis  # Flip to get outward normal
+            
+            #Move position along surface normal by offset_distance
+            adjusted_positions[i] = positions[i] + surface_normal * offset_distance
+    
+    return adjusted_positions
+
 def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_orientations=True):
     #Main function: compute tool orientations from cartesian XYZ points
     #Args: path_xyz (N,3) array of [x,y,z] in sequence, dt time step, neighbor_range for normal estimation
@@ -281,33 +306,107 @@ if ROS2_AVAILABLE:
                 10
             )
             
+            #Subscriber for on_surface boolean array
+            self.on_surface_sub = self.create_subscription(
+                Float64MultiArray,
+                '/path/on_surface',
+                self.on_surface_callback,
+                10
+            )
+            
             #Parameters
             self.declare_parameter('dt', 0.1)
             self.declare_parameter('neighbor_range', 3)
+            self.declare_parameter('off_surface_height', 0.05)  # 5 cm in meters
+            
+            #Storage for received data
+            self.path_xyz = None
+            self.on_surface = None
+            self.data_processed = False  # Flag to avoid reprocessing same data
             
             self.get_logger().info('Tool Orientation Node initialized')
-            self.get_logger().info('Waiting for path on topic: /path/xyz_path')
+            self.get_logger().info('Waiting for path on topic: /parameterization/xyz_path')
+            self.get_logger().info('Waiting for on_surface data on topic: /path/on_surface')
+        
+        def on_surface_callback(self, msg):
+            #Callback for receiving on_surface boolean array
+            #Expected input: Float64MultiArray with [bool1, bool2, ...] as floats (0.0 or 1.0)
+            self.on_surface = np.array(msg.data, dtype=bool)
+            self.data_processed = False  # New data received, reset flag
+            self.get_logger().info(f'Received on_surface data with {len(self.on_surface)} points')
+            
+            #Try to process if we have both path and on_surface data
+            self.try_process_data()
         
         def path_callback(self, msg):
             #Callback for receiving path points and computing orientations
             #Expected input: Float64MultiArray with [x1, y1, z1, x2, y2, z2, ...]
-            self.get_logger().info(f'Received path on topic: /path/xyz_path')
-            #Extract parameters
-            dt = self.get_parameter('dt').value
-            neighbor_range = self.get_parameter('neighbor_range').value
+            self.get_logger().info(f'Received path on topic: /parameterization/xyz_path')
             
             #Reshape data to (N, 3)
             n_points = len(msg.data) // 3
-            path_xyz = np.array(msg.data).reshape(n_points, 3)
+            self.path_xyz = np.array(msg.data).reshape(n_points, 3)
+            self.data_processed = False  # New data received, reset flag
             
             self.get_logger().info(f'Received path with {n_points} points')
             
-            #Compute and publish
-            self.compute_and_publish_orientations(path_xyz, dt, neighbor_range)
+            #Try to process if we have both path and on_surface data
+            self.try_process_data()
         
-        def compute_and_publish_orientations(self, path_xyz, dt=0.1, neighbor_range=3):
+        def try_process_data(self):
+            #Process data only when both path and on_surface are available
+            if self.path_xyz is None:
+                self.get_logger().info('Waiting for path data...')
+                return
+            
+            if self.on_surface is None:
+                self.get_logger().info('Waiting for on_surface data...')
+                return
+            
+            #Skip if data already processed
+            if self.data_processed:
+                self.get_logger().debug('Data already processed, skipping...')
+                return
+            
+            #Check that arrays are aligned
+            if len(self.path_xyz) != len(self.on_surface):
+                self.get_logger().error(
+                    f'Array size mismatch: path has {len(self.path_xyz)} points, '
+                    f'on_surface has {len(self.on_surface)} points'
+                )
+                return
+            
+            #Extract parameters
+            dt = self.get_parameter('dt').value
+            neighbor_range = self.get_parameter('neighbor_range').value
+            off_surface_height = self.get_parameter('off_surface_height').value
+            
+            #Compute and publish
+            self.compute_and_publish_orientations(
+                self.path_xyz, 
+                self.on_surface, 
+                dt, 
+                neighbor_range, 
+                off_surface_height
+            )
+            
+            #Mark data as processed
+            self.data_processed = True
+        
+        def compute_and_publish_orientations(self, path_xyz, on_surface, dt=0.1, neighbor_range=3, off_surface_height=0.05):
             #Compute orientations and publish positions + rotation matrices
+            #First compute base orientations for all points
             positions, orientations = compute_orientations_from_xyz(path_xyz, dt, neighbor_range)
+            
+            #Apply off-surface offsets where needed
+            adjusted_positions = apply_off_surface_offset(positions, orientations, on_surface, off_surface_height)
+            
+            #Count how many points are off-surface
+            n_off_surface = np.sum(~on_surface)
+            self.get_logger().info(
+                f'Applied off-surface offset to {n_off_surface}/{len(positions)} points '
+                f'(offset: {off_surface_height*100:.1f} cm)'
+            )
             
             #Create Float64MultiArray message
             trajectory_msg = Float64MultiArray()
@@ -315,8 +414,8 @@ if ROS2_AVAILABLE:
             #Setup dimensions: [n_points, 12] where each row is [x, y, z, r11, r12, r13, r21, r22, r23, r31, r32, r33]
             dim_points = MultiArrayDimension()
             dim_points.label = "points"
-            dim_points.size = len(positions)
-            dim_points.stride = len(positions) * 12
+            dim_points.size = len(adjusted_positions)
+            dim_points.stride = len(adjusted_positions) * 12
             
             dim_data = MultiArrayDimension()
             dim_data.label = "data"
@@ -327,10 +426,10 @@ if ROS2_AVAILABLE:
             trajectory_msg.layout.data_offset = 0
             
             #Flatten data: [x, y, z, rotation_matrix_flattened]
-            for i in range(len(positions)):
-                trajectory_msg.data.append(float(positions[i][0]))
-                trajectory_msg.data.append(float(positions[i][1]))
-                trajectory_msg.data.append(float(positions[i][2]))
+            for i in range(len(adjusted_positions)):
+                trajectory_msg.data.append(float(adjusted_positions[i][0]))
+                trajectory_msg.data.append(float(adjusted_positions[i][1]))
+                trajectory_msg.data.append(float(adjusted_positions[i][2]))
                 
                 #Flatten rotation matrix (row-major)
                 R_flat = orientations[i].flatten()
@@ -338,9 +437,9 @@ if ROS2_AVAILABLE:
                     trajectory_msg.data.append(float(val))
             
             self.trajectory_pub.publish(trajectory_msg)
-            self.get_logger().info(f'Published {len(positions)} waypoints with rotation matrices')
+            self.get_logger().info(f'Published {len(adjusted_positions)} waypoints with rotation matrices')
             
-            return positions, orientations
+            return adjusted_positions, orientations
 
     def main(args=None):
         rclpy.init(args=args)
