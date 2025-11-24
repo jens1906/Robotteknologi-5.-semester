@@ -38,34 +38,40 @@ class PathPlanner(Node):
     def __init__(self):
         super().__init__('path_planner_node') # Initialize ROS2 node
 
-        # Parameters (values are in UV space, typically 0-100 range)
-        self.declare_parameter('point_spacing', 0.5)  # Spacing between points along lines (V direction)
-        self.declare_parameter('line_spacing', 5.0)  # Spacing between scan lines (U direction)
-        self.declare_parameter('n_bezier', 25)  # Number of points for generating connecting curves
+        self.declare_parameter('point_spacing', 5)  # Spacing between points along lines (V direction) - mm
+        self.declare_parameter('line_spacing', 250.0)  # Spacing between scan lines (U direction) - mm
+        self.declare_parameter('n_bezier', 50)  # Number of points for generating connecting curves - n
         self.declare_parameter('auto_generate', True)  # Automatically generate path when parameterization is ready
-        self.declare_parameter('test', True)  # Test mode
+        self.declare_parameter('test', False)  # Test mode
 
+        # Load parameters
         self.test = self.get_parameter('test').value
         self.point_spacing = self.get_parameter('point_spacing').value
         self.line_spacing = self.get_parameter('line_spacing').value
         self.n_bezier = self.get_parameter('n_bezier').value
         self.auto_generate = self.get_parameter('auto_generate').value
-        self.bezier_curvature = self.line_spacing * 0.75  # Smoother curves
         self.tau = np.linspace(0, 1, self.n_bezier)
 
         # Data holders
-        self.uv_bounds = None
+        self.uv_boundary = None  # Boundary points from UVBoundary
         self.paths_uv = None
         self.parameterization_ready = False
+        
 
-        # Create service client for UV bounds
+        # Service client
         self.bounds_client = self.create_client(
             GetUVBounds,
             '/parameterization/get_uv_bounds'
         )
 
-        # Subscribers
         if self.test != True:
+            self.create_subscription(
+                Float64MultiArray,
+                '/corrosion/tool_size',
+                self.tool_size_callback,
+                10
+            )
+
             self.create_subscription(
                 ParameterizationStatus,
                 '/parameterization/status',
@@ -73,11 +79,21 @@ class PathPlanner(Node):
                 10
             )
         else:
+            self.tool_size = 25
+            self.line_spacing = 2 * self.tool_size - 5  # Full coverage with overlap
             self.testing_mode()
 
         # Publishers
-        self.uv_path_pub = self.create_publisher(Float64MultiArray, '/path/uv_path', 10)
+        self.uv_path_pub = self.create_publisher(
+            Float64MultiArray,
+            '/path/uv_path',
+            10)
         
+        self.on_surface_pub = self.create_publisher(
+            Float64MultiArray,
+            '/path/on_surface',
+            10)
+                
         # Debug info
         self.get_logger().info('Path Planner node initialized')
         self.get_logger().info(f'  Test mode: {self.test}')
@@ -87,37 +103,90 @@ class PathPlanner(Node):
         self.get_logger().info(f'  Auto-generate: {self.auto_generate}')
 
 
-    def plot_uv_points_and_path(self):
-        """ Plot bounds and Path"""
+    def tool_size_callback(self, msg):
+        """Update tool size and line spacing from corrosion detection (expects data[1] = tool size)."""
+        if len(msg.data) > 1:
+            self.tool_size = msg.data[1]
+            # Line spacing should be 2 * tool_radius for full coverage with overlap
+            self.line_spacing = 2 * self.tool_size
+            self.get_logger().info(f'Tool size updated: {self.tool_size:.3f}')
+            self.get_logger().info(f'Line spacing updated: {self.line_spacing:.3f}')
+
+    def test_plot(self):
+        """ Plot bounds, path, and tool coverage"""
         try:
             import matplotlib.pyplot as plt
+            from matplotlib.patches import Circle
             if self.uv_bounds is None or self.paths_uv is None or self.uv_path is None:
                 self.get_logger().error('Cannot plot: UV bounds, paths, or uv_path not available')
                 return
+            
             u_min = self.uv_bounds['u_min']
             u_max = self.uv_bounds['u_max']
             v_min = self.uv_bounds['v_min']
             v_max = self.uv_bounds['v_max']
-            plt.figure(figsize=(10, 6))
-            # Plot bounds
-            plt.plot([u_min, u_max, u_max, u_min, u_min],
-                     [v_min, v_min, v_max, v_max, v_min], 'k--', label='UV Bounds')
+            
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+            
+            # Left plot: Path visualization
+            ax1.plot([u_min, u_max, u_max, u_min, u_min],
+                     [v_min, v_min, v_max, v_max, v_min], 'k--', linewidth=2, label='UV Bounds')
+            
             # Plot zigzag lines
             for u_line, v_line in zip(self.paths_uv[0], self.paths_uv[1]):
-                plt.plot(u_line, v_line, 'b.-', alpha=0.5)
+                ax1.plot(u_line, v_line, 'b.-', alpha=0.5)
+            
             # Plot continuous path
-            plt.plot(self.uv_path[:, 0], self.uv_path[:, 1], 'r-', linewidth=2, label='Continuous Path')
-            plt.title('UV Path Planning')
-            plt.xlabel('U')
-            plt.ylabel('V')
-            plt.legend()
-            plt.axis('equal')
-            plt.grid(True)
+            ax1.plot(self.uv_path[:, 0], self.uv_path[:, 1], 'r-', linewidth=2, label='Continuous Path')
+            
+            ax1.set_title('UV Path Planning')
+            ax1.set_xlabel('U')
+            ax1.set_ylabel('V')
+            ax1.legend()
+            ax1.axis('equal')
+            ax1.grid(True)
+            
+            # Right plot: Tool coverage visualization
+            ax2.plot([u_min, u_max, u_max, u_min, u_min],
+                     [v_min, v_min, v_max, v_max, v_min], 'k--', linewidth=2, label='UV Bounds')
+                        
+            # Plot tool coverage circles along the full continuous path (including Bézier curves)
+            # Sample every N points to avoid too many circles
+            step = max(1, len(self.uv_path) // 100)
+            for i in range(0, len(self.uv_path), step):
+                circle = Circle((self.uv_path[i, 0], self.uv_path[i, 1]), self.tool_size, 
+                              color='green', alpha=0.1, linewidth=0)
+                ax2.add_patch(circle)
+            
+            # Plot the continuous path
+            ax2.plot(self.uv_path[:, 0], self.uv_path[:, 1], 'b-', linewidth=1, alpha=0.7)
+            
+            # Add coverage info
+            coverage_text = f'Tool radius: {self.tool_size:.2f}\n'
+            coverage_text += f'Line spacing: {self.line_spacing:.2f}\n'
+            coverage_text += f'Point spacing: {self.point_spacing:.2f}\n'
+            coverage_text += f'Max gap (U): {self.line_spacing:.2f}\n'
+            coverage_text += f'Max gap (V): {self.point_spacing:.2f}'
+            
+            ax2.text(0.02, 0.98, coverage_text, transform=ax2.transAxes,
+                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                    fontsize=9, family='monospace')
+            
+            ax2.set_title('Tool Coverage Visualization')
+            ax2.set_xlabel('U')
+            ax2.set_ylabel('V')
+            ax2.axis('equal')
+            ax2.grid(True)
+            
+            plt.tight_layout()
             plt.show()
+            
         except ImportError:
             self.get_logger().error('matplotlib not installed, cannot plot UV points and path.')
         except Exception as e:
-            self.get_logger().error(f'Error in plot_uv_points_and_path: {e}')
+            self.get_logger().error(f'Error in test_plot: {e}')
+            import traceback
+            self.get_logger().error(traceback.format_exc())
 
     def testing_mode(self):
         """Test mode with synthetic UV bounds - validates path generation without parameterization node."""
@@ -126,9 +195,9 @@ class PathPlanner(Node):
         # Create realistic UV bounds (typical range 0-100)
         self.uv_bounds = {
             'u_min': 0.0,
-            'u_max': 100.0,
+            'u_max': 200.0,
             'v_min': 0.0,
-            'v_max': 50.0
+            'v_max': 100.0
         }
         
         self.get_logger().info(f'Test UV bounds: U=[{self.uv_bounds["u_min"]}, {self.uv_bounds["u_max"]}], '
@@ -160,145 +229,87 @@ class PathPlanner(Node):
         self.get_logger().info(f'  ✓ Total waypoints: {sum(len(line) for line in u_lines)}')
         self.get_logger().info(f'  ✓ Published continuous path to /path/uv_path')
         self.get_logger().info('Test mode complete - node will continue running for integration tests')
-        self.plot_uv_points_and_path()
-
+        self.test_plot()
 
     def status_callback(self, msg):
-        """
-        Callback for parameterization status.
-        When parameterization becomes ready, fetch UV bounds and generate path.
-        """
-        try:
-            # Track previous state to detect transitions
-            previously_ready = self.parameterization_ready
-            self.parameterization_ready = msg.is_ready
-            
-            # Only process if we have valid data (num_points > 0)
-            if not msg.is_ready or msg.num_points == 0:
-                if previously_ready:
-                    self.get_logger().warn('Parameterization no longer ready')
-                self.parameterization_ready = False
-                return
-            
-            # If just became ready (state transition), generate path
-            if self.parameterization_ready and not previously_ready:
-                self.get_logger().info(f'Parameterization is ready with {msg.num_points} points. Fetching UV bounds...')
-                
-                if self.auto_generate:
-                    self.fetch_uv_bounds_async()
-                else:
-                    self.get_logger().info('Auto-generate disabled. Call generate_path() manually.')
-                    
-        except Exception as e:
-            self.get_logger().error(f"Error in status_callback: {e}")
-
-
-    def fetch_uv_bounds_async(self):
-        """
-        Fetch UV bounds asynchronously from parameterization service.
-        """
-        try:
-            # Wait for service
-            if not self.bounds_client.wait_for_service(timeout_sec=1.0):
+        """Callback for parameterization status."""
+        previously_ready = self.parameterization_ready
+        self.parameterization_ready = msg.is_ready and msg.num_points > 0
+        
+        if not self.parameterization_ready:
+            if previously_ready:
+                self.get_logger().warn('Parameterization no longer ready')
+            return
+        
+        if not previously_ready and self.auto_generate:
+            self.get_logger().info(f'Parameterization ready ({msg.num_points} points). Fetching UV bounds...')
+            if self.bounds_client.wait_for_service(timeout_sec=1.0):
+                future = self.bounds_client.call_async(GetUVBounds.Request())
+                future.add_done_callback(self._process_uv_bounds)
+            else:
                 self.get_logger().error('UV bounds service not available')
-                return
-            
-            # Call service asynchronously
-            request = GetUVBounds.Request()
-            future = self.bounds_client.call_async(request)
-            future.add_done_callback(self.uv_bounds_callback)
-                
-        except Exception as e:
-            self.get_logger().error(f"Error fetching UV bounds: {e}")
-            import traceback
-            self.get_logger().error(traceback.format_exc())
 
+    def _extract_boundary(self, response):
+        """Extract boundary points from service response."""
+        if response.boundary and len(response.boundary.points) > 0:
+            self.uv_boundary = np.array([[pt.u, pt.v] for pt in response.boundary.points])
+            self.get_logger().info(f'UV boundary: {len(self.uv_boundary)} points')
+        else:
+            self.uv_boundary = np.array([
+                [response.u_min, response.v_min], [response.u_max, response.v_min],
+                [response.u_max, response.v_max], [response.u_min, response.v_max]
+            ])
+            self.get_logger().info('Using rectangular bounds')
 
-    def uv_bounds_callback(self, future):
-        """
-        Callback when UV bounds service call completes.
-        """
+    def _process_uv_bounds(self, future):
+        """Process UV bounds response and generate path."""
         try:
             response = future.result()
-            
             if response.success:
-                self.uv_bounds = {
-                    'u_min': response.u_min,
-                    'u_max': response.u_max,
-                    'v_min': response.v_min,
-                    'v_max': response.v_max
-                }
-                self.get_logger().info(
-                    f'UV bounds received: U=[{response.u_min:.3f}, {response.u_max:.3f}], '
-                    f'V=[{response.v_min:.3f}, {response.v_max:.3f}]'
-                )
-                
-                # Generate and publish path
+                self._extract_boundary(response)
+                self.generate_lines()
+                self.adjust_lines()
+
+
+
+
+
+
                 self.generate_zigzag_paths()
                 self.publish_path()
             else:
                 self.get_logger().error(f'Failed to get UV bounds: {response.message}')
-                
         except Exception as e:
-            self.get_logger().error(f'Error in UV bounds callback: {e}')
-            import traceback
-            self.get_logger().error(traceback.format_exc())
-
+            self.get_logger().error(f'Error processing UV bounds: {e}')
 
     def fetch_uv_bounds(self):
-        """
-        Fetch UV bounds from parameterization service.
-        Returns True if successful, False otherwise.
-        """
-        try:
-            # Wait for service
-            if not self.bounds_client.wait_for_service(timeout_sec=5.0):
-                self.get_logger().error('UV bounds service not available')
-                return False
-            
-            # Call service
-            request = GetUVBounds.Request()
-            future = self.bounds_client.call_async(request)
-            
-            # Wait for the future to complete
-            import time
-            start_time = time.time()
-            while not future.done() and (time.time() - start_time) < 5.0:
-                rclpy.spin_once(self, timeout_sec=0.1)
-            
-            if future.done():
-                try:
-                    response = future.result()
-                    
-                    if response.success:
-                        self.uv_bounds = {
-                            'u_min': response.u_min,
-                            'u_max': response.u_max,
-                            'v_min': response.v_min,
-                            'v_max': response.v_max
-                        }
-                        self.get_logger().info(
-                            f'UV bounds received: U=[{response.u_min:.3f}, {response.u_max:.3f}], '
-                            f'V=[{response.v_min:.3f}, {response.v_max:.3f}]'
-                        )
-                        return True
-                    else:
-                        self.get_logger().error(f'Failed to get UV bounds: {response.message}')
-                        return False
-                except Exception as e:
-                    self.get_logger().error(f'Exception getting result: {e}')
-                    return False
-            else:
-                self.get_logger().error('Service call timed out')
-                return False
-                
-        except Exception as e:
-            self.get_logger().error(f"Error fetching UV bounds: {e}")
-            import traceback
-            self.get_logger().error(traceback.format_exc())
+        """Fetch UV bounds synchronously. Returns True if successful."""
+        if not self.bounds_client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().error('UV bounds service not available')
             return False
-
-
+        
+        future = self.bounds_client.call_async(GetUVBounds.Request())
+        
+        import time
+        start_time = time.time()
+        while not future.done() and (time.time() - start_time) < 5.0:
+            rclpy.spin_once(self, timeout_sec=0.1)
+        
+        if not future.done():
+            self.get_logger().error('Service call timed out')
+            return False
+        
+        try:
+            response = future.result()
+            if response.success:
+                self._extract_boundary(response)
+                return True
+            self.get_logger().error(f'Failed to get UV bounds: {response.message}')
+            return False
+        except Exception as e:
+            self.get_logger().error(f'Error fetching UV bounds: {e}')
+            return False
+    
     def generate_path(self):
         """
         Manually trigger path generation.
@@ -421,8 +432,8 @@ class PathPlanner(Node):
 
                     if norm_curr > 1e-6 and norm_next > 1e-6:
                         b0 = end
-                        b1 = end + self.bezier_curvature * vec_curr / norm_curr
-                        b2 = next_start - self.bezier_curvature * vec_next / norm_next
+                        b1 = end + self.tool_size * vec_curr / norm_curr
+                        b2 = next_start - self.tool_size * vec_next / norm_next
                         b3 = next_start
 
                         path.append(self.cubic_bezier(b0, b1, b2, b3))
@@ -441,6 +452,19 @@ class PathPlanner(Node):
             if uv_path is None:
                 raise ValueError("Error: publish_path(): Path generation failed.")
             
+
+
+
+            # make an array that is true with the same length as uv_path                    delete this later
+            on_surface = np.ones(len(uv_path), dtype=bool)
+            on_surface_msg = Float64MultiArray()
+            on_surface_msg.data = on_surface.astype(np.float64).tolist()
+            self.on_surface_pub.publish(on_surface_msg)
+
+
+
+
+
             # Publish UV path
             uv_msg = Float64MultiArray()
             uv_msg.data = uv_path.flatten().tolist()
