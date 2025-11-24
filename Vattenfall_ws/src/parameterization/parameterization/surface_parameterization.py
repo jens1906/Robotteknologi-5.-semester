@@ -354,6 +354,10 @@ class Parameterization:
             
         Returns:
             xyz: Nx3 array of (x,y,z) coordinates in global frame
+            
+        Note:
+            CloughTocher2D returns NaN for points outside the convex hull.
+            Check UV bounds with get_uv_bounds() before calling.
         """
         if not self.is_ready:
             raise ValueError("Interpolation not ready. Call build_inverse_interpolation() first.")
@@ -365,6 +369,16 @@ class Parameterization:
         y_local = self.interpolator_y(uv_query)
         z_local = self.interpolator_z(uv_query)
         xyz_local = np.column_stack([x_local, y_local, z_local])
+        
+        # Check for NaN values (points outside convex hull)
+        nan_mask = np.any(np.isnan(xyz_local), axis=1)
+        if np.any(nan_mask):
+            print(f"Warning: {np.sum(nan_mask)} of {len(uv_query)} UV points are outside the interpolation domain")
+            # Get UV bounds for debugging
+            bounds = self.get_uv_bounds()
+            out_of_bounds = uv_query[nan_mask]
+            print(f"  UV bounds: u=[{bounds['u_min']:.3f}, {bounds['u_max']:.3f}], v=[{bounds['v_min']:.3f}, {bounds['v_max']:.3f}]")
+            print(f"  Sample out-of-bounds UV: {out_of_bounds[:min(5, len(out_of_bounds))]}")
         
         # Transform from local frame to global frame
         xyz_global = self.local_to_global(xyz_local)
