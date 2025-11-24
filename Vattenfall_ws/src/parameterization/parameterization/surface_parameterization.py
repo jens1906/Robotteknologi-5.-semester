@@ -99,93 +99,136 @@ class Parameterization:
         """
         Compute arc-length-based UV parameterization for point clouds.
         
-        Approach:
-        - u = arc-length in x-direction along surface
-        - v = arc-length in y-direction along surface
+        Optimized approach using grid-based interpolation:
+        - Sort points and compute cumulative arc-lengths along x and y directions
+        - Use spatial binning to compute arc-lengths in 2D grid
+        - Interpolate arc-length values for each point
         
-        For discrete point clouds, we approximate the arc-length integrals
-        by sorting points and accumulating distances along grid lines.
+        This reduces complexity from O(N²) to O(N log N + G²) where G is grid size.
         
         Returns:
             uv_params: Nx2 array of (u,v) coordinates based on arc-lengths
         """
-        print("Computing arc-length-based parameterization...")
+        print("Computing optimized arc-length-based parameterization...")
         
         n_points = len(self.points_local)
-        uv_params = np.zeros((n_points, 2))
         
         # Use local coordinates (x, y, z) from PCA
         x = self.points_local[:, 0]
         y = self.points_local[:, 1]
         z = self.points_local[:, 2]
         
-        # Find reference point (xref, yref) - use minimum x and y
-        x_ref = np.min(x)
-        y_ref = np.min(y)
+        # Find reference point
+        x_min, y_min = np.min(x), np.min(y)
+        x_max, y_max = np.max(x), np.max(y)
         
-        # Create a structured grid approximation
-        # Bin points into grid cells for arc-length computation
-        n_bins_x = min(50, int(np.sqrt(n_points)))
-        n_bins_y = min(50, int(np.sqrt(n_points)))
+        # Create adaptive grid based on point density
+        n_grid = min(100, max(20, int(np.sqrt(n_points))))
         
-        x_bins = np.linspace(np.min(x), np.max(x), n_bins_x)
-        y_bins = np.linspace(np.min(y), np.max(y), n_bins_y)
+        # Build 2D grid for arc-length computation
+        x_grid = np.linspace(x_min, x_max, n_grid)
+        y_grid = np.linspace(y_min, y_max, n_grid)
         
-        # For each point, compute u and v via arc-length approximation
-        for i in range(n_points):
-            xi, yi, zi = x[i], y[i], z[i]
-            
-            # Compute u: arc-length from (x_ref, y_ref) to (xi, y_ref)
-            # Find points approximately along the line y = y_ref
-            y_tolerance = (np.max(y) - np.min(y)) / n_bins_y
-            mask_u = np.abs(y - y_ref) < y_tolerance
-            mask_u &= (x >= x_ref) & (x <= xi)
-            
-            if np.sum(mask_u) > 1:
-                # Sort points by x-coordinate
-                u_indices = np.where(mask_u)[0]
-                u_indices = u_indices[np.argsort(x[u_indices])]
-                
-                # Accumulate arc-length along the path
-                u_arc_length = 0.0
-                for j in range(len(u_indices) - 1):
-                    idx1, idx2 = u_indices[j], u_indices[j + 1]
-                    dx = x[idx2] - x[idx1]
-                    dz = z[idx2] - z[idx1]
-                    # Arc-length element: √(1 + (dz/dx)²) * dx
-                    u_arc_length += np.sqrt(dx**2 + dz**2)
-                
-                uv_params[i, 0] = u_arc_length
-            else:
-                # Fallback: Euclidean distance in xy-plane
-                uv_params[i, 0] = xi - x_ref
-            
-            # Compute v: arc-length from (xi, y_ref) to (xi, yi)
-            # Find points approximately along the line x = xi
-            x_tolerance = (np.max(x) - np.min(x)) / n_bins_x
-            mask_v = np.abs(x - xi) < x_tolerance
-            mask_v &= (y >= y_ref) & (y <= yi)
-            
-            if np.sum(mask_v) > 1:
-                # Sort points by y-coordinate
-                v_indices = np.where(mask_v)[0]
-                v_indices = v_indices[np.argsort(y[v_indices])]
-                
-                # Accumulate arc-length along the path
-                v_arc_length = 0.0
-                for j in range(len(v_indices) - 1):
-                    idx1, idx2 = v_indices[j], v_indices[j + 1]
-                    dy = y[idx2] - y[idx1]
-                    dz = z[idx2] - z[idx1]
-                    # Arc-length element: √(1 + (dz/dy)²) * dy
-                    v_arc_length += np.sqrt(dy**2 + dz**2)
-                
-                uv_params[i, 1] = v_arc_length
-            else:
-                # Fallback: Euclidean distance in xy-plane
-                uv_params[i, 1] = yi - y_ref
+        # Initialize arc-length grids
+        u_grid = np.zeros((n_grid, n_grid))
+        v_grid = np.zeros((n_grid, n_grid))
         
-        print(f"Arc-length parameterization complete. UV range: u=[{uv_params[:,0].min():.3f}, {uv_params[:,0].max():.3f}], v=[{uv_params[:,1].min():.3f}, {uv_params[:,1].max():.3f}]")
+        # Bin points into grid cells for local arc-length computation
+        x_indices = np.digitize(x, x_grid) - 1
+        y_indices = np.digitize(y, y_grid) - 1
+        
+        # Clamp indices to valid range
+        x_indices = np.clip(x_indices, 0, n_grid - 1)
+        y_indices = np.clip(y_indices, 0, n_grid - 1)
+        
+        # Compute arc-length in u-direction (along x-axis for each y-slice)
+        for j in range(n_grid):
+            # Find points in this y-slice
+            y_slice_mask = (y_indices == j)
+            if not np.any(y_slice_mask):
+                continue
+            
+            # Get points in this slice and sort by x
+            slice_x = x[y_slice_mask]
+            slice_z = z[y_slice_mask]
+            sort_idx = np.argsort(slice_x)
+            slice_x_sorted = slice_x[sort_idx]
+            slice_z_sorted = slice_z[sort_idx]
+            
+            # Compute cumulative arc-length along this slice
+            if len(slice_x_sorted) > 1:
+                dx = np.diff(slice_x_sorted)
+                dz = np.diff(slice_z_sorted)
+                arc_increments = np.sqrt(dx**2 + dz**2)
+                cumulative_arc = np.concatenate([[0], np.cumsum(arc_increments)])
+                
+                # Interpolate arc-length values onto regular grid
+                u_grid[:, j] = np.interp(x_grid, slice_x_sorted, cumulative_arc)
+        
+        # Compute arc-length in v-direction (along y-axis for each x-slice)
+        for i in range(n_grid):
+            # Find points in this x-slice
+            x_slice_mask = (x_indices == i)
+            if not np.any(x_slice_mask):
+                continue
+            
+            # Get points in this slice and sort by y
+            slice_y = y[x_slice_mask]
+            slice_z = z[x_slice_mask]
+            sort_idx = np.argsort(slice_y)
+            slice_y_sorted = slice_y[sort_idx]
+            slice_z_sorted = slice_z[sort_idx]
+            
+            # Compute cumulative arc-length along this slice
+            if len(slice_y_sorted) > 1:
+                dy = np.diff(slice_y_sorted)
+                dz = np.diff(slice_z_sorted)
+                arc_increments = np.sqrt(dy**2 + dz**2)
+                cumulative_arc = np.concatenate([[0], np.cumsum(arc_increments)])
+                
+                # Interpolate arc-length values onto regular grid
+                v_grid[i, :] = np.interp(y_grid, slice_y_sorted, cumulative_arc)
+        
+        # Interpolate arc-length values for all points using bilinear interpolation
+        uv_params = np.zeros((n_points, 2))
+        
+        # Normalize coordinates to grid indices
+        x_norm = (x - x_min) / (x_max - x_min + 1e-10) * (n_grid - 1)
+        y_norm = (y - y_min) / (y_max - y_min + 1e-10) * (n_grid - 1)
+        
+        # Bilinear interpolation for u values
+        x_floor = np.floor(x_norm).astype(int)
+        y_floor = np.floor(y_norm).astype(int)
+        x_ceil = np.minimum(x_floor + 1, n_grid - 1)
+        y_ceil = np.minimum(y_floor + 1, n_grid - 1)
+        
+        # Interpolation weights
+        wx = x_norm - x_floor
+        wy = y_norm - y_floor
+        
+        # Bilinear interpolation for u
+        u_00 = u_grid[x_floor, y_floor]
+        u_10 = u_grid[x_ceil, y_floor]
+        u_01 = u_grid[x_floor, y_ceil]
+        u_11 = u_grid[x_ceil, y_ceil]
+        
+        uv_params[:, 0] = (1 - wx) * (1 - wy) * u_00 + \
+                          wx * (1 - wy) * u_10 + \
+                          (1 - wx) * wy * u_01 + \
+                          wx * wy * u_11
+        
+        # Bilinear interpolation for v
+        v_00 = v_grid[x_floor, y_floor]
+        v_10 = v_grid[x_ceil, y_floor]
+        v_01 = v_grid[x_floor, y_ceil]
+        v_11 = v_grid[x_ceil, y_ceil]
+        
+        uv_params[:, 1] = (1 - wx) * (1 - wy) * v_00 + \
+                          wx * (1 - wy) * v_10 + \
+                          (1 - wx) * wy * v_01 + \
+                          wx * wy * v_11
+        
+        print(f"Arc-length parameterization complete (optimized). UV range: u=[{uv_params[:,0].min():.3f}, {uv_params[:,0].max():.3f}], v=[{uv_params[:,1].min():.3f}, {uv_params[:,1].max():.3f}]")
         
         return uv_params
     
