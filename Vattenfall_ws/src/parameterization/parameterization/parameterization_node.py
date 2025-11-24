@@ -63,6 +63,8 @@ class ParameterizationNode(Node):
         self.corrosion_points = None
         self.corrosion_uv_bounds = None
         self.corrosion_boundary_uv = None  # Boundary points in UV space
+        self.pending_corrosion_data = None  # Store corrosion data if received before parameterization ready
+        self.retry_timer = None  # Timer for retrying corrosion processing
         
         # Create subscriber for corrosion scatter plot
         self.corrosion_plot_sub = self.create_subscription(
@@ -206,6 +208,7 @@ class ParameterizationNode(Node):
         """
         Callback for corrosion scatter plot messages.
         Maps corrosion points to UV coordinates and computes their bounds.
+        Retries if parameterization is not ready yet.
         """
         try:
             self.get_logger().info('Received corrosion scatter plot data')
@@ -222,66 +225,110 @@ class ParameterizationNode(Node):
                 self.get_logger().error(f'Invalid corrosion data length: {len(data)} (must be multiple of 3)')
                 return
             
-            self.corrosion_points = data.reshape(-1, 3)
-            self.get_logger().info(f'Received {len(self.corrosion_points)} corrosion points')
+            corrosion_points = data.reshape(-1, 3)
+            self.get_logger().info(f'Received {len(corrosion_points)} corrosion points')
             
             # Check if workspace parameterization is ready
             if not self.surf.is_ready:
-                self.get_logger().warn('Workspace parameterization not ready yet. Cannot map corrosion points to UV.')
+                self.get_logger().warn('Workspace parameterization not ready yet. Storing data and will retry...')
+                self.pending_corrosion_data = corrosion_points
+                
+                # Set up retry timer if not already running
+                if self.retry_timer is None:
+                    self.retry_timer = self.create_timer(1.0, self._retry_corrosion_processing)
                 return
             
-            # Map corrosion points to UV coordinates using the workspace parameterization
-            corrosion_uv = self._map_xyz_to_uv(self.corrosion_points)
-            
-            # Get workspace UV bounds for validation
-            workspace_bounds = self.surf.get_uv_bounds()
-            
-            # Compute UV bounds of the corrosion area
-            corrosion_u_min = float(np.min(corrosion_uv[:, 0]))
-            corrosion_u_max = float(np.max(corrosion_uv[:, 0]))
-            corrosion_v_min = float(np.min(corrosion_uv[:, 1]))
-            corrosion_v_max = float(np.max(corrosion_uv[:, 1]))
-            
-            # Clamp corrosion bounds to workspace bounds to ensure interpolation validity
-            # Add small margin to avoid edge issues
-            margin_u = (workspace_bounds['u_max'] - workspace_bounds['u_min']) * 0.01
-            margin_v = (workspace_bounds['v_max'] - workspace_bounds['v_min']) * 0.01
-            
-            self.corrosion_uv_bounds = {
-                'u_min': max(corrosion_u_min, workspace_bounds['u_min'] + margin_u),
-                'u_max': min(corrosion_u_max, workspace_bounds['u_max'] - margin_u),
-                'v_min': max(corrosion_v_min, workspace_bounds['v_min'] + margin_v),
-                'v_max': min(corrosion_v_max, workspace_bounds['v_max'] - margin_v)
-            }
-            
-            # Log if bounds were clamped
-            if (corrosion_u_min < workspace_bounds['u_min'] or corrosion_u_max > workspace_bounds['u_max'] or
-                corrosion_v_min < workspace_bounds['v_min'] or corrosion_v_max > workspace_bounds['v_max']):
-                self.get_logger().warn('Corrosion bounds exceed workspace bounds - clamping to valid range')
-                self.get_logger().warn(f'  Original: U=[{corrosion_u_min:.3f}, {corrosion_u_max:.3f}], V=[{corrosion_v_min:.3f}, {corrosion_v_max:.3f}]')
-                self.get_logger().warn(f'  Workspace: U=[{workspace_bounds["u_min"]:.3f}, {workspace_bounds["u_max"]:.3f}], V=[{workspace_bounds["v_min"]:.3f}, {workspace_bounds["v_max"]:.3f}]')
-            
-            # Compute boundary/perimeter points using ConvexHull
-            if len(corrosion_uv) >= 3:  # Need at least 3 points for convex hull
-                try:
-                    hull = ConvexHull(corrosion_uv)
-                    # Get the boundary points in order (hull.vertices gives indices)
-                    self.corrosion_boundary_uv = corrosion_uv[hull.vertices]
-                    self.get_logger().info(f'Computed {len(self.corrosion_boundary_uv)} boundary points from convex hull')
-                except Exception as e:
-                    self.get_logger().warn(f'Could not compute convex hull: {str(e)}. Using all points as boundary.')
-                    self.corrosion_boundary_uv = corrosion_uv
-            else:
-                # Not enough points for convex hull, use all points
-                self.corrosion_boundary_uv = corrosion_uv
-            
-            self.get_logger().info(f'Corrosion UV bounds (clamped): U=[{self.corrosion_uv_bounds["u_min"]:.3f}, {self.corrosion_uv_bounds["u_max"]:.3f}], '
-                                 f'V=[{self.corrosion_uv_bounds["v_min"]:.3f}, {self.corrosion_uv_bounds["v_max"]:.3f}]')
+            # Process the corrosion data
+            self._process_corrosion_data(corrosion_points)
             
         except Exception as e:
-            self.get_logger().error(f'Error processing corrosion scatter plot: {str(e)}')
+            self.get_logger().error(f'Error in corrosion callback: {str(e)}')
             import traceback
             self.get_logger().error(traceback.format_exc())
+    
+    def _retry_corrosion_processing(self):
+        """
+        Timer callback to retry processing pending corrosion data.
+        Stops when parameterization is ready and data is processed.
+        """
+        if self.pending_corrosion_data is None:
+            # No pending data, cancel timer
+            if self.retry_timer is not None:
+                self.retry_timer.cancel()
+                self.retry_timer = None
+            return
+        
+        if self.surf.is_ready:
+            self.get_logger().info('Parameterization ready - processing pending corrosion data')
+            try:
+                self._process_corrosion_data(self.pending_corrosion_data)
+                self.pending_corrosion_data = None
+                
+                # Cancel the retry timer
+                if self.retry_timer is not None:
+                    self.retry_timer.cancel()
+                    self.retry_timer = None
+            except Exception as e:
+                self.get_logger().error(f'Error processing pending corrosion data: {str(e)}')
+        else:
+            self.get_logger().debug('Still waiting for parameterization to be ready...')
+    
+    def _process_corrosion_data(self, corrosion_points):
+        """
+        Process corrosion points: map to UV and compute bounds.
+        
+        Args:
+            corrosion_points: Nx3 array of XYZ coordinates
+        """
+        self.corrosion_points = corrosion_points
+        
+        # Map corrosion points to UV coordinates using the workspace parameterization
+        corrosion_uv = self._map_xyz_to_uv(self.corrosion_points)
+        
+        # Get workspace UV bounds for validation
+        workspace_bounds = self.surf.get_uv_bounds()
+        
+        # Compute UV bounds of the corrosion area
+        corrosion_u_min = float(np.min(corrosion_uv[:, 0]))
+        corrosion_u_max = float(np.max(corrosion_uv[:, 0]))
+        corrosion_v_min = float(np.min(corrosion_uv[:, 1]))
+        corrosion_v_max = float(np.max(corrosion_uv[:, 1]))
+        
+        # Clamp corrosion bounds to workspace bounds to ensure interpolation validity
+        # Add small margin to avoid edge issues
+        margin_u = (workspace_bounds['u_max'] - workspace_bounds['u_min']) * 0.01
+        margin_v = (workspace_bounds['v_max'] - workspace_bounds['v_min']) * 0.01
+        
+        self.corrosion_uv_bounds = {
+            'u_min': max(corrosion_u_min, workspace_bounds['u_min'] + margin_u),
+            'u_max': min(corrosion_u_max, workspace_bounds['u_max'] - margin_u),
+            'v_min': max(corrosion_v_min, workspace_bounds['v_min'] + margin_v),
+            'v_max': min(corrosion_v_max, workspace_bounds['v_max'] - margin_v)
+        }
+        
+        # Log if bounds were clamped
+        if (corrosion_u_min < workspace_bounds['u_min'] or corrosion_u_max > workspace_bounds['u_max'] or
+            corrosion_v_min < workspace_bounds['v_min'] or corrosion_v_max > workspace_bounds['v_max']):
+            self.get_logger().warn('Corrosion bounds exceed workspace bounds - clamping to valid range')
+            self.get_logger().warn(f'  Original: U=[{corrosion_u_min:.3f}, {corrosion_u_max:.3f}], V=[{corrosion_v_min:.3f}, {corrosion_v_max:.3f}]')
+            self.get_logger().warn(f'  Workspace: U=[{workspace_bounds["u_min"]:.3f}, {workspace_bounds["u_max"]:.3f}], V=[{workspace_bounds["v_min"]:.3f}, {workspace_bounds["v_max"]:.3f}]')
+        
+        # Compute boundary/perimeter points using ConvexHull
+        if len(corrosion_uv) >= 3:  # Need at least 3 points for convex hull
+            try:
+                hull = ConvexHull(corrosion_uv)
+                # Get the boundary points in order (hull.vertices gives indices)
+                self.corrosion_boundary_uv = corrosion_uv[hull.vertices]
+                self.get_logger().info(f'Computed {len(self.corrosion_boundary_uv)} boundary points from convex hull')
+            except Exception as e:
+                self.get_logger().warn(f'Could not compute convex hull: {str(e)}. Using all points as boundary.')
+                self.corrosion_boundary_uv = corrosion_uv
+        else:
+            # Not enough points for convex hull, use all points
+            self.corrosion_boundary_uv = corrosion_uv
+        
+        self.get_logger().info(f'Corrosion UV bounds (clamped): U=[{self.corrosion_uv_bounds["u_min"]:.3f}, {self.corrosion_uv_bounds["u_max"]:.3f}], '
+                             f'V=[{self.corrosion_uv_bounds["v_min"]:.3f}, {self.corrosion_uv_bounds["v_max"]:.3f}]')
     
     
     def _map_xyz_to_uv(self, xyz_points):
