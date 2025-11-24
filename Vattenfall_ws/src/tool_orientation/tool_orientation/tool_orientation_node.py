@@ -395,23 +395,42 @@ if ROS2_AVAILABLE:
         
         def compute_and_publish_orientations(self, path_xyz, on_surface, dt=0.1, neighbor_range=3, off_surface_height=0.05):
             #Compute orientations and publish positions + rotation matrices
-            #First compute base orientations for all points
-            positions, orientations = compute_orientations_from_xyz(path_xyz, dt, neighbor_range)
             
-            #Apply off-surface offsets where needed
-            adjusted_positions = apply_off_surface_offset(positions, orientations, on_surface, off_surface_height)
+            # INPUT: path_xyz is in MILLIMETERS (from camera/corrosion detection)
+            # OUTPUT: positions should be in METERS (for robot)
+            
+            self.get_logger().info(f'Input path_xyz range: X=[{np.min(path_xyz[:,0]):.1f}, {np.max(path_xyz[:,0]):.1f}] mm')
+            self.get_logger().info(f'                      Y=[{np.min(path_xyz[:,1]):.1f}, {np.max(path_xyz[:,1]):.1f}] mm')
+            self.get_logger().info(f'                      Z=[{np.min(path_xyz[:,2]):.1f}, {np.max(path_xyz[:,2]):.1f}] mm')
+            
+            #First compute base orientations for all points (input in mm)
+            positions_mm, orientations = compute_orientations_from_xyz(path_xyz, dt, neighbor_range)
+            
+            # Convert off_surface_height from meters to millimeters for consistent units
+            off_surface_height_mm = off_surface_height * 1000.0  # m to mm
+            
+            #Apply off-surface offsets where needed (in mm)
+            adjusted_positions_mm = apply_off_surface_offset(positions_mm, orientations, on_surface, off_surface_height_mm)
+            
+            # CONVERT FROM MILLIMETERS TO METERS for robot output
+            adjusted_positions = adjusted_positions_mm / 1000.0  # mm to m
             
             #Count how many points are off-surface
             n_off_surface = np.sum(~on_surface)
             self.get_logger().info(
-                f'Applied off-surface offset to {n_off_surface}/{len(positions)} points '
-                f'(offset: {off_surface_height*100:.1f} cm)'
+                f'Applied off-surface offset to {n_off_surface}/{len(positions_mm)} points '
+                f'(offset: {off_surface_height*1000:.1f} mm = {off_surface_height*100:.1f} cm)'
             )
+            
+            self.get_logger().info(f'Output positions range: X=[{np.min(adjusted_positions[:,0]):.4f}, {np.max(adjusted_positions[:,0]):.4f}] m')
+            self.get_logger().info(f'                        Y=[{np.min(adjusted_positions[:,1]):.4f}, {np.max(adjusted_positions[:,1]):.4f}] m')
+            self.get_logger().info(f'                        Z=[{np.min(adjusted_positions[:,2]):.4f}, {np.max(adjusted_positions[:,2]):.4f}] m')
             
             #Create Float64MultiArray message
             trajectory_msg = Float64MultiArray()
             
             #Setup dimensions: [n_points, 12] where each row is [x, y, z, r11, r12, r13, r21, r22, r23, r31, r32, r33]
+            # NOTE: x, y, z are in METERS, rotation matrix is unitless
             dim_points = MultiArrayDimension()
             dim_points.label = "points"
             dim_points.size = len(adjusted_positions)
