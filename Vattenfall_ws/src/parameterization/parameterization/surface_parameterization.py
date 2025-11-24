@@ -243,6 +243,9 @@ class Parameterization:
         For isometric (arc-length) parameterization: E ≈ 1, G ≈ 1, F ≈ 0
         For projection parameterization: E and G depend on surface curvature
         
+        Note: Metric tensor is intrinsic, but we compute it in local frame
+        for consistency with UV parameterization.
+        
         Args:
             k_neighbors: Number of neighbors for local derivative estimation
             
@@ -252,33 +255,37 @@ class Parameterization:
         if self.uv_params is None:
             self.compute_initial_parameterization()
         
-        n_points = len(self.points)
+        if self.points_local is None:
+            raise ValueError("Local frame not computed. Call compute_local_frame() first.")
+        
+        n_points = len(self.points_local)
         metric_tensor = np.zeros((n_points, 3))  # [E, F, G] for each point
         
-        # Build KD-trees for efficient neighbor search
-        if self.kdtree_xyz is None:
-            self.kdtree_xyz = cKDTree(self.points)
+        # Build KD-tree for efficient neighbor search in local coordinates
+        # UV was computed from local coords, so use local coords for metric
+        kdtree_local = cKDTree(self.points_local)
+        
         if self.kdtree_uv is None:
             self.kdtree_uv = cKDTree(self.uv_params)
         
         for i in range(n_points):
-            # Find neighbors in XYZ space
-            distances, indices = self.kdtree_xyz.query(self.points[i], k=min(k_neighbors, n_points))
+            # Find neighbors in local XYZ space
+            distances, indices = kdtree_local.query(self.points_local[i], k=min(k_neighbors, n_points))
             
             if len(indices) < 4:
                 # Not enough neighbors, use identity metric
                 metric_tensor[i] = [1.0, 0.0, 1.0]
                 continue
             
-            # Get neighbor coordinates
-            xyz_neighbors = self.points[indices]
+            # Get neighbor coordinates in local frame
+            xyz_local_neighbors = self.points_local[indices]
             uv_neighbors = self.uv_params[indices]
             
             # Compute local surface derivatives ∂r/∂u and ∂r/∂v
             # using least squares fitting of local plane
             try:
                 # Center the data
-                xyz_centered = xyz_neighbors - xyz_neighbors[0]
+                xyz_centered = xyz_local_neighbors - xyz_local_neighbors[0]
                 uv_centered = uv_neighbors - uv_neighbors[0]
                 
                 # Solve for derivatives: [∂r/∂u, ∂r/∂v] via least squares
@@ -287,10 +294,11 @@ class Parameterization:
                     # Compute pseudo-inverse
                     derivatives = xyz_centered.T @ np.linalg.pinv(uv_centered.T)
                     
-                    dr_du = derivatives[:, 0]  # ∂r/∂u
-                    dr_dv = derivatives[:, 1]  # ∂r/∂v
+                    dr_du = derivatives[:, 0]  # ∂r/∂u in local frame
+                    dr_dv = derivatives[:, 1]  # ∂r/∂v in local frame
                     
                     # Compute first fundamental form coefficients
+                    # Note: Metric tensor is same in any orthonormal frame
                     E = np.dot(dr_du, dr_du)  # ||∂r/∂u||²
                     F = np.dot(dr_du, dr_dv)  # <∂r/∂u, ∂r/∂v>
                     G = np.dot(dr_dv, dr_dv)  # ||∂r/∂v||²
@@ -315,16 +323,19 @@ class Parameterization:
         - Piecewise cubic spline interpolation
         - C1 continuity (continuous first derivatives)
         - Good balance of smoothness and computational efficiency
+        
+        Note: Interpolators map UV → local coordinates, then transform to global.
         """
         if self.uv_params is None:
             self.compute_initial_parameterization()
         
         # CloughTocher2D provides piecewise cubic spline interpolation
         # C1 continuous (continuous first derivatives)
+        # UV params are computed from local frame, so interpolators must use local coords
         print("Building cubic spline interpolators (CloughTocher2D)...")
-        self.interpolator_x = CloughTocher2DInterpolator(self.uv_params, self.points[:, 0])
-        self.interpolator_y = CloughTocher2DInterpolator(self.uv_params, self.points[:, 1])
-        self.interpolator_z = CloughTocher2DInterpolator(self.uv_params, self.points[:, 2])
+        self.interpolator_x = CloughTocher2DInterpolator(self.uv_params, self.points_local[:, 0])
+        self.interpolator_y = CloughTocher2DInterpolator(self.uv_params, self.points_local[:, 1])
+        self.interpolator_z = CloughTocher2DInterpolator(self.uv_params, self.points_local[:, 2])
         
         # Build KD-tree for utility functions
         if self.kdtree_uv is None:
@@ -336,26 +347,29 @@ class Parameterization:
     def interpolate(self, uv_query):
         """
         Interpolate Cartesian coordinates from parameter space using cubic splines.
-        Maps (u,v) → (x,y,z).
+        Maps (u,v) → (x,y,z) in global coordinate frame.
         
         Args:
             uv_query: Nx2 array of (u,v) coordinates
             
         Returns:
-            xyz: Nx3 array of (x,y,z) coordinates
+            xyz: Nx3 array of (x,y,z) coordinates in global frame
         """
         if not self.is_ready:
             raise ValueError("Interpolation not ready. Call build_inverse_interpolation() first.")
         
         uv_query = np.atleast_2d(uv_query)
         
-        # Use cubic spline interpolators
-        x = self.interpolator_x(uv_query)
-        y = self.interpolator_y(uv_query)
-        z = self.interpolator_z(uv_query)
-        xyz = np.column_stack([x, y, z])
+        # Use cubic spline interpolators to get local coordinates
+        x_local = self.interpolator_x(uv_query)
+        y_local = self.interpolator_y(uv_query)
+        z_local = self.interpolator_z(uv_query)
+        xyz_local = np.column_stack([x_local, y_local, z_local])
         
-        return xyz
+        # Transform from local frame to global frame
+        xyz_global = self.local_to_global(xyz_local)
+        
+        return xyz_global
     
     def get_metric_at_uv(self, uv_query):
         """
