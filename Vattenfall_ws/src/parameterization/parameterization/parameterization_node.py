@@ -501,7 +501,9 @@ class ParameterizationNode(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'parameterization'
         
-        msg.is_ready = self.surf.is_ready
+        # Only report ready when both workspace parameterization AND corrosion bounds are available
+        # This prevents path planner from starting with workspace bounds instead of corrosion bounds
+        msg.is_ready = self.surf.is_ready and self.corrosion_uv_bounds is not None
         
         if self.surf.is_ready:
             try:
