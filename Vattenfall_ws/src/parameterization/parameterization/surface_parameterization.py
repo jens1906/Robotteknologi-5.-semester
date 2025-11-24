@@ -99,17 +99,15 @@ class Parameterization:
         """
         Compute arc-length-based UV parameterization for point clouds.
         
-        Optimized approach using grid-based interpolation:
+        Approach using grid-based interpolation:
         - Sort points and compute cumulative arc-lengths along x and y directions
         - Use spatial binning to compute arc-lengths in 2D grid
         - Interpolate arc-length values for each point
         
-        This reduces complexity from O(N²) to O(N log N + G²) where G is grid size.
-        
         Returns:
             uv_params: Nx2 array of (u,v) coordinates based on arc-lengths
         """
-        print("Computing optimized arc-length-based parameterization...")
+        print("Computing arc-length-based parameterization...")
         
         n_points = len(self.points_local)
         
@@ -140,8 +138,9 @@ class Parameterization:
         # Clamp indices to valid range
         x_indices = np.clip(x_indices, 0, n_grid - 1)
         y_indices = np.clip(y_indices, 0, n_grid - 1)
-        
+
         # Compute arc-length in u-direction (along x-axis for each y-slice)
+        print("Starting arc length computations u-direction...")
         for j in range(n_grid):
             # Find points in this y-slice
             y_slice_mask = (y_indices == j)
@@ -166,6 +165,7 @@ class Parameterization:
                 u_grid[:, j] = np.interp(x_grid, slice_x_sorted, cumulative_arc)
         
         # Compute arc-length in v-direction (along y-axis for each x-slice)
+        print("Starting arc length computations v-direction...")
         for i in range(n_grid):
             # Find points in this x-slice
             x_slice_mask = (x_indices == i)
