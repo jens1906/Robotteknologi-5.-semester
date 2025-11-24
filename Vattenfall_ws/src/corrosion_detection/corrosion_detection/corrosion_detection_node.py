@@ -26,6 +26,17 @@ class CorrosionDetector(Node):
             depth=5
         )
         
+        # Hand-Eye Calibration Matrix (Camera to End Effector)
+        # This transforms points from camera frame to robot end-effector frame
+        self.T_camera_to_ee = np.array([
+            [-0.996, -0.088, -0.009, 39.945],
+            [ 0.088, -0.996, -0.005, 47.026],
+            [-0.008, -0.005,  1.000, -6.355],
+            [ 0.000,  0.000,  0.000,  1.000]
+        ])
+        self.get_logger().info('Hand-Eye Calibration Matrix loaded')
+        self.get_logger().info(f'T_camera_to_ee:\n{self.T_camera_to_ee}')
+        
         self.toolsizes = [30, 25]  # Example tool sizes in mm
 
         self.corrosion_thresholding = self.create_publisher(Image, '/corrosion/thresholding_pub', image_qos)
@@ -264,6 +275,31 @@ class CorrosionDetector(Node):
         
         return scatter_data_original, scatter_data
 
+    def apply_hand_eye_transform(self, xyz_camera):
+        """
+        Apply hand-eye calibration to transform points from camera frame to end-effector frame.
+        
+        Args:
+            xyz_camera: (N, 3) array of points in camera coordinate frame
+            
+        Returns:
+            xyz_ee: (N, 3) array of points in end-effector coordinate frame
+        """
+        if len(xyz_camera) == 0:
+            return xyz_camera
+        
+        # Convert to homogeneous coordinates (N, 4)
+        ones = np.ones((xyz_camera.shape[0], 1))
+        xyz_homogeneous = np.hstack([xyz_camera, ones])
+        
+        # Apply transformation: T_camera_to_ee @ points^T -> (4, N)
+        xyz_ee_homogeneous = (self.T_camera_to_ee @ xyz_homogeneous.T).T
+        
+        # Convert back to Cartesian coordinates (N, 3)
+        xyz_ee = xyz_ee_homogeneous[:, :3]
+        
+        return xyz_ee
+
     def combine_and_transform(self, scatter_data_tuple, depth, depthFiles=None):
         # Unpack the tuple (original, offset)
         scatter_data_original, scatter_data_offset = scatter_data_tuple
@@ -273,19 +309,26 @@ class CorrosionDetector(Node):
             if printlogger: self.get_logger().warn('No scatter data to transform')
             return np.array([]), np.array([])
         
-        # Transform ORIGINAL data
+        # Transform ORIGINAL data (camera pixel + depth -> camera XYZ)
         depth_values_orig = depth[scatter_data_original[:, 1], scatter_data_original[:, 0]]
-        xyz_original = np.column_stack(((scatter_data_original[:, 0] - c[0]) * depth_values_orig / (1.93/0.003), 
-                                        (scatter_data_original[:, 1] - c[1]) * depth_values_orig / (1.93/0.003), 
-                                        depth_values_orig))
+        xyz_camera_original = np.column_stack(((scatter_data_original[:, 0] - c[0]) * depth_values_orig / (1.93/0.003), 
+                                                (scatter_data_original[:, 1] - c[1]) * depth_values_orig / (1.93/0.003), 
+                                                depth_values_orig))
         
-        # Transform OFFSET data
+        # Transform OFFSET data (camera pixel + depth -> camera XYZ)
         depth_values_offset = depth[scatter_data_offset[:, 1], scatter_data_offset[:, 0]]
-        xyz_offset = np.column_stack(((scatter_data_offset[:, 0] - c[0]) * depth_values_offset / (1.93/0.003), 
-                                      (scatter_data_offset[:, 1] - c[1]) * depth_values_offset / (1.93/0.003), 
-                                      depth_values_offset))
+        xyz_camera_offset = np.column_stack(((scatter_data_offset[:, 0] - c[0]) * depth_values_offset / (1.93/0.003), 
+                                             (scatter_data_offset[:, 1] - c[1]) * depth_values_offset / (1.93/0.003), 
+                                             depth_values_offset))
         
-        return xyz_original, xyz_offset
+        # Apply hand-eye calibration to transform from camera frame to end-effector frame
+        xyz_ee_original = self.apply_hand_eye_transform(xyz_camera_original)
+        xyz_ee_offset = self.apply_hand_eye_transform(xyz_camera_offset)
+        
+        if printlogger:
+            self.get_logger().info(f'Transformed {len(xyz_ee_original)} original points and {len(xyz_ee_offset)} offset points to end-effector frame')
+        
+        return xyz_ee_original, xyz_ee_offset
 
     def destroy_node(self):
         

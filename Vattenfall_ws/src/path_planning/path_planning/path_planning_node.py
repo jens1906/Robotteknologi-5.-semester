@@ -43,7 +43,7 @@ class PathPlanner(Node):
         self.declare_parameter('line_spacing', 5.0)  # Spacing between scan lines (U direction)
         self.declare_parameter('n_bezier', 25)  # Number of points for generating connecting curves
         self.declare_parameter('auto_generate', True)  # Automatically generate path when parameterization is ready
-        self.declare_parameter('test', True)  # Test mode
+        self.declare_parameter('test', False)  # Test mode
 
         self.test = self.get_parameter('test').value
         self.point_spacing = self.get_parameter('point_spacing').value

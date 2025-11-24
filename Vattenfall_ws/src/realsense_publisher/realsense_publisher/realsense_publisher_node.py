@@ -1,5 +1,5 @@
 
-Test = True
+Test = False
 if Test == False:
     import pyrealsense2 as rs
 import numpy as np
