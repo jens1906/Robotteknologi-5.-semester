@@ -233,13 +233,33 @@ class ParameterizationNode(Node):
             # Map corrosion points to UV coordinates using the workspace parameterization
             corrosion_uv = self._map_xyz_to_uv(self.corrosion_points)
             
+            # Get workspace UV bounds for validation
+            workspace_bounds = self.surf.get_uv_bounds()
+            
             # Compute UV bounds of the corrosion area
+            corrosion_u_min = float(np.min(corrosion_uv[:, 0]))
+            corrosion_u_max = float(np.max(corrosion_uv[:, 0]))
+            corrosion_v_min = float(np.min(corrosion_uv[:, 1]))
+            corrosion_v_max = float(np.max(corrosion_uv[:, 1]))
+            
+            # Clamp corrosion bounds to workspace bounds to ensure interpolation validity
+            # Add small margin to avoid edge issues
+            margin_u = (workspace_bounds['u_max'] - workspace_bounds['u_min']) * 0.01
+            margin_v = (workspace_bounds['v_max'] - workspace_bounds['v_min']) * 0.01
+            
             self.corrosion_uv_bounds = {
-                'u_min': float(np.min(corrosion_uv[:, 0])),
-                'u_max': float(np.max(corrosion_uv[:, 0])),
-                'v_min': float(np.min(corrosion_uv[:, 1])),
-                'v_max': float(np.max(corrosion_uv[:, 1]))
+                'u_min': max(corrosion_u_min, workspace_bounds['u_min'] + margin_u),
+                'u_max': min(corrosion_u_max, workspace_bounds['u_max'] - margin_u),
+                'v_min': max(corrosion_v_min, workspace_bounds['v_min'] + margin_v),
+                'v_max': min(corrosion_v_max, workspace_bounds['v_max'] - margin_v)
             }
+            
+            # Log if bounds were clamped
+            if (corrosion_u_min < workspace_bounds['u_min'] or corrosion_u_max > workspace_bounds['u_max'] or
+                corrosion_v_min < workspace_bounds['v_min'] or corrosion_v_max > workspace_bounds['v_max']):
+                self.get_logger().warn('Corrosion bounds exceed workspace bounds - clamping to valid range')
+                self.get_logger().warn(f'  Original: U=[{corrosion_u_min:.3f}, {corrosion_u_max:.3f}], V=[{corrosion_v_min:.3f}, {corrosion_v_max:.3f}]')
+                self.get_logger().warn(f'  Workspace: U=[{workspace_bounds["u_min"]:.3f}, {workspace_bounds["u_max"]:.3f}], V=[{workspace_bounds["v_min"]:.3f}, {workspace_bounds["v_max"]:.3f}]')
             
             # Compute boundary/perimeter points using ConvexHull
             if len(corrosion_uv) >= 3:  # Need at least 3 points for convex hull
@@ -255,7 +275,7 @@ class ParameterizationNode(Node):
                 # Not enough points for convex hull, use all points
                 self.corrosion_boundary_uv = corrosion_uv
             
-            self.get_logger().info(f'Corrosion UV bounds: U=[{self.corrosion_uv_bounds["u_min"]:.3f}, {self.corrosion_uv_bounds["u_max"]:.3f}], '
+            self.get_logger().info(f'Corrosion UV bounds (clamped): U=[{self.corrosion_uv_bounds["u_min"]:.3f}, {self.corrosion_uv_bounds["u_max"]:.3f}], '
                                  f'V=[{self.corrosion_uv_bounds["v_min"]:.3f}, {self.corrosion_uv_bounds["v_max"]:.3f}]')
             
         except Exception as e:
