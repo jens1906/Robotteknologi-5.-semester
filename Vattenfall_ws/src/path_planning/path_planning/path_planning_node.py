@@ -39,7 +39,7 @@ class PathPlanner(Node):
         super().__init__('path_planner_node') # Initialize ROS2 node
 
         self.declare_parameter('point_spacing', 5)  # Spacing between points along lines (V direction) - mm
-        self.declare_parameter('line_spacing', 250.0)  # Spacing between scan lines (U direction) - mm
+        self.declare_parameter('line_spacing', 50.0)  # Spacing between scan lines (U direction) - mm
         self.declare_parameter('n_bezier', 50)  # Number of points for generating connecting curves - n
         self.declare_parameter('auto_generate', True)  # Automatically generate path when parameterization is ready
         self.declare_parameter('test', False)  # Test mode
