@@ -3,10 +3,7 @@ from shapely.geometry import Polygon, Point
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray, ByteMultiArray
-
-from parameterization.msg import ParameterizationStatus
-from parameterization.srv import GetUVBounds
+from std_msgs.msg import Float64MultiArray, ByteMultiArray, Bool
 
 """
 Path Planner Node
@@ -23,7 +20,7 @@ Subscribers:
 
 Publishers:
 - /path/uv_path (Float64MultiArray): Generated UV path data (flattened Nx2 array).
-- /path/on_surface (Float64MultiArray): Corresponding on-surface flags (0/1 as float).
+- /path/on_surface (ByteMultiArray): Corresponding on-surface flags (0/1 as float).
 
 Services Used:
 - /parameterization/get_uv_bounds (GetUVBounds): Get UV parameter space bounds.
@@ -45,7 +42,7 @@ class PathPlanner(Node):
     def __init__(self):
         super().__init__('path_planner_node') # Initialize ROS2 node
 
-        self.declare_parameter('point_spacing', 5)  # Spacing between points along lines (V direction) - mm
+        self.declare_parameter('point_spacing', 1)  # Spacing between points along lines (V direction) - mm
         self.declare_parameter('line_spacing', 25.0)  # Spacing between scan lines (U direction) - mm
         self.declare_parameter('n_bezier', 50)  # Number of points for generating connecting curves - n
 
@@ -57,16 +54,13 @@ class PathPlanner(Node):
 
         # Data holders
         self.uv_boundary = None # Boundary of the surface in UV space
+        self.uv_bounds = None # UV bounds dict with u_min, u_max, v_min, v_max
         self.uv_path = None # Final path in UV space
         self.on_surface = None # Flags for points on/off surface
         self.parameterization_ready = False # Initially not ready
         self.tool_size = None  # Will be set by tool_size_callback
-        
-        # Service client
-        self.bounds_client = self.create_client(
-            GetUVBounds,
-            '/parameterization/get_uv_bounds'
-        )
+        self.received_bounds = False
+        self.received_boundary = False
 
         # Subscriptions
         self.create_subscription(
@@ -77,9 +71,23 @@ class PathPlanner(Node):
         )
 
         self.create_subscription(
-            ParameterizationStatus,
-            '/parameterization/status',
-            self.status_callback,
+            Bool,
+            '/parameterization/ready',
+            self.ready_callback,
+            10
+        )
+        
+        self.create_subscription(
+            Float64MultiArray,
+            '/parameterization/uv_bounds',
+            self.uv_bounds_callback,
+            10
+        )
+        
+        self.create_subscription(
+            Float64MultiArray,
+            '/parameterization/uv_boundary',
+            self.uv_boundary_callback,
             10
         )
 
@@ -101,10 +109,10 @@ class PathPlanner(Node):
         self.get_logger().info(f'  Bezier points: {self.n_bezier}')
 
 
-    def status_callback(self, msg):
-        """Callback for parameterization status."""
+    def ready_callback(self, msg):
+        """Callback for parameterization ready status."""
         previously_ready = self.parameterization_ready
-        self.parameterization_ready = msg.is_ready and msg.num_points > 0
+        self.parameterization_ready = msg.data
         
         if not self.parameterization_ready:
             if previously_ready:
@@ -114,40 +122,75 @@ class PathPlanner(Node):
         if previously_ready:
             return
             
-        self.get_logger().info(f'Parameterization ready ({msg.num_points} points). Fetching UV bounds...')
-        if self.bounds_client.wait_for_service(timeout_sec=1.0):
-            future = self.bounds_client.call_async(GetUVBounds.Request())
-            future.add_done_callback(self._process_uv_bounds)
-        else:
-            self.get_logger().error('UV bounds service not available')
+        self.get_logger().info('Parameterization ready. Waiting for bounds and boundary data...')
+        self._try_generate_path()
 
 
-    def _extract_boundary(self, response):
-        """Extract boundary points from service response."""
-        if response.boundary and len(response.boundary.points) > 0:
-            self.uv_boundary = np.array([[pt.u, pt.v] for pt in response.boundary.points])
-            self.get_logger().info(f'UV boundary: {len(self.uv_boundary)} points')
-        else:
-            self.uv_boundary = np.array([
-                [response.u_min, response.v_min], [response.u_max, response.v_min],
-                [response.u_max, response.v_max], [response.u_min, response.v_max]
-            ])
-            self.get_logger().info('Using rectangular bounds')
+    def uv_bounds_callback(self, msg):
+        """Callback for UV bounds data.
+        Expected format: [u_min, u_max, v_min, v_max]
+        """
+        if len(msg.data) != 4:
+            self.get_logger().error(f'Invalid UV bounds data length: {len(msg.data)} (expected 4)')
+            return
+        
+        self.uv_bounds = {
+            'u_min': msg.data[0],
+            'u_max': msg.data[1],
+            'v_min': msg.data[2],
+            'v_max': msg.data[3]
+        }
+        self.received_bounds = True
+        self.get_logger().info(f'Received UV bounds: U=[{self.uv_bounds["u_min"]:.3f}, {self.uv_bounds["u_max"]:.3f}], '
+                             f'V=[{self.uv_bounds["v_min"]:.3f}, {self.uv_bounds["v_max"]:.3f}]')
+        self._try_generate_path()
 
 
-    def _process_uv_bounds(self, future):
-        """Process UV bounds response and generate path."""
+    def uv_boundary_callback(self, msg):
+        """Callback for UV boundary points.
+        Expected format: flattened Nx2 array [u1, v1, u2, v2, ...]
+        """
+        if len(msg.data) == 0:
+            self.get_logger().warn('Received empty boundary data')
+            return
+        
+        if len(msg.data) % 2 != 0:
+            self.get_logger().error(f'Invalid boundary data length: {len(msg.data)} (must be even)')
+            return
+        
+        # Reshape to Nx2
+        self.uv_boundary = np.array(msg.data).reshape(-1, 2)
+        self.received_boundary = True
+        self.get_logger().info(f'Received UV boundary: {len(self.uv_boundary)} points')
+        self._try_generate_path()
+
+
+    def _try_generate_path(self):
+        """Attempt to generate path if all required data is available."""
+        if not self.parameterization_ready:
+            self.get_logger().debug('Waiting for parameterization to be ready...')
+            return
+        
+        if not self.received_bounds:
+            self.get_logger().debug('Waiting for UV bounds...')
+            return
+        
+        if not self.received_boundary:
+            self.get_logger().debug('Waiting for UV boundary...')
+            return
+        
+        if self.tool_size is None:
+            self.get_logger().debug('Waiting for tool size...')
+            return
+        
+        # All data available, generate path
+        self.get_logger().info('All data received. Generating path...')
         try:
-            response = future.result()
-            if response.success:
-                self._extract_boundary(response)
-                self.generate_lines()  # This calls adjust_lines() internally
-                self.uv_path = self.create_continuous_path()
-                self.publish_path()
-            else:
-                self.get_logger().error(f'Failed to get UV bounds: {response.message}')
+            self.generate_lines()  # This calls adjust_lines() internally
+            self.uv_path = self.create_continuous_path()
+            self.publish_path()
         except Exception as e:
-            self.get_logger().error(f'Error processing UV bounds: {e}')
+            self.get_logger().error(f'Error generating path: {e}')
     
 
     def tool_size_callback(self, msg):
