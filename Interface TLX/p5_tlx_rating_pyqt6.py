@@ -43,8 +43,18 @@ class TLXWindow(QMainWindow):
 
     def _connect_signals(self):
         for slider, lcd in zip(self.sliders, self.lcds):
-            slider.valueChanged.connect(lcd.display)
-            lcd.display(slider.value())
+            def handler(val, s=slider, l=lcd):
+                # Snap to nearest multiple of 5
+                snapped = round(val / 5) * 5
+                if snapped != val:
+                    # Prevent recursive signal emission
+                    s.blockSignals(True)
+                    s.setValue(snapped)
+                    s.blockSignals(False)
+                    val = snapped
+                l.display(val)
+            slider.valueChanged.connect(handler)
+            handler(slider.value())
         if self.export_button:
             self.export_button.clicked.connect(self.export_results)
 
@@ -64,12 +74,12 @@ class TLXWindow(QMainWindow):
         filename, _ = QFileDialog.getSaveFileName(
             self,
             "Save TLX Ratings",
-            "tlx_ratings.csv",
-            "CSV Files (*.csv);;All Files (*)",
+            "tlx_ratings.txt",
+            "Text Files (*.txt);;All Files (*)",
         )
         if not filename:
             return
-        header = [
+        order = [
             "mental_demand",
             "physical_demand",
             "temporal_demand",
@@ -77,20 +87,10 @@ class TLXWindow(QMainWindow):
             "effort",
             "frustration",
         ]
-        write_header = False
-        try:
-            with open(filename, "r", encoding="utf-8") as f:
-                first = f.readline().strip()
-                if first != ",".join(header):
-                    write_header = True
-        except FileNotFoundError:
-            write_header = True
-        except Exception:
-            write_header = True
-        with open(filename, "a", encoding="utf-8") as f:
-            if write_header:
-                f.write(",".join(header) + "\n")
-            f.write(",".join(str(data[h]) for h in header) + "\n")
+        lines = [f"{key}: {data[key]}" for key in order]
+        content = "\n".join(lines) + "\n"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(content)
 
 
 def main():
