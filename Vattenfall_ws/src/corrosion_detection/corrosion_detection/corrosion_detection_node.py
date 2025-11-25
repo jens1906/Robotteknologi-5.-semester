@@ -5,7 +5,8 @@ import message_filters
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 from sensor_msgs.msg import Image
-from std_msgs.msg import Float32MultiArray, Bool  
+from std_msgs.msg import Float32MultiArray, Bool
+from tf2_msgs.msg import TFMessage  
 
 c = (480 / 2, 640 / 2)
 kernel = np.ones((5, 5), np.uint8)
@@ -26,6 +27,17 @@ class CorrosionDetector(Node):
             depth=5
         )
         
+        # Hand-Eye Calibration Matrix (Camera to End Effector)
+        # This transforms points from camera frame to robot end-effector frame
+        self.T_camera_to_ee = np.array([
+            [-0.996, -0.088, -0.009, 39.945],
+            [ 0.088, -0.996, -0.005, 47.026],
+            [-0.008, -0.005,  1.000, -6.355],
+            [ 0.000,  0.000,  0.000,  1.000]
+        ])
+        self.get_logger().info('Hand-Eye Calibration Matrix loaded')
+        self.get_logger().info(f'T_camera_to_ee:\n{self.T_camera_to_ee}')
+        
         self.toolsizes = [30, 25]  # Example tool sizes in mm
 
         self.corrosion_thresholding = self.create_publisher(Image, '/corrosion/thresholding_pub', image_qos)
@@ -43,6 +55,8 @@ class CorrosionDetector(Node):
         self.ui_terminate_pub_sub = self.create_subscription(Bool, '/ui/terminate_pub', self.ui_terminate_callback, 10)
         self.ui_connected_pub_sub = self.create_subscription(Bool, '/ui/connected_pub', self.ui_connected_callback, 10)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
+        
+        self.tf_static_sub = self.create_subscription(TFMessage, '/tf_static', self.tf_static_callback, 10)
         color_sub = message_filters.Subscriber(self, Image, '/realsense/camera_color_pub', qos_profile=image_qos)
         depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub', qos_profile=image_qos)
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
@@ -58,6 +72,7 @@ class CorrosionDetector(Node):
         self.last_subscriber_count = 0  # Track subscriber count changes
         self.ui_connected_state = False
         self.last_corrosion_threshold_image = None
+        self.combined_transformation_of_ur = None
 
         if printlogger: self.get_logger().info('Initialized Corrosion Detector Node')
 
@@ -90,6 +105,99 @@ class CorrosionDetector(Node):
         self.running_status = False
         self.corrosion_accepted = False
         self.get_logger().info('Terminate command received, stopping activities')
+
+    def quaternion_to_rotation_matrix(self, q):
+        """
+        Convert a quaternion to a 3x3 rotation matrix.
+        
+        Args:
+            q: quaternion with attributes x, y, z, w
+            
+        Returns:
+            3x3 rotation matrix as numpy array
+        """
+        x, y, z, w = q.x, q.y, q.z, q.w
+        
+        # Normalize quaternion
+        norm = np.sqrt(x**2 + y**2 + z**2 + w**2)
+        x, y, z, w = x/norm, y/norm, z/norm, w/norm
+        
+        # Convert to rotation matrix
+        R = np.array([
+            [1 - 2*(y**2 + z**2),     2*(x*y - w*z),     2*(x*z + w*y)],
+            [    2*(x*y + w*z), 1 - 2*(x**2 + z**2),     2*(y*z - w*x)],
+            [    2*(x*z - w*y),     2*(y*z + w*x), 1 - 2*(x**2 + y**2)]
+        ])
+        return R
+
+    def transform_to_homogeneous_matrix(self, transform):
+        """
+        Convert a Transform (translation + rotation) to a 4x4 homogeneous transformation matrix.
+        
+        Args:
+            transform: geometry_msgs/Transform with translation and rotation
+            
+        Returns:
+            4x4 homogeneous transformation matrix
+        """
+        # Extract translation
+        tx = transform.translation.x
+        ty = transform.translation.y
+        tz = transform.translation.z
+        
+        # Convert quaternion rotation to 3x3 rotation matrix
+        R = self.quaternion_to_rotation_matrix(transform.rotation)
+        
+        # Create 4x4 homogeneous transformation matrix
+        T = np.eye(4)
+        T[0:3, 0:3] = R
+        T[0:3, 3] = [tx, ty, tz]
+        
+        return T
+
+    def tf_static_callback(self, msg):
+        """
+        Callback for /tf_static topic.
+        This receives static transform information between frames and combines them.
+        
+        Args:
+            msg: TFMessage containing TransformStamped objects
+        """
+        if printlogger:
+            self.get_logger().info(f'Received TF Static with {len(msg.transforms)} transforms')
+        
+        # Initialize combined transformation as identity matrix
+        combined_transformation = np.eye(4)
+        
+        # Process each transform in the message and multiply them
+        for transform in msg.transforms:
+            parent_frame = transform.header.frame_id
+            child_frame = transform.child_frame_id
+            
+            # Extract translation and rotation
+            translation = transform.transform.translation
+            rotation = transform.transform.rotation
+            
+            # Convert transform to 4x4 homogeneous matrix
+            T = self.transform_to_homogeneous_matrix(transform.transform)
+            
+            # Multiply with accumulated transformation
+            combined_transformation = combined_transformation @ T
+            
+            if printlogger:
+                self.get_logger().info(
+                    f'Transform: {parent_frame} -> {child_frame}\n'
+                    f'  Position: x={translation.x:.3f}, y={translation.y:.3f}, z={translation.z:.3f}\n'
+                    f'  Rotation: x={rotation.x:.3f}, y={rotation.y:.3f}, z={rotation.z:.3f}, w={rotation.w:.3f}'
+                )
+        
+        # Save the combined transformation to instance variable
+        self.combined_transformation_of_ur = combined_transformation
+        
+        if printlogger:
+            self.get_logger().info('Combined Transformation Matrix (End-Effector to Base):')
+            self.get_logger().info(f'\n{self.combined_transformation_of_ur}')
+            self.get_logger().info(f'Position: x={self.combined_transformation_of_ur[0, 3]:.3f}, y={self.combined_transformation_of_ur[1, 3]:.3f}, z={self.combined_transformation_of_ur[2, 3]:.3f}')
 
     def image_msg_to_numpy(self, msg):
         """Convert ROS Image message to numpy array."""
@@ -264,6 +372,51 @@ class CorrosionDetector(Node):
         
         return scatter_data_original, scatter_data
 
+    def apply_hand_eye_transform(self, xyz_camera):
+        """
+        Apply hand-eye calibration and UR transformation to transform points from camera frame to robot base frame.
+        
+        Transformation chain:
+        1. Camera frame -> End-effector frame (via T_camera_to_ee)
+        2. End-effector frame -> Robot base frame (via combined_transformation_of_ur)
+        
+        Combined: T_total = combined_transformation_of_ur @ T_camera_to_ee
+        
+        Args:
+            xyz_camera: (N, 3) array of points in camera coordinate frame
+            
+        Returns:
+            xyz_base: (N, 3) array of points in robot base coordinate frame (or end-effector if UR transform not available)
+        """
+        if len(xyz_camera) == 0:
+            return xyz_camera
+        
+        # Convert to homogeneous coordinates (N, 4)
+        ones = np.ones((xyz_camera.shape[0], 1))
+        xyz_homogeneous = np.hstack([xyz_camera, ones])
+        
+        # Combine transformations: Camera -> End-effector -> Base
+        if self.combined_transformation_of_ur is not None:
+            # Combined transformation matrix
+            T_total = self.combined_transformation_of_ur @ self.T_camera_to_ee
+            
+            # Apply combined transformation in one step: T_total @ points^T -> (4, N)
+            xyz_base_homogeneous = (T_total @ xyz_homogeneous.T).T
+            
+            # Convert back to Cartesian coordinates (N, 3)
+            xyz_base = xyz_base_homogeneous[:, :3]
+            
+            return xyz_base
+        else:
+            # If UR transformation not available, only apply hand-eye calibration
+            xyz_ee_homogeneous = (self.T_camera_to_ee @ xyz_homogeneous.T).T
+            xyz_ee = xyz_ee_homogeneous[:, :3]
+            
+            if printlogger:
+                self.get_logger().warn('Combined UR transformation not available, returning end-effector frame coordinates')
+            
+            return xyz_ee
+
     def combine_and_transform(self, scatter_data_tuple, depth, depthFiles=None):
         # Unpack the tuple (original, offset)
         scatter_data_original, scatter_data_offset = scatter_data_tuple
@@ -273,19 +426,26 @@ class CorrosionDetector(Node):
             if printlogger: self.get_logger().warn('No scatter data to transform')
             return np.array([]), np.array([])
         
-        # Transform ORIGINAL data
+        # Transform ORIGINAL data (camera pixel + depth -> camera XYZ)
         depth_values_orig = depth[scatter_data_original[:, 1], scatter_data_original[:, 0]]
-        xyz_original = np.column_stack(((scatter_data_original[:, 0] - c[0]) * depth_values_orig / (1.93/0.003), 
-                                        (scatter_data_original[:, 1] - c[1]) * depth_values_orig / (1.93/0.003), 
-                                        depth_values_orig))
+        xyz_camera_original = np.column_stack(((scatter_data_original[:, 0] - c[0]) * depth_values_orig / (1.93/0.003), 
+                                                (scatter_data_original[:, 1] - c[1]) * depth_values_orig / (1.93/0.003), 
+                                                depth_values_orig))
         
-        # Transform OFFSET data
+        # Transform OFFSET data (camera pixel + depth -> camera XYZ)
         depth_values_offset = depth[scatter_data_offset[:, 1], scatter_data_offset[:, 0]]
-        xyz_offset = np.column_stack(((scatter_data_offset[:, 0] - c[0]) * depth_values_offset / (1.93/0.003), 
-                                      (scatter_data_offset[:, 1] - c[1]) * depth_values_offset / (1.93/0.003), 
-                                      depth_values_offset))
+        xyz_camera_offset = np.column_stack(((scatter_data_offset[:, 0] - c[0]) * depth_values_offset / (1.93/0.003), 
+                                             (scatter_data_offset[:, 1] - c[1]) * depth_values_offset / (1.93/0.003), 
+                                             depth_values_offset))
         
-        return xyz_original, xyz_offset
+        # Apply hand-eye calibration to transform from camera frame to end-effector frame
+        xyz_ee_original = self.apply_hand_eye_transform(xyz_camera_original)
+        xyz_ee_offset = self.apply_hand_eye_transform(xyz_camera_offset)
+        
+        if printlogger:
+            self.get_logger().info(f'Transformed {len(xyz_ee_original)} original points and {len(xyz_ee_offset)} offset points to end-effector frame')
+        
+        return xyz_ee_original, xyz_ee_offset
 
     def destroy_node(self):
         
