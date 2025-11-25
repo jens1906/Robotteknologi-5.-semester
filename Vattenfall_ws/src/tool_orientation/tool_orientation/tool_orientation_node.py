@@ -5,7 +5,7 @@ import numpy as np
 try:
     import rclpy
     from rclpy.node import Node
-    from std_msgs.msg import Float64MultiArray, MultiArrayDimension
+    from std_msgs.msg import Float64MultiArray, MultiArrayDimension, ByteMultiArray
     ROS2_AVAILABLE = True
 except ImportError:
     ROS2_AVAILABLE = False
@@ -308,7 +308,7 @@ if ROS2_AVAILABLE:
             
             #Subscriber for on_surface boolean array
             self.on_surface_sub = self.create_subscription(
-                Float64MultiArray,
+                ByteMultiArray,
                 '/path/on_surface',
                 self.on_surface_callback,
                 10

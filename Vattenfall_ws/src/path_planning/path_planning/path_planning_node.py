@@ -3,7 +3,7 @@ from shapely.geometry import Polygon, Point
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, ByteMultiArray
 
 from parameterization.msg import ParameterizationStatus
 from parameterization.srv import GetUVBounds
@@ -90,7 +90,7 @@ class PathPlanner(Node):
             10)
         
         self.on_surface_pub = self.create_publisher(
-            Float64MultiArray,
+            ByteMultiArray,
             '/path/on_surface',
             10)
                 
