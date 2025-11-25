@@ -29,14 +29,18 @@
     
     <!-- Disable collisions between end effector tool parts (camera holder and camera) -->
     <disable_collisions link1="tool0" link2="realsense_holder" reason="Adjacent"/>
+    <disable_collisions link1="tool0" link2="rsd435" reason="Adjacent"/>
     <disable_collisions link1="realsense_holder" link2="rsd435" reason="Adjacent"/>
     <disable_collisions link1="wrist_3_link" link2="realsense_holder" reason="Adjacent"/>
-    <disable_collisions link1="wrist_3_link" link2="rsd435" reason="Default"/>
-    <disable_collisions link1="wrist_2_link" link2="realsense_holder" reason="Default"/>
-    <disable_collisions link1="wrist_1_link" link2="realsense_holder" reason="Default"/>
-    <disable_collisions link1="wrist_1_link" link2="rsd435" reason="Default"/>
-    <disable_collisions link1="forearm_link" link2="realsense_holder" reason="Never"/>
-    <disable_collisions link1="forearm_link" link2="rsd435" reason="Never"/>
+    <disable_collisions link1="wrist_3_link" link2="rsd435" reason="Adjacent"/>
+    <disable_collisions link1="wrist_2_link" link2="realsense_holder" reason="Adjacent"/>
+    <disable_collisions link1="wrist_2_link" link2="rsd435" reason="Adjacent"/>
+    <disable_collisions link1="wrist_1_link" link2="realsense_holder" reason="Adjacent"/>
+    <disable_collisions link1="wrist_1_link" link2="rsd435" reason="Adjacent"/>
+    <disable_collisions link1="forearm_link" link2="realsense_holder" reason="Adjacent"/>
+    <disable_collisions link1="forearm_link" link2="rsd435" reason="Adjacent"/>
+    <disable_collisions link1="upper_arm_link" link2="realsense_holder" reason="Adjacent"/>
+    <disable_collisions link1="upper_arm_link" link2="rsd435" reason="Adjacent"/>
     
     <!-- Standard UR robot adjacent link collision pairs -->
     <disable_collisions link1="base_link" link2="base_link_inertia" reason="Adjacent"/>

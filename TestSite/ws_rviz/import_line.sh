@@ -2,7 +2,9 @@
 # Import scanning path visualization into running RViz
 # Run this AFTER launching ./launch_ur_moveit.sh
 
-cd /home/andr465m/Documents/GitHub/Robotteknologi-5.-semester/TestSite/ws_rviz
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
 source install/setup.bash
 
 echo "=========================================="
