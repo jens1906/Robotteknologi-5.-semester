@@ -30,6 +30,7 @@ install(PROGRAMS
   scripts/follow_path_ompl.py
   scripts/follow_path_corridor.py
   scripts/follow_path_cartesian.py
+  scripts/external_topic_simulator.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

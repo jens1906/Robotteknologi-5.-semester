@@ -21,8 +21,8 @@ source /opt/ros/jazzy/setup.bash
 # Launch ONLY the driver (no RViz)
 ros2 launch ur_robot_driver ur_control.launch.py \
     ur_type:=ur3e \
-    robot_ip:=192.168.0.100 \
-    use_mock_hardware:=false \
+    robot_ip:=192.168.56.2 \
+    use_mock_hardware:=true \
     launch_rviz:=false \
     kinematics_params_file:=${HOME}/ur3e_calibration.yaml
 

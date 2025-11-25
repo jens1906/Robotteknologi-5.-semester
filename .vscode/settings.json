@@ -1,4 +1,5 @@
 {
     "idf.pythonInstallPath": "/usr/bin/python3",
-    "ros.distro": "jazzy"
+    "ros.distro": "jazzy",
+    "cmake.sourceDirectory": "/home/andr465m/Documents/GitHub/Robotteknologi-5.-semester/TestSite/ws_moveit/src/moveit2/moveit"
 }

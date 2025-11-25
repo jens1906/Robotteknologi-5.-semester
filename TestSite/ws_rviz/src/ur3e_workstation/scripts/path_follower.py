@@ -92,7 +92,8 @@ class PathFollowerNode(Node):
         
         self.get_logger().info('Path Follower Node initialized!')
         self.get_logger().info(f'Waiting for path on topic: {self.get_parameter("path_topic").value}')
-        self.get_logger().info('Expected format: [R11, R12, R13, R21, R22, R23, R31, R32, R33, X, Y, Z, ...]')
+        self.get_logger().info('Expected format: [X1, Y1, Z1, R11, R12, R13, R21, R22, R23, R31, R32, R33, X2, Y2, Z2, ...]')
+        self.get_logger().info('Where X,Y,Z are positions in meters and R is a 3x3 rotation matrix')
         self.get_logger().info('Service /execute_cartesian_path available for path execution')
     
     def execute_path_service_callback(self, request, response):
@@ -117,15 +118,16 @@ class PathFollowerNode(Node):
     def path_callback(self, msg):
         """
         Callback for receiving path data.
-        Expected format: [R11, R12, R13, R21, R22, R23, R31, R32, R33, X, Y, Z, ...]
-        Where R is a 3x3 rotation matrix and X,Y,Z are positions in meters.
+        Expected format: [X1, Y1, Z1, R11, R12, R13, R21, R22, R23, R31, R32, R33, X2, Y2, Z2, ...]
+        Where X,Y,Z are positions in meters and R is a 3x3 rotation matrix.
+        Data will be reshaped to (N,12) before use.
         """
         self.get_logger().info(f'Received path with {len(msg.data)} elements')
         
         # Parse the data
         data = np.array(msg.data)
         
-        # Each waypoint has 12 values (9 for rotation matrix + 3 for position)
+        # Each waypoint has 12 values (3 for position + 9 for rotation matrix)
         if len(data) % 12 != 0:
             self.get_logger().error(f'Invalid path data length: {len(data)}. Must be multiple of 12.')
             return
@@ -133,20 +135,18 @@ class PathFollowerNode(Node):
         num_waypoints = len(data) // 12
         self.get_logger().info(f'Parsing {num_waypoints} waypoints...')
         
+        # Reshape data to (N,12) as requested :)
+        reshaped_data = data.reshape((num_waypoints, 12))
+        self.get_logger().info(f'Data reshaped to ({num_waypoints}, 12)')
+        
         # Parse waypoints
         self.waypoints = []
         for i in range(num_waypoints):
-            idx = i * 12
+            # Extract position first (indices 0,1,2)
+            position = reshaped_data[i, 0:3]
             
-            # Extract rotation matrix (row-major order)
-            rot_matrix = np.array([
-                [data[idx+0], data[idx+1], data[idx+2]],
-                [data[idx+3], data[idx+4], data[idx+5]],
-                [data[idx+6], data[idx+7], data[idx+8]]
-            ])
-            
-            # Extract position
-            position = np.array([data[idx+9], data[idx+10], data[idx+11]])
+            # Extract rotation matrix (indices 3-11, then reshape to 3x3)
+            rot_matrix = reshaped_data[i, 3:12].reshape((3, 3))
             
             # Convert rotation matrix to quaternion
             try:

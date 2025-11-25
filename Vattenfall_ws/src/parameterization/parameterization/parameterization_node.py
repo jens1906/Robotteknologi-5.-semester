@@ -443,7 +443,8 @@ class ParameterizationNode(Node):
     def get_uv_bounds_callback(self, request, response):
         """
         Service callback for getting UV parameter space bounds.
-        Returns corrosion UV bounds and boundary points if available, otherwise workspace bounds.
+        Returns corrosion UV bounds and boundary points.
+        Requires both workspace parameterization and corrosion bounds to be ready.
         """
         try:
             if not self.surf.is_ready:
@@ -451,31 +452,30 @@ class ParameterizationNode(Node):
                 response.message = 'Parameterization not ready. No point cloud received yet.'
                 return response
             
-            # Use corrosion bounds if available, otherwise use full workspace bounds
-            if self.corrosion_uv_bounds is not None:
-                bounds = self.corrosion_uv_bounds
-                self.get_logger().info('Returning corrosion UV bounds')
+            # Check if corrosion bounds are available
+            if self.corrosion_uv_bounds is None:
+                response.success = False
+                response.message = 'Corrosion bounds not available yet. Waiting for corrosion data to be processed.'
+                self.get_logger().warn('UV bounds requested but corrosion data not processed yet')
+                return response
+            
+            # Initialize boundary to empty
+            response.boundary = UVBoundary()
+            response.boundary.points = []
+            
+            # Return corrosion bounds
+            bounds = self.corrosion_uv_bounds
+            self.get_logger().info('Returning corrosion UV bounds')
+            
+            # Add boundary points if available
+            if self.corrosion_boundary_uv is not None:
+                for uv in self.corrosion_boundary_uv:
+                    point = UVPoint()
+                    point.u = float(uv[0])
+                    point.v = float(uv[1])
+                    response.boundary.points.append(point)
                 
-                # Add boundary points if available using custom message type
-                if self.corrosion_boundary_uv is not None:
-                    response.boundary = UVBoundary()
-                    response.boundary.points = []
-                    
-                    for uv in self.corrosion_boundary_uv:
-                        point = UVPoint()
-                        point.u = float(uv[0])
-                        point.v = float(uv[1])
-                        response.boundary.points.append(point)
-                    
-                    self.get_logger().info(f'Returning {len(self.corrosion_boundary_uv)} boundary points')
-                else:
-                    response.boundary = UVBoundary()
-                    response.boundary.points = []
-            else:
-                bounds = self.surf.get_uv_bounds()
-                self.get_logger().info('Returning workspace UV bounds (corrosion bounds not available)')
-                response.boundary = UVBoundary()
-                response.boundary.points = []  # No boundary points for workspace
+                self.get_logger().info(f'Returning {len(self.corrosion_boundary_uv)} boundary points')
             
             response.u_min = bounds['u_min']
             response.u_max = bounds['u_max']
