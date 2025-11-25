@@ -22,10 +22,9 @@
     <disable_collisions link1="bordplade" link2="upper_arm_link" reason="Never"/>
     <disable_collisions link1="mount" link2="upper_arm_link" reason="Default"/>
     
-    <!-- Disable collisions between test plate and robot (it's behind the robot) -->
-    <disable_collisions link1="testpladekurve" link2="base_link" reason="Never"/>
-    <disable_collisions link1="testpladekurve" link2="base_link_inertia" reason="Never"/>
-    <disable_collisions link1="testpladekurve" link2="shoulder_link" reason="Never"/>
+    <!-- ENABLE collisions between test plate and robot - DO NOT DISABLE -->
+    <!-- The robot should NOT pass through the test plate! -->
+    <!-- Removed all testpladekurve collision disables to enable proper collision detection -->
     
     <!-- Disable collisions between end effector tool parts (camera holder and camera) -->
     <disable_collisions link1="tool0" link2="realsense_holder" reason="Adjacent"/>
