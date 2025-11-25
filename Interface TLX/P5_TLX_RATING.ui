@@ -285,7 +285,7 @@
          </sizepolicy>
         </property>
         <property name="text">
-         <string>Export</string>
+         <string>Expor</string>
         </property>
        </widget>
       </item>
