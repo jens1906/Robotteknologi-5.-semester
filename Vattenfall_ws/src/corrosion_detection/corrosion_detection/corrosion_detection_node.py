@@ -355,8 +355,10 @@ class CorrosionDetector(Node):
         filled_mask = np.zeros_like(image[:, :, 0])
         cv.drawContours(filled_mask, contours, -1, 255, thickness=cv.FILLED)
         
-        # Apply 30mm offset by dilating the filled mask
-        offset_kernel_size = int(max(self.toolsizes) / 0.8) * 2 + 1  # Convert mm to pixels and ensure odd size
+        # Apply offset by dilating the filled mask to create workspace boundary
+        # Workspace scale factor: 3.0 = 3x bigger workspace area around corrosion
+        workspace_scale = 3.0
+        offset_kernel_size = int(max(self.toolsizes) / 0.8 * workspace_scale) * 2 + 1  # Scaled kernel size
         offset_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (offset_kernel_size, offset_kernel_size))
         filled_mask_offset = cv.dilate(filled_mask, offset_kernel, iterations=1)
 
@@ -405,13 +407,13 @@ class CorrosionDetector(Node):
             
             # Convert back to Cartesian coordinates (N, 3)
             xyz_base = xyz_base_homogeneous[:, :3]
-            
+            self.get_logger().info('Applied combined UR transformation to points')
             return xyz_base
         else:
             # If UR transformation not available, only apply hand-eye calibration
             xyz_ee_homogeneous = (self.T_camera_to_ee @ xyz_homogeneous.T).T
             xyz_ee = xyz_ee_homogeneous[:, :3]
-            
+            self.get_logger().warn('UR transformation not available, returning end-effector frame coordinates only')
             if printlogger:
                 self.get_logger().warn('Combined UR transformation not available, returning end-effector frame coordinates')
             
