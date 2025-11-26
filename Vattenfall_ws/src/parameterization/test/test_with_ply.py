@@ -1,6 +1,5 @@
 """
 Standalone test script for testing conformal parameterization with your PLY file.
-This implementation follows Amersdorfer et al. (2021).
 
 Usage:
     python test_with_ply.py <path_to_ply_file>
@@ -13,6 +12,9 @@ Example:
 import sys
 import os
 import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.patches import Circle
 
 
 def load_ply_file(filepath):
@@ -30,19 +32,195 @@ def load_ply_file(filepath):
         sys.exit(1)
 
 
+def create_interactive_visualization(surf, points):
+    """
+    Create interactive visualization showing UV space and XYZ space side-by-side.
+    User can hover/click in UV space to see corresponding XYZ location.
+    """
+    print("\n" + "=" * 70)
+    print("  INTERACTIVE VISUALIZATION")
+    print("=" * 70)
+    print("\nControls:")
+    print("  • Move mouse in UV space (left plot) to see XYZ mapping")
+    print("  • Click to place a marker")
+    print("  • Close window to exit")
+    print("=" * 70 + "\n")
+    
+    # Get UV bounds
+    bounds = surf.get_uv_bounds()
+    u_min, u_max = bounds['u_min'], bounds['u_max']
+    v_min, v_max = bounds['v_min'], bounds['v_max']
+    
+    # Create UV grid for surface visualization (lower resolution for performance)
+    n_grid_viz = 30
+    u_viz = np.linspace(u_min, u_max, n_grid_viz)
+    v_viz = np.linspace(v_min, v_max, n_grid_viz)
+    U_viz, V_viz = np.meshgrid(u_viz, v_viz)
+    uv_grid = np.column_stack([U_viz.ravel(), V_viz.ravel()])
+    
+    # Interpolate to get XYZ surface
+    print("Computing surface mesh for visualization...")
+    xyz_grid = surf.interpolate(uv_grid)
+    
+    # Filter out NaN values (outside convex hull)
+    valid_mask = ~np.isnan(xyz_grid).any(axis=1)
+    xyz_grid_valid = xyz_grid[valid_mask]
+    U_viz_valid = U_viz.ravel()[valid_mask].reshape(-1)
+    V_viz_valid = V_viz.ravel()[valid_mask].reshape(-1)
+    
+    # Reshape for surface plot
+    X_viz = xyz_grid_valid[:, 0].reshape(n_grid_viz, n_grid_viz) if len(xyz_grid_valid) == n_grid_viz**2 else None
+    Y_viz = xyz_grid_valid[:, 1].reshape(n_grid_viz, n_grid_viz) if len(xyz_grid_valid) == n_grid_viz**2 else None
+    Z_viz = xyz_grid_valid[:, 2].reshape(n_grid_viz, n_grid_viz) if len(xyz_grid_valid) == n_grid_viz**2 else None
+    
+    # Create figure with side-by-side plots
+    fig = plt.figure(figsize=(16, 7))
+    
+    # Left: UV space (2D)
+    ax_uv = fig.add_subplot(121)
+    ax_uv.set_title('UV Parameter Space\n(Hover/Click to Select)', fontsize=12, fontweight='bold')
+    ax_uv.set_xlabel('u', fontsize=11)
+    ax_uv.set_ylabel('v', fontsize=11)
+    ax_uv.set_aspect('equal')
+    ax_uv.grid(True, alpha=0.3)
+    
+    # Plot UV points as scatter
+    scatter_uv = ax_uv.scatter(surf.uv_params[:, 0], surf.uv_params[:, 1], 
+                               c='lightblue', s=1, alpha=0.5, label='UV points')
+    
+    # Hover/click marker in UV space
+    marker_uv, = ax_uv.plot([], [], 'ro', markersize=10, label='Selected point')
+    circle_uv = Circle((0, 0), 0, fill=False, color='red', linewidth=2)
+    ax_uv.add_patch(circle_uv)
+    circle_uv.set_visible(False)
+    
+    # Text annotation for UV coordinates
+    text_uv = ax_uv.text(0.02, 0.98, '', transform=ax_uv.transAxes, 
+                         verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                         fontsize=10)
+    
+    ax_uv.set_xlim(u_min - 0.1*(u_max-u_min), u_max + 0.1*(u_max-u_min))
+    ax_uv.set_ylim(v_min - 0.1*(v_max-v_min), v_max + 0.1*(v_max-v_min))
+    ax_uv.legend(loc='upper right')
+    
+    # Right: XYZ space (3D)
+    ax_xyz = fig.add_subplot(122, projection='3d')
+    ax_xyz.set_title('XYZ World Space\n(Corresponding Point)', fontsize=12, fontweight='bold')
+    ax_xyz.set_xlabel('X', fontsize=11)
+    ax_xyz.set_ylabel('Y', fontsize=11)
+    ax_xyz.set_zlabel('Z', fontsize=11)
+    
+    # Plot surface mesh or point cloud
+    if X_viz is not None and not np.isnan(X_viz).any():
+        # Plot as surface mesh
+        surf_plot = ax_xyz.plot_surface(X_viz, Y_viz, Z_viz, 
+                                        cmap='viridis', alpha=0.6, 
+                                        linewidth=0, antialiased=True,
+                                        shade=True)
+    else:
+        # Fallback: plot point cloud (subsample for performance)
+        subsample = min(5000, len(points))
+        indices = np.random.choice(len(points), subsample, replace=False)
+        ax_xyz.scatter(points[indices, 0], points[indices, 1], points[indices, 2],
+                      c=points[indices, 2], cmap='viridis', s=1, alpha=0.3)
+    
+    # Hover/click marker in XYZ space
+    marker_xyz, = ax_xyz.plot([], [], [], 'ro', markersize=10, label='Selected point')
+    
+    # Text annotation for XYZ coordinates
+    text_xyz = ax_xyz.text2D(0.02, 0.98, '', transform=ax_xyz.transAxes,
+                             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                             fontsize=10)
+    
+    ax_xyz.legend(loc='upper right')
+    
+    # Set equal aspect ratio for 3D plot
+    x_range = points[:, 0].max() - points[:, 0].min()
+    y_range = points[:, 1].max() - points[:, 1].min()
+    z_range = points[:, 2].max() - points[:, 2].min()
+    max_range = max(x_range, y_range, z_range)
+    x_mid = (points[:, 0].max() + points[:, 0].min()) / 2
+    y_mid = (points[:, 1].max() + points[:, 1].min()) / 2
+    z_mid = (points[:, 2].max() + points[:, 2].min()) / 2
+    ax_xyz.set_xlim(x_mid - max_range/2, x_mid + max_range/2)
+    ax_xyz.set_ylim(y_mid - max_range/2, y_mid + max_range/2)
+    ax_xyz.set_zlim(z_mid - max_range/2, z_mid + max_range/2)
+    
+    plt.tight_layout()
+    
+    # Event handler for mouse motion (real-time update)
+    def on_motion(event):
+        if event.inaxes == ax_uv:
+            u_hover = event.xdata
+            v_hover = event.ydata
+            
+            if u_hover is not None and v_hover is not None:
+                # Check if within bounds
+                if u_min <= u_hover <= u_max and v_min <= v_hover <= v_max:
+                    # Interpolate to get XYZ
+                    uv_query = np.array([[u_hover, v_hover]])
+                    xyz_query = surf.interpolate(uv_query)
+                    
+                    if not np.isnan(xyz_query).any():
+                        # Update UV marker
+                        marker_uv.set_data([u_hover], [v_hover])
+                        circle_uv.center = (u_hover, v_hover)
+                        circle_uv.radius = 0.02 * (u_max - u_min)
+                        circle_uv.set_visible(True)
+                        
+                        # Update XYZ marker
+                        marker_xyz.set_data([xyz_query[0, 0]], [xyz_query[0, 1]])
+                        marker_xyz.set_3d_properties([xyz_query[0, 2]])
+                        
+                        # Update text annotations
+                        text_uv.set_text(f'UV: ({u_hover:.4f}, {v_hover:.4f})')
+                        text_xyz.set_text(f'XYZ: ({xyz_query[0, 0]:.4f}, {xyz_query[0, 1]:.4f}, {xyz_query[0, 2]:.4f})')
+                        
+                        fig.canvas.draw_idle()
+    
+    # Event handler for mouse click (place persistent marker)
+    def on_click(event):
+        if event.inaxes == ax_uv and event.button == 1:  # Left click
+            u_click = event.xdata
+            v_click = event.ydata
+            
+            if u_click is not None and v_click is not None:
+                # Check if within bounds
+                if u_min <= u_click <= u_max and v_min <= v_click <= v_max:
+                    # Interpolate to get XYZ
+                    uv_query = np.array([[u_click, v_click]])
+                    xyz_query = surf.interpolate(uv_query)
+                    
+                    if not np.isnan(xyz_query).any():
+                        # Add persistent markers
+                        ax_uv.plot(u_click, v_click, 'g*', markersize=12, markeredgecolor='black', markeredgewidth=0.5)
+                        ax_xyz.plot([xyz_query[0, 0]], [xyz_query[0, 1]], [xyz_query[0, 2]], 
+                                   'g*', markersize=12, markeredgecolor='black', markeredgewidth=0.5)
+                        
+                        print(f"Clicked: UV=({u_click:.4f}, {v_click:.4f}) -> XYZ=({xyz_query[0, 0]:.4f}, {xyz_query[0, 1]:.4f}, {xyz_query[0, 2]:.4f})")
+                        
+                        fig.canvas.draw_idle()
+    
+    # Connect event handlers
+    fig.canvas.mpl_connect('motion_notify_event', on_motion)
+    fig.canvas.mpl_connect('button_press_event', on_click)
+    
+    plt.show()
+
+
 def test_parameterization(ply_file_path):
     """Test conformal parameterization with a PLY file"""
     
     # Import the module
     try:
-        from parameterization.conformal_parameterization import ConformalParameterization
+        from parameterization.surface_parameterization import Parameterization
     except ImportError:
         # Try adding parent directory to path
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-        from parameterization.conformal_parameterization import ConformalParameterization
+        from parameterization.surface_parameterization import Parameterization
     
     print("=" * 70)
-    print("  TESTING CONFORMAL PARAMETERIZATION (Amersdorfer et al. 2021)")
+    print("  TESTING CONFORMAL PARAMETERIZATION")
     print("=" * 70)
     
     # Load point cloud
@@ -59,7 +237,7 @@ def test_parameterization(ply_file_path):
     
     # Initialize parameterization
     print("\n2. Initializing conformal parameterization...")
-    surf = ConformalParameterization()
+    surf = Parameterization()
     surf.set_points(points)
     print("   Points set")
     
@@ -71,56 +249,48 @@ def test_parameterization(ply_file_path):
     print(f"   Principal axes computed (3x3 orthonormal matrix)")
     
     # Compute initial UV parameterization
-    print("\n4. Computing initial UV parameterization (projection method)...")
-    uv = surf.compute_initial_parameterization(method='projection')
+    print("\n4. Computing initial UV parameterization...")
+    uv = surf.compute_initial_parameterization()
     bounds = surf.get_uv_bounds()
     print(f"   Initial UV parameterization computed")
     print(f"   U range: [{bounds['u_min']:.3f}, {bounds['u_max']:.3f}]")
     print(f"   V range: [{bounds['v_min']:.3f}, {bounds['v_max']:.3f}]")
     
     # Compute surface metric tensor
-    print("\n5. Computing surface metric tensor...")
-    k_neighbors = min(20, len(points) // 10)
-    metric = surf.compute_surface_metric(k_neighbors=k_neighbors)
-    print(f"   Metric tensor computed using {k_neighbors} neighbors")
-    print(f"   Mean E (∂x/∂u magnitude²): {np.mean(metric[:, 0]):.6f}")
-    print(f"   Mean F (∂x/∂u · ∂x/∂v): {np.mean(metric[:, 1]):.6f}")
-    print(f"   Mean G (∂x/∂v magnitude²): {np.mean(metric[:, 2]):.6f}")
-    
-    # Apply conformal correction
-    print("\n6. Applying conformal correction...")
-    uv_corrected = surf.apply_conformal_correction(iterations=10, alpha=0.5)
-    bounds_after = surf.get_uv_bounds()
-    print(f"   Conformal correction applied (10 iterations, α=0.5)")
-    print(f"   U range after correction: [{bounds_after['u_min']:.3f}, {bounds_after['u_max']:.3f}]")
-    print(f"   V range after correction: [{bounds_after['v_min']:.3f}, {bounds_after['v_max']:.3f}]")
+    # print("\n5. Computing surface metric tensor...")
+    # k_neighbors = min(20, len(points) // 10)
+    # metric = surf.compute_surface_metric(k_neighbors=k_neighbors)
+    # print(f"   Metric tensor computed using {k_neighbors} neighbors")
+    # print(f"   Mean E (∂x/∂u magnitude²): {np.mean(metric[:, 0]):.6f}")
+    # print(f"   Mean F (∂x/∂u · ∂x/∂v): {np.mean(metric[:, 1]):.6f}")
+    # print(f"   Mean G (∂x/∂v magnitude²): {np.mean(metric[:, 2]):.6f}")
     
     # Build interpolation
-    print("\n7. Building inverse interpolation (RBF with 50 neighbors)...")
-    surf.build_inverse_interpolation(method='rbf', neighbors=50)
+    print("\n5. Building inverse interpolation...")
+    surf.build_inverse_interpolation()
     print(f"   Interpolation ready")
     
     # Evaluate quality
-    print("\n8. Evaluating quality metrics...")
-    sample_size = min(1000, len(points))
-    metrics = surf.evaluate_quality(sample_size=sample_size)
-    print(f"   Quality evaluation complete")
-    print(f"   Sample size: {metrics['sample_size']}/{metrics['total_points']} points")
-    print(f"   Mean error: {metrics['mean_error']:.6f}")
-    print(f"   Max error: {metrics['max_error']:.6f}")
-    print(f"   RMSE: {metrics['rmse']:.6f}")
-    print(f"   Std deviation: {metrics['std_error']:.6f}")
+    # print("\n7. Evaluating quality metrics...")
+    # sample_size = min(1000, len(points))
+    # metrics = surf.evaluate_quality(sample_size=sample_size)
+    # print(f"   Quality evaluation complete")
+    # print(f"   Sample size: {metrics['sample_size']}/{metrics['total_points']} points")
+    # print(f"   Mean error: {metrics['mean_error']:.6f}")
+    # print(f"   Max error: {metrics['max_error']:.6f}")
+    # print(f"   RMSE: {metrics['rmse']:.6f}")
+    # print(f"   Std deviation: {metrics['std_error']:.6f}")
     
-    # Conformal quality metrics
-    if 'mean_isotropy_error' in metrics:
-        print(f"\n   Conformal Quality Metrics:")
-        print(f"   Isotropy error: {metrics['mean_isotropy_error']:.6f} (closer to 0 is better)")
-        print(f"   Orthogonality error: {metrics['mean_orthogonality_error']:.6f} (closer to 0 is better)")
-        print(f"   Mean scale U: {metrics['mean_scale_u']:.6f}")
-        print(f"   Mean scale V: {metrics['mean_scale_v']:.6f}")
+    # # Conformal quality metrics
+    # if 'mean_isotropy_error' in metrics:
+    #     print(f"\n   Conformal Quality Metrics:")
+    #     print(f"   Isotropy error: {metrics['mean_isotropy_error']:.6f} (closer to 0 is better)")
+    #     print(f"   Orthogonality error: {metrics['mean_orthogonality_error']:.6f} (closer to 0 is better)")
+    #     print(f"   Mean scale U: {metrics['mean_scale_u']:.6f}")
+    #     print(f"   Mean scale V: {metrics['mean_scale_v']:.6f}")
     
     # Test interpolation
-    print("\n9. Testing interpolation...")
+    print("\n6. Testing interpolation...")
     n_test = min(10, len(points))
     test_indices = np.random.choice(len(points), n_test, replace=False)
     test_uv = surf.uv_params[test_indices]
@@ -134,7 +304,7 @@ def test_parameterization(ply_file_path):
     print(f"   Max error: {np.max(errors):.6f}")
     
     # Test frame transformations
-    print("\n10. Testing frame transformations...")
+    print("\n9. Testing frame transformations...")
     n_transform = min(20, len(points))
     test_points = points[:n_transform]
     
@@ -146,40 +316,47 @@ def test_parameterization(ply_file_path):
     print(f"    Max reconstruction error: {np.max(transform_errors):.10f}")
     
     # Generate example scanning path with equidistant spacing
-    print("\n11. Generating iso-parametric scanning path...")
-    desired_spacing = 0.05  # 5cm on surface
+    # print("\n8. Generating iso-parametric scanning path...")
+    # desired_spacing = 0.05  # 5cm on surface
     
-    # Compute equidistant UV spacing
-    spacing_u = surf.compute_equidistant_uv_spacing(desired_spacing, uv_direction='u')
-    spacing_v = surf.compute_equidistant_uv_spacing(desired_spacing, uv_direction='v')
+    # # Compute equidistant UV spacing
+    # spacing_u = surf.compute_equidistant_uv_spacing(desired_spacing, uv_direction='u')
+    # spacing_v = surf.compute_equidistant_uv_spacing(desired_spacing, uv_direction='v')
     
-    print(f"    Equidistant UV spacing for {desired_spacing*1000:.1f}mm:")
-    print(f"    Δu = {spacing_u:.6f}, Δv = {spacing_v:.6f}")
+    # print(f"    Equidistant UV spacing for {desired_spacing*1000:.1f}mm:")
+    # print(f"    Δu = {spacing_u:.6f}, Δv = {spacing_v:.6f}")
     
-    # Generate iso-v curves
-    num_passes = int((bounds_after['v_max'] - bounds_after['v_min']) / spacing_v)
-    num_passes = max(5, min(num_passes, 15))  # Between 5 and 15
-    points_per_pass = 20
+    # # Get current bounds
+    # current_bounds = surf.get_uv_bounds()
     
-    path_uv = []
-    for i in range(num_passes):
-        v = bounds_after['v_min'] + (bounds_after['v_max'] - bounds_after['v_min']) * i / (num_passes - 1)
-        u_line = np.linspace(bounds_after['u_min'], bounds_after['u_max'], points_per_pass)
+    # # Generate iso-v curves
+    # num_passes = int((current_bounds['v_max'] - current_bounds['v_min']) / spacing_v)
+    # num_passes = max(5, min(num_passes, 15))  # Between 5 and 15
+    # points_per_pass = 20
+    
+    # path_uv = []
+    # for i in range(num_passes):
+    #     v = current_bounds['v_min'] + (current_bounds['v_max'] - current_bounds['v_min']) * i / (num_passes - 1)
+    #     u_line = np.linspace(current_bounds['u_min'], current_bounds['u_max'], points_per_pass)
         
-        if i % 2 == 1:
-            u_line = u_line[::-1]  # Alternate direction
+    #     if i % 2 == 1:
+    #         u_line = u_line[::-1]  # Alternate direction
         
-        for u in u_line:
-            path_uv.append([u, v])
+    #     for u in u_line:
+    #         path_uv.append([u, v])
     
-    path_uv = np.array(path_uv)
-    path_3d = surf.interpolate(path_uv)
-    path_length = np.sum(np.linalg.norm(np.diff(path_3d, axis=0), axis=1))
+    # path_uv = np.array(path_uv)
+    # path_3d = surf.interpolate(path_uv)
+    # path_length = np.sum(np.linalg.norm(np.diff(path_3d, axis=0), axis=1))
     
-    print(f"    Generated iso-parametric scanning path")
-    print(f"    Waypoints: {len(path_3d)}")
-    print(f"    Path length: {path_length:.2f} units")
-    print(f"    Number of passes: {num_passes}")
+    # print(f"    Generated iso-parametric scanning path")
+    # print(f"    Waypoints: {len(path_3d)}")
+    # print(f"    Path length: {path_length:.2f} units")
+    # print(f"    Number of passes: {num_passes}")
+    
+    # Launch interactive visualization
+    print("\n8. Launching interactive visualization...")
+    create_interactive_visualization(surf, points)
     
     # Summary
     print("\n" + "=" * 70)
@@ -188,13 +365,13 @@ def test_parameterization(ply_file_path):
     print("\nSummary:")
     print(f"  • Point cloud: {len(points)} points")
     print(f"  • UV parameterization: {uv.shape}")
-    print(f"  • Metric tensor: {metric.shape}")
-    print(f"  • Quality RMSE: {metrics['rmse']:.6f}")
-    if 'mean_isotropy_error' in metrics:
-        print(f"  • Isotropy error: {metrics['mean_isotropy_error']:.6f}")
+    # print(f"  • Metric tensor: {metric.shape}")
+    # print(f"  • Quality RMSE: {metrics['rmse']:.6f}")
+    # if 'mean_isotropy_error' in metrics:
+    #     print(f"  • Isotropy error: {metrics['mean_isotropy_error']:.6f}")
     print(f"  • Interpolation: Working")
     print(f"  • Frame transformations: Working")
-    print(f"  • Path generation: Working")
+    # print(f"  • Path generation: Working")
     print("\n" + "=" * 70)
     
     return True
