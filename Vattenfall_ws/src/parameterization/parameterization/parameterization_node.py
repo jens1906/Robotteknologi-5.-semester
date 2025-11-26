@@ -395,6 +395,10 @@ class ParameterizationNode(Node):
             # Convert message to UV array
             uv_path = np.array(msg.data).reshape(-1, 2)
             
+            # Force print UV path stats
+            self.get_logger().warn(f'UV PATH RECEIVED: {len(uv_path)} points')
+            self.get_logger().warn(f'UV PATH RANGE: U=[{np.min(uv_path[:, 0]):.3f}, {np.max(uv_path[:, 0]):.3f}], V=[{np.min(uv_path[:, 1]):.3f}, {np.max(uv_path[:, 1]):.3f}]')
+            
             if len(uv_path) == 0:
                 self.get_logger().warn('Received empty UV path')
                 return

@@ -391,12 +391,20 @@ class CorrosionDetector(Node):
             if printlogger:
                 self.get_logger().warn('Combined UR transformation not available, returning end-effector frame coordinates')
             
-            return xyz_ee
+            return 
+            
+    def median_filter_depth(self, depth, kernel_size=10):
+        # Apply median filter to depth image to reduce noise
+        filtered_depth = cv.medianBlur(depth, kernel_size)
+        return filtered_depth
+    
 
     def combine_and_transform(self, scatter_data_tuple, depth, depthFiles=None):
         # Unpack the tuple (original, offset)
         scatter_data_original, scatter_data_offset = scatter_data_tuple
         
+        depth = self.median_filter_depth(depth, kernel_size=5)
+
         # Check if scatter_data is empty
         if scatter_data_offset is None or len(scatter_data_offset) == 0:
             if printlogger: self.get_logger().warn('No scatter data to transform')
