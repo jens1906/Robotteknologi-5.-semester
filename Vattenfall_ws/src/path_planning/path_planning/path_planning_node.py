@@ -354,6 +354,8 @@ class PathPlanner(Node):
         else:
             self.get_logger().warn('On-surface flags not available')
 
+        self.parameterization_ready = False  # Reset for next cycle
+
 
 def main():
     try:
