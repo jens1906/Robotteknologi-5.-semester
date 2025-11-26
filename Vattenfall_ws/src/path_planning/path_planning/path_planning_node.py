@@ -3,7 +3,7 @@ from shapely.geometry import Polygon, Point
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray, ByteMultiArray, Bool
+from std_msgs.msg import Float64MultiArray, ByteMultiArray, Bool, Float32MultiArray
 
 """
 Path Planner Node
@@ -81,11 +81,12 @@ class PathPlanner(Node):
         self.tool_size = tool_size
         self.received_bounds = uv_bounds is not None # True if uv_bounds has been received
         self.received_boundary = uv_boundary is not None # True if uv_boundary has been received
+        self.path_generated = False  # Track if path has been generated for current data
 
         if not test_active:
             # Subscriptions
             self.create_subscription(
-                Float64MultiArray,
+                Float32MultiArray,
                 '/corrosion/tool_size',
                 self.tool_size_callback,
                 10
@@ -161,13 +162,20 @@ class PathPlanner(Node):
             self.get_logger().error(f'Invalid UV bounds data length: {len(msg.data)} (expected 4)')
             return
         
-        self.uv_bounds = {
+        new_bounds = {
             'u_min': msg.data[0],
             'u_max': msg.data[1],
             'v_min': msg.data[2],
             'v_max': msg.data[3]
         }
+        
+        # Ignore if bounds haven't changed
+        if self.uv_bounds == new_bounds:
+            return
+        
+        self.uv_bounds = new_bounds
         self.received_bounds = True
+        self.path_generated = False  # New data, need to regenerate path
         self.get_logger().info(f'Received UV bounds: U=[{self.uv_bounds["u_min"]:.3f}, {self.uv_bounds["u_max"]:.3f}], '
                              f'V=[{self.uv_bounds["v_min"]:.3f}, {self.uv_bounds["v_max"]:.3f}]')
         self._try_generate_path()
@@ -194,6 +202,10 @@ class PathPlanner(Node):
 
     def _try_generate_path(self):
         """Attempt to generate path if all required data is available."""
+        # Skip if path already generated for current data
+        if self.path_generated:
+            return
+        
         if not self.parameterization_ready:
             self.get_logger().debug('Waiting for parameterization to be ready...')
             return
@@ -216,6 +228,7 @@ class PathPlanner(Node):
             self.generate_lines()
             self.create_continuous_path()
             self.publish_path()
+            self.path_generated = True  # Mark as generated
         except Exception as e:
             self.get_logger().error(f'Error generating path: {e}')
     
@@ -353,8 +366,6 @@ class PathPlanner(Node):
             self.get_logger().info('Published on-surface flags')
         else:
             self.get_logger().warn('On-surface flags not available')
-
-        self.parameterization_ready = False  # Reset for next cycle
 
 
 def main():
