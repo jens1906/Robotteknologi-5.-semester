@@ -52,8 +52,8 @@ class UserInterfaceNode(Node):
 
         self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
-        color_sub = message_filters.Subscriber(self, Image, '/realsense/camera_color_pub', qos_profile=image_qos)
-        depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub', qos_profile=image_qos)
+        color_sub = message_filters.Subscriber(self, Image, '/camera/color/image_raw', qos_profile=image_qos)
+        depth_sub = message_filters.Subscriber(self, Image, '/camera/aligned_depth_to_color/image_raw', qos_profile=image_qos)
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
         
@@ -63,7 +63,9 @@ class UserInterfaceNode(Node):
         self.get_logger().info('User Interface Node Initialized')
 
     def image_match(self, color_msg, depth_msg):
+        # RealSense wrapper publishes RGB8, convert to BGR8 for OpenCV/display
         color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
+        color_image = cv.cvtColor(color_image, cv.COLOR_RGB2BGR)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
         
         # Allocate corrosion_area_add and corrosion_area_remove only once on first image match
@@ -297,13 +299,16 @@ class UserInterface(QMainWindow):
 
     def reset_vision(self):
         self.ros_node.get_logger().info('Resetting vision areas')
-        h,w = self.corrosion_area_add.shape
-        self.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
-        self.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
-        self.undo_add_stack.clear() 
-        self.undo_remove_stack.clear()
-        self.ros_node.ui_corrosion_area_remove_pub.publish(self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8'))
-        self.ros_node.ui_corrosion_area_add_pub.publish(self.numpy_to_image_msg(self.corrosion_area_add, 'mono8'))
+        if self.corrosion_area_add is not None:
+            h, w = self.corrosion_area_add.shape
+            self.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
+            self.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
+            self.undo_add_stack.clear() 
+            self.undo_remove_stack.clear()
+            self.ros_node.ui_corrosion_area_remove_pub.publish(self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8'))
+            self.ros_node.ui_corrosion_area_add_pub.publish(self.numpy_to_image_msg(self.corrosion_area_add, 'mono8'))
+        else:
+            self.ros_node.get_logger().info('Corrosion areas not initialized yet, skipping reset')
 
         if printlogger: self.ros_node.get_logger().info('Resetting Vision')
 

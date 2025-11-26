@@ -36,9 +36,9 @@ class ExternalTopicSimulator(Node):
             t = i / (num_points - 1)
             
             # Create a curved path in XYZ
-            x = -0.1 + 0.2 * t  # -0.1 to 0.1m (left to right)
+            x = 0.2 + 0.2 * t  # -0.1 to 0.1m (left to right)
             y = -0.5 - 0.1 * np.sin(t * 2 * np.pi)  # Sine wave in Y
-            z = 0.3 + 0.05 * np.cos(t * 3 * np.pi)  # Cosine wave in Z
+            z = 0.2 + 0.05 * np.cos(t * 3 * np.pi)  # Cosine wave in Z
             
             # Create varying tool orientations
             # Base orientation: pointing down with some rotation

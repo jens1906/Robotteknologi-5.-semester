@@ -5,7 +5,9 @@ import numpy as np
 try:
     import rclpy
     from rclpy.node import Node
-    from std_msgs.msg import Float64MultiArray, MultiArrayDimension, ByteMultiArray
+    from std_msgs.msg import Float64MultiArray, ByteMultiArray
+    from geometry_msgs.msg import PoseArray, Pose
+    from scipy.spatial.transform import Rotation as R
     ROS2_AVAILABLE = True
 except ImportError:
     ROS2_AVAILABLE = False
@@ -147,29 +149,9 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
     return normalize(normal)
 
 
-def rotation_matrix_to_ijk(R):
-    #Compute ijk from rotation matrix
-    #Args: R(3,3) rotation matrix
-    #Returns: ijk vector(3)
-    #Dont need to comment math here, it is normal stuff from internet
-    angle = np.arccos((np.trace(R) - 1) / 2)
-    
-    if np.abs(angle) < 1e-10:
-        return np.array([0.0, 0.0, 0.0])
-    
-    axis = np.array([
-        R[2, 1] - R[1, 2],
-        R[0, 2] - R[2, 0],
-        R[1, 0] - R[0, 1]
-    ]) / (2 * np.sin(angle))
-    
-    ijk = axis * angle
-    return ijk
-
-
-def orientation_matrix_from_path(x, y, z, velocity, normal):
+def orientation_matrix_from_path(velocity, normal):
     #Compute orientation matrix at a point
-    #Args: x,y,z position, velocity (3,) vector, normal (3,) vector
+    #Args: velocity (3,) vector, normal (3,) vector
     #Returns: R (3, 3) rotation matrix
     
     #Tool z-axis points into surface (opposite of normal)
@@ -247,14 +229,13 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
     
     #Step 3: Process each point
     for i in range(n_points):
-        x, y, z = path_xyz[i]
         velocity = velocities[i]
         
         #Estimate surface normal from neighboring points
         normal = compute_normal_from_neighbors(path_xyz, i, neighbor_range)
         
         #Compute orientation matrix
-        R = orientation_matrix_from_path(x, y, z, velocity, normal)
+        R = orientation_matrix_from_path(velocity, normal)
         
         #Check for discontinuous orientation change
         if smooth_orientations and i > 0:
@@ -267,7 +248,7 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
             #If orientation changes by more than 90 degrees, likely a sign flip
             if angle_diff > np.pi / 2:
                 #Check if flipping the normal reduces the discontinuity
-                R_flipped = orientation_matrix_from_path(x, y, z, velocity, -normal)
+                R_flipped = orientation_matrix_from_path(velocity, -normal)
                 R_diff_flipped = R_prev.T @ R_flipped
                 trace_flipped = np.trace(R_diff_flipped)
                 angle_flipped = np.arccos(np.clip((trace_flipped - 1) / 2, -1, 1))
@@ -275,12 +256,6 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
                 if angle_flipped < angle_diff:
                     R = R_flipped
         
-        """
-        If ijk is needed, then run this to convert to ijk!
-        ijk = rotation_matrix_to_ijk(R)
-        orientations[i] = ijk
-        """
-
         orientations[i] = R
     
     return path_xyz, orientations
@@ -291,10 +266,10 @@ if ROS2_AVAILABLE:
         def __init__(self):
             super().__init__('tool_orientation_node')
             
-            #Publisher for positions and rotation matrices
+            #Publisher for trajectory with quaternions (unified format)
             self.trajectory_pub = self.create_publisher(
-                Float64MultiArray,
-                '/tool_orientation/xyz_rotation',
+                PoseArray,
+                '/tool_orientation/path',
                 10
             )
             
@@ -318,6 +293,7 @@ if ROS2_AVAILABLE:
             self.declare_parameter('dt', 0.1)
             self.declare_parameter('neighbor_range', 3)
             self.declare_parameter('off_surface_height', 0.05)  # 5 cm in meters
+            self.declare_parameter('frame_id', 'ee_link')  # Coordinate frame for visualization
             
             #Storage for received data
             self.path_xyz = None
@@ -325,47 +301,26 @@ if ROS2_AVAILABLE:
             self.data_processed = False  # Flag to avoid reprocessing same data
             
             self.get_logger().info('Tool Orientation Node initialized')
-            self.get_logger().info('Waiting for path on topic: /parameterization/xyz_path')
-            self.get_logger().info('Waiting for on_surface data on topic: /path/on_surface')
+            self.get_logger().info('Publishing to: /tool_orientation/path (PoseArray with quaternions)')
         
         def on_surface_callback(self, msg):
             #Callback for receiving on_surface boolean array
-            #Expected input: Float64MultiArray with [bool1, bool2, ...] as floats (0.0 or 1.0)
             self.on_surface = np.array(msg.data, dtype=bool)
-            self.data_processed = False  # New data received, reset flag
-            self.get_logger().info(f'Received on_surface data with {len(self.on_surface)} points')
-            
-            #Try to process if we have both path and on_surface data
+            self.data_processed = False
             self.try_process_data()
         
         def path_callback(self, msg):
             #Callback for receiving path points and computing orientations
             #Expected input: Float64MultiArray with [x1, y1, z1, x2, y2, z2, ...]
-            self.get_logger().info(f'Received path on topic: /parameterization/xyz_path')
-            
-            #Reshape data to (N, 3)
             n_points = len(msg.data) // 3
             self.path_xyz = np.array(msg.data).reshape(n_points, 3)
-            self.data_processed = False  # New data received, reset flag
-            
-            self.get_logger().info(f'Received path with {n_points} points')
-            
-            #Try to process if we have both path and on_surface data
+            self.data_processed = False
+            self.get_logger().info(f'Received {n_points} path points')
             self.try_process_data()
         
         def try_process_data(self):
             #Process data only when both path and on_surface are available
-            if self.path_xyz is None:
-                self.get_logger().info('Waiting for path data...')
-                return
-            
-            if self.on_surface is None:
-                self.get_logger().info('Waiting for on_surface data...')
-                return
-            
-            #Skip if data already processed
-            if self.data_processed:
-                self.get_logger().debug('Data already processed, skipping...')
+            if self.path_xyz is None or self.on_surface is None or self.data_processed:
                 return
             
             #Check that arrays are aligned
@@ -395,9 +350,9 @@ if ROS2_AVAILABLE:
         
         def compute_and_publish_orientations(self, path_xyz, on_surface, dt=0.1, neighbor_range=3, off_surface_height=0.05):
             #Compute orientations and publish positions + rotation matrices
-            
-            # INPUT: path_xyz is in MILLIMETERS (from camera/corrosion detection)
-            # OUTPUT: positions should be in METERS (for robot)
+
+            #INPUT: path_xyz is in MILLIMETERS (from camera/corrosion detection)
+            #OUTPUT: positions should be in METERS (for robot)
             
             self.get_logger().info(f'Input path_xyz range: X=[{np.min(path_xyz[:,0]):.1f}, {np.max(path_xyz[:,0]):.1f}] mm')
             self.get_logger().info(f'                      Y=[{np.min(path_xyz[:,1]):.1f}, {np.max(path_xyz[:,1]):.1f}] mm')
@@ -426,37 +381,38 @@ if ROS2_AVAILABLE:
             self.get_logger().info(f'                        Y=[{np.min(adjusted_positions[:,1]):.4f}, {np.max(adjusted_positions[:,1]):.4f}] m')
             self.get_logger().info(f'                        Z=[{np.min(adjusted_positions[:,2]):.4f}, {np.max(adjusted_positions[:,2]):.4f}] m')
             
-            #Create Float64MultiArray message
-            trajectory_msg = Float64MultiArray()
+            #Create PoseArray message with positions + quaternions
+            trajectory_msg = PoseArray()
+            trajectory_msg.header.stamp = self.get_clock().now().to_msg()
+            trajectory_msg.header.frame_id = self.get_parameter('frame_id').value
             
-            #Setup dimensions: [n_points, 12] where each row is [x, y, z, r11, r12, r13, r21, r22, r23, r31, r32, r33]
-            # NOTE: x, y, z are in METERS, rotation matrix is unitless
-            dim_points = MultiArrayDimension()
-            dim_points.label = "points"
-            dim_points.size = len(adjusted_positions)
-            dim_points.stride = len(adjusted_positions) * 12
-            
-            dim_data = MultiArrayDimension()
-            dim_data.label = "data"
-            dim_data.size = 12
-            dim_data.stride = 12
-            
-            trajectory_msg.layout.dim = [dim_points, dim_data]
-            trajectory_msg.layout.data_offset = 0
-            
-            #Flatten data: [x, y, z, rotation_matrix_flattened]
             for i in range(len(adjusted_positions)):
-                trajectory_msg.data.append(float(adjusted_positions[i][0]))
-                trajectory_msg.data.append(float(adjusted_positions[i][1]))
-                trajectory_msg.data.append(float(adjusted_positions[i][2]))
+                pose = Pose()
+                #Position in meters
+                pose.position.x = float(adjusted_positions[i][0])
+                pose.position.y = float(adjusted_positions[i][1])
+                pose.position.z = float(adjusted_positions[i][2])
                 
-                #Flatten rotation matrix (row-major)
-                R_flat = orientations[i].flatten()
-                for val in R_flat:
-                    trajectory_msg.data.append(float(val))
+                #Convert rotation matrix to quaternion
+                try:
+                    rot = R.from_matrix(orientations[i])
+                    quat = rot.as_quat()  # Returns [x, y, z, w]
+                    pose.orientation.x = float(quat[0])
+                    pose.orientation.y = float(quat[1])
+                    pose.orientation.z = float(quat[2])
+                    pose.orientation.w = float(quat[3])
+                except Exception as e:
+                    self.get_logger().warn(f'Failed to convert orientation at point {i}: {e}')
+                    #Default to identity quaternion if conversion fails
+                    pose.orientation.x = 0.0
+                    pose.orientation.y = 0.0
+                    pose.orientation.z = 0.0
+                    pose.orientation.w = 1.0
+                
+                trajectory_msg.poses.append(pose)
             
             self.trajectory_pub.publish(trajectory_msg)
-            self.get_logger().info(f'Published {len(adjusted_positions)} waypoints with rotation matrices')
+            self.get_logger().info(f'Published {len(adjusted_positions)} waypoints with quaternions')
             
             return adjusted_positions, orientations
 
@@ -477,23 +433,3 @@ if ROS2_AVAILABLE:
 else:
     if __name__ == '__main__':
         print("ROS2 mode disabled. Import this module to use compute_orientations_from_xyz() function.")
-
-#Compute orientations
-#   positions, orientations = compute_orientations_from_xyz(path_xyz)
-    
-#Display results
-"""
-    print("Tool Orientation Computation Complete")
-    print(f"Number of waypoints: {len(positions)}")
-    print(f"\nExample - Point 25:")
-    print(f"  Position: {positions[25]}")
-    print(f"  Orientation matrix:\n{orientations[25]}")
-    print(f"  Determinant (should be ~1): {np.linalg.det(orientations[25]):.6f}")
-    
-    #Save results
-    np.save('positions_xyz.npy', positions)
-    np.save('orientations_xyz.npy', orientations)
-    print(f"\nSaved:")
-    print(f"  - positions_xyz.npy: {positions.shape}")
-    print(f"  - orientations_xyz.npy: {orientations.shape}")
-"""
