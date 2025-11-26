@@ -125,7 +125,7 @@ class PathPlanner(Node):
             
             self.reset_parameteration_ready = self.create_publisher(
                 Bool,
-                '/parameterization/reset_ready',
+                '//parameterization/ready',
                 10)
                     
             # Debug info
