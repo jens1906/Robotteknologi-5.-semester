@@ -26,20 +26,19 @@
     <!-- The robot should NOT pass through the test plate! -->
     <!-- Removed all testpladekurve collision disables to enable proper collision detection -->
     
-    <!-- Disable collisions between end effector tool parts (camera holder and camera) -->
+    <!-- Disable collisions ONLY between truly adjacent/fixed parts -->
+    <!-- Camera assembly is fixed to tool0/wrist_3, so disable those -->
     <disable_collisions link1="tool0" link2="realsense_holder" reason="Adjacent"/>
     <disable_collisions link1="tool0" link2="rsd435" reason="Adjacent"/>
     <disable_collisions link1="realsense_holder" link2="rsd435" reason="Adjacent"/>
     <disable_collisions link1="wrist_3_link" link2="realsense_holder" reason="Adjacent"/>
     <disable_collisions link1="wrist_3_link" link2="rsd435" reason="Adjacent"/>
-    <disable_collisions link1="wrist_2_link" link2="realsense_holder" reason="Adjacent"/>
-    <disable_collisions link1="wrist_2_link" link2="rsd435" reason="Adjacent"/>
-    <disable_collisions link1="wrist_1_link" link2="realsense_holder" reason="Adjacent"/>
-    <disable_collisions link1="wrist_1_link" link2="rsd435" reason="Adjacent"/>
-    <disable_collisions link1="forearm_link" link2="realsense_holder" reason="Adjacent"/>
-    <disable_collisions link1="forearm_link" link2="rsd435" reason="Adjacent"/>
-    <disable_collisions link1="upper_arm_link" link2="realsense_holder" reason="Adjacent"/>
-    <disable_collisions link1="upper_arm_link" link2="rsd435" reason="Adjacent"/>
+    <disable_collisions link1="wrist_2_link" link2="realsense_holder" reason="Never"/>
+    <disable_collisions link1="wrist_2_link" link2="rsd435" reason="Never"/>
+    
+    <!-- IMPORTANT: Enable collisions between forearm/upper_arm and camera! -->
+    <!-- The robot CAN hit its own camera if it folds back - must check this! -->
+    <!-- Removed forearm/upper_arm collision disables to prevent self-collision -->
     
     <!-- Standard UR robot adjacent link collision pairs -->
     <disable_collisions link1="base_link" link2="base_link_inertia" reason="Adjacent"/>

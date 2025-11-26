@@ -21,7 +21,7 @@ source /opt/ros/jazzy/setup.bash
 # Launch with REAL hardware
 ros2 launch ur_robot_driver ur_control.launch.py \
     ur_type:=ur3e \
-    robot_ip:=192.168.56.2 \
+    robot_ip:=192.168.56.101 \
     use_mock_hardware:=false \
     launch_rviz:=false \
     controller_manager.ros__parameters.update_rate:=100 \
