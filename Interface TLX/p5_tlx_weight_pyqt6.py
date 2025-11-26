@@ -52,8 +52,13 @@ class TLXWeightWindow(QMainWindow):
         self._current_index = 0
         self._pages: List[QObject] = []
         self._page_buttons: List[List[QPushButton]] = []
+        self._home_buttons: List[QPushButton] = []
+        self._home_to_page: Dict[QPushButton, int] = {}
+        self._completed_pairs: Dict[int, bool] = {}
+        self._pair_selection: Dict[int, str] = {}
         self._collect_pages()
-        self._wire_buttons()
+        self._wire_home_buttons()
+        self._wire_pair_pages()
         self._update_window_title()
 
     def _collect_pages(self):
@@ -70,39 +75,89 @@ class TLXWeightWindow(QMainWindow):
             filtered = [b for b in buttons if b.text().strip()]
             self._page_buttons.append(filtered)
 
-    def _wire_buttons(self):
-        for page_idx, buttons in enumerate(self._page_buttons):
-            # Expect 2 buttons per pairwise comparison page.
+        # Assume page 0 is the home page containing 15 pair selector buttons
+        if len(self._page_buttons) == 0:
+            QMessageBox.critical(self, "Error", "No pages found in stackedWidget")
+            raise RuntimeError("no pages")
+        self._home_buttons = self._page_buttons[0]
+        # Try to detect an explicit Export button on the home page
+        self._export_button = None
+        for b in self._home_buttons:
+            if "export" in b.text().lower():
+                self._export_button = b
+                break
+        # Map home buttons to subsequent pages (1..N-1). If counts mismatch, map as far as possible.
+        for idx, btn in enumerate(self._home_buttons, start=1):
+            if idx < count:
+                self._home_to_page[btn] = idx
+                self._completed_pairs[idx] = False
+
+    def _wire_home_buttons(self):
+        # Clicking a home button should navigate to its pair page
+        for btn, page_idx in self._home_to_page.items():
+            btn.clicked.connect(lambda checked=False, b=btn, i=page_idx: self._open_pair_page(b, i))
+        if self._export_button is not None:
+            self._export_button.clicked.connect(self._export)
+
+    def _wire_pair_pages(self):
+        # On pair pages, expect exactly two buttons representing the two dimensions
+        for page_idx in range(1, len(self._page_buttons)):
+            buttons = self._page_buttons[page_idx]
             if len(buttons) < 2:
                 continue
-            for btn in buttons:
-                btn.clicked.connect(lambda checked=False, b=btn, i=page_idx: self._handle_choice(b, i))
+            a_btn, b_btn = buttons[0], buttons[1]
+            a_btn.clicked.connect(lambda checked=False, b=a_btn, i=page_idx: self._choose_on_pair_page(b, i))
+            b_btn.clicked.connect(lambda checked=False, b=b_btn, i=page_idx: self._choose_on_pair_page(b, i))
 
-    def _handle_choice(self, button: QPushButton, page_index: int):
-        # Parse the pair from the button label ("A\nor\nB")
+    def _open_pair_page(self, home_button: QPushButton, page_index: int):
+        self.stacked.setCurrentIndex(page_index)
+        self._update_window_title()
+
+    def _choose_on_pair_page(self, button: QPushButton, page_index: int):
+        # Determine chosen dimension from the clicked button's text
         a, b = parse_button_text(button.text())
-        # If we failed to get a proper pair, just advance (nothing counted)
-        if not b or a == b:
-            QMessageBox.warning(self, "Pair Parse", f"Could not parse a pair from: '{button.text()}'")
-            self._advance()
-            return
-
-        # Ask user which dimension contributed more workload.
-        box = QMessageBox(self)
-        box.setWindowTitle("Select Dimension")
-        box.setText(f"Which contributed more to workload?\n\n{a} OR {b}")
-        btn_a = box.addButton(a, QMessageBox.ButtonRole.AcceptRole)
-        btn_b = box.addButton(b, QMessageBox.ButtonRole.DestructiveRole)
-        box.exec()
-        clicked = box.clickedButton()
-        chosen = a if clicked == btn_a else b
-        # Sanity check / fallback
+        # If parsing fails, treat the entire text as one dimension name
+        chosen = a if a else button.text().strip()
         if chosen not in self.weights:
-            QMessageBox.warning(self, "Unrecognized", f"Chosen dimension '{chosen}' not in known list; ignoring.")
-            self._advance()
-            return
+            # try second part
+            if b in self.weights:
+                chosen = b
+            else:
+                # fuzzy containment
+                lowered = chosen.lower()
+                matched = None
+                for dim in self.weights.keys():
+                    if dim.lower() in lowered:
+                        matched = dim
+                        break
+                if matched:
+                    chosen = matched
+                else:
+                    QMessageBox.warning(self, "Unrecognized", f"Could not map '{button.text()}' to a known dimension; ignoring.")
+                    # Return to home
+                    self.stacked.setCurrentIndex(0)
+                    self._update_window_title()
+                    return
+
+        # If this pair had a previous selection, remove its count first
+        prev = self._pair_selection.get(page_index)
+        if prev and prev in self.weights:
+            self.weights[prev] = max(0, self.weights[prev] - 1)
+        # Apply new selection
         self.weights[chosen] += 1
-        self._advance()
+        self._pair_selection[page_index] = chosen
+        self._completed_pairs[page_index] = True
+        # Find corresponding home button and mark it green
+        home_btn = None
+        for hb, idx in self._home_to_page.items():
+            if idx == page_index:
+                home_btn = hb
+                break
+        if home_btn is not None:
+            home_btn.setStyleSheet("background-color: #5cb85c; color: white;")
+        # Navigate back to home
+        self.stacked.setCurrentIndex(0)
+        self._update_window_title()
 
     def _advance(self):
         self._current_index += 1
@@ -133,13 +188,11 @@ class TLXWeightWindow(QMainWindow):
         )
         if not filename:
             return
-        total_pairs = sum(self.weights.values()) or 1
-        # Compute normalized weights (percentage)
+        # Export raw counts only, one per line as "Name: count"
         lines = []
         for dim in DIMENSION_NAMES:
-            raw = self.weights[dim]
-            pct = raw / total_pairs * 100.0
-            lines.append(f"{dim}: {raw} ({pct:.1f}%)")
+            raw = self.weights.get(dim, 0)
+            lines.append(f"{dim}: {raw}")
         content = "\n".join(lines) + "\n"
         with open(filename, "w", encoding="utf-8") as f:
             f.write(content)
