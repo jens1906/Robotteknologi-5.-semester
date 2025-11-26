@@ -39,74 +39,101 @@ Notes:
 class PathPlanner(Node):
     """ Path Planner"""
     
-    def __init__(self):
-        super().__init__('path_planner_node') # Initialize ROS2 node
+    def __init__(self, point_spacing=None, line_spacing=None, n_bezier=None, 
+                 uv_bounds=None, uv_boundary=None, tool_size=None, test_active=False):
+        """
+        Initialize PathPlanner.
+        
+        Args:
+            point_spacing: Spacing between points along lines (V direction) in mm
+            line_spacing: Spacing between lines (U direction) in mm
+            n_bezier: Number of n points to make the Bézier curves
+            tool_size: Tool size in mm
+            test_active: If True, do not initialize ROS (for testing)
+        """
+        self.test_active = test_active
+        
+        if not test_active:
+            super().__init__('path_planner_node') # Initialize ROS2 node
 
-        self.declare_parameter('point_spacing', 1)  # Spacing between points along lines (V direction) - mm
-        self.declare_parameter('line_spacing', 25.0)  # Spacing between scan lines (U direction) - mm
-        self.declare_parameter('n_bezier', 50)  # Number of points for generating connecting curves - n
+            self.declare_parameter('point_spacing', 1)
+            self.declare_parameter('line_spacing', 25.0)
+            self.declare_parameter('n_bezier', 50)
 
-        # Load parameters
-        self.point_spacing = self.get_parameter('point_spacing').value
-        self.line_spacing = self.get_parameter('line_spacing').value
-        self.n_bezier = self.get_parameter('n_bezier').value
+            # Load parameters from ROS if not provided
+            self.point_spacing = point_spacing if point_spacing is not None else self.get_parameter('point_spacing').value
+            self.line_spacing = line_spacing if line_spacing is not None else self.get_parameter('line_spacing').value
+            self.n_bezier = n_bezier if n_bezier is not None else self.get_parameter('n_bezier').value
+        else:
+            # Test mode - use provided values or defaults
+            self.point_spacing = point_spacing if point_spacing is not None else 1
+            self.line_spacing = line_spacing if line_spacing is not None else 25.0
+            self.n_bezier = n_bezier if n_bezier is not None else 50
+        
         self.tau = np.linspace(0, 1, self.n_bezier)
 
         # Data holders
-        self.uv_boundary = None # Boundary of the surface in UV space
-        self.uv_bounds = None # UV bounds dict with u_min, u_max, v_min, v_max
+        self.uv_boundary = uv_boundary  # Detected area with corrosion
+        self.uv_bounds = uv_bounds  # Bounds of the boundary
         self.uv_path = None # Final path in UV space
         self.on_surface = None # Flags for points on/off surface
-        self.parameterization_ready = False # Initially not ready
-        self.tool_size = None  # Will be set by tool_size_callback
-        self.received_bounds = False
-        self.received_boundary = False
+        self.parameterization_ready = test_active # True when the module should generate path
+        self.tool_size = tool_size
+        self.received_bounds = uv_bounds is not None # True if uv_bounds has been received
+        self.received_boundary = uv_boundary is not None # True if uv_boundary has been received
 
-        # Subscriptions
-        self.create_subscription(
-            Float64MultiArray,
-            '/corrosion/tool_size',
-            self.tool_size_callback,
-            10
-        )
+        if not test_active:
+            # Subscriptions
+            self.create_subscription(
+                Float64MultiArray,
+                '/corrosion/tool_size',
+                self.tool_size_callback,
+                10
+            )
 
-        self.create_subscription(
-            Bool,
-            '/parameterization/ready',
-            self.ready_callback,
-            10
-        )
-        
-        self.create_subscription(
-            Float64MultiArray,
-            '/parameterization/uv_bounds',
-            self.uv_bounds_callback,
-            10
-        )
-        
-        self.create_subscription(
-            Float64MultiArray,
-            '/parameterization/uv_boundary',
-            self.uv_boundary_callback,
-            10
-        )
+            self.create_subscription(
+                Bool,
+                '/parameterization/ready',
+                self.ready_callback,
+                10
+            )
+            
+            self.create_subscription(
+                Float64MultiArray,
+                '/parameterization/uv_bounds',
+                self.uv_bounds_callback,
+                10
+            )
+            
+            self.create_subscription(
+                Float64MultiArray,
+                '/parameterization/uv_boundary',
+                self.uv_boundary_callback,
+                10
+            )
 
-        # Publishers
-        self.uv_path_pub = self.create_publisher(
-            Float64MultiArray,
-            '/path/uv_path',
-            10)
-        
-        self.on_surface_pub = self.create_publisher(
-            ByteMultiArray,
-            '/path/on_surface',
-            10)
-                
-        # Debug info
-        self.get_logger().info('Path Planner node initialized')
-        self.get_logger().info(f'  Point spacing (V direction): {self.point_spacing}')
-        self.get_logger().info(f'  Line spacing (U direction): {self.line_spacing}')
-        self.get_logger().info(f'  Bezier points: {self.n_bezier}')
+            # Publishers
+            self.uv_path_pub = self.create_publisher(
+                Float64MultiArray,
+                '/path/uv_path',
+                10)
+            
+            self.on_surface_pub = self.create_publisher(
+                ByteMultiArray,
+                '/path/on_surface',
+                10)
+                    
+            # Debug info
+            self.get_logger().info('Path Planner node initialized')
+            self.get_logger().info(f'  Point spacing (V direction): {self.point_spacing}')
+            self.get_logger().info(f'  Line spacing (U direction): {self.line_spacing}')
+            self.get_logger().info(f'  Bezier points: {self.n_bezier}')
+        else:
+            # Test mode - Info
+            print('Path Planner initialized (test_active mode)')
+            print(f'  Point spacing (V direction): {self.point_spacing}')
+            print(f'  Line spacing (U direction): {self.line_spacing}')
+            print(f'  Bezier points: {self.n_bezier}')
 
 
     def ready_callback(self, msg):
@@ -186,8 +213,8 @@ class PathPlanner(Node):
         # All data available, generate path
         self.get_logger().info('All data received. Generating path...')
         try:
-            self.generate_lines()  # This calls adjust_lines() internally
-            self.uv_path = self.create_continuous_path()
+            self.generate_lines()
+            self.create_continuous_path()
             self.publish_path()
         except Exception as e:
             self.get_logger().error(f'Error generating path: {e}')
@@ -199,8 +226,12 @@ class PathPlanner(Node):
             self.tool_size = msg.data[1]
             # Line spacing should be 2 * tool_radius for full coverage with overlap
             self.line_spacing = 2 * self.tool_size
-            self.get_logger().info(f'Tool size updated: {self.tool_size:.3f}')
-            self.get_logger().info(f'Line spacing updated: {self.line_spacing:.3f}')
+            if not self.test_active:
+                self.get_logger().info(f'Tool size updated: {self.tool_size:.3f}')
+                self.get_logger().info(f'Line spacing updated: {self.line_spacing:.3f}')
+            else:
+                print(f'Tool size updated: {self.tool_size:.3f}')
+                print(f'Line spacing updated: {self.line_spacing:.3f}')
 
 
     def adjust_lines(self):
@@ -223,16 +254,14 @@ class PathPlanner(Node):
 
         # Apply tool_size/2 offset from borders
         offset = self.tool_size / 2
-        u_min_offset = u_min + offset
-        u_max_offset = u_max - offset
         v_min_offset = v_min + offset
         v_max_offset = v_max - offset
 
         line_n = int(np.ceil((v_max_offset - v_min_offset) / self.line_spacing)) + 1
-        points_per_line = int(np.ceil((u_max_offset - u_min_offset) / self.point_spacing)) + 1
+        points_per_line = int(np.ceil((u_max - u_min) / self.point_spacing)) + 1
 
-        v_lines_pos = np.linspace(v_min_offset, v_max_offset, line_n)
-        u_base = np.linspace(u_min_offset, u_max_offset, points_per_line)
+        v_lines_pos = np.linspace(v_max_offset, v_min_offset, line_n)
+        u_base = np.linspace(u_min, u_max, points_per_line)
 
         u_lines, v_lines = [], []
         for i, v_pos in enumerate(v_lines_pos):
@@ -297,8 +326,8 @@ class PathPlanner(Node):
 
             # Store on_surface flags for use in publish_path
             self.continuous_on_surface = np.array(on_surface)
+            self.uv_path = np.vstack(path)
             
-            return np.vstack(path)
     
         except Exception as e:
             self.get_logger().error(f"Error in create_continuous_path: {str(e)}")
@@ -318,7 +347,8 @@ class PathPlanner(Node):
 
         # Publish on-surface flags
         if hasattr(self, 'continuous_on_surface'):
-            on_surface_msg = Float64MultiArray(data=self.continuous_on_surface.astype(float).tolist())
+            on_surface_msg = ByteMultiArray()
+            on_surface_msg.data = bytes(self.continuous_on_surface.astype(np.uint8).tolist())
             self.on_surface_pub.publish(on_surface_msg)
             self.get_logger().info('Published on-surface flags')
         else:
