@@ -1,4 +1,5 @@
 planning_plugin: ompl_interface/OMPLPlanner
+planning_time: 10.0
 request_adapters: >-
   default_planner_request_adapters/AddTimeOptimalParameterization
   default_planner_request_adapters/ResolveConstraintFrames
@@ -39,3 +40,4 @@ ur3e_manipulator:
     - PRMstar
   projection_evaluator: joints(shoulder_pan_joint,shoulder_lift_joint)
   longest_valid_segment_fraction: 0.005
+  planning_time: 10.0

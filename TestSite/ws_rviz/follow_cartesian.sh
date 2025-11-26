@@ -2,7 +2,9 @@
 # Follow the scanning path using Cartesian path planning
 # This creates ONE SMOOTH continuous motion without stopping
 
-cd /home/andr465m/Documents/GitHub/Robotteknologi-5.-semester/TestSite/ws_rviz
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
 source install/setup.bash
 
 echo "=========================================="

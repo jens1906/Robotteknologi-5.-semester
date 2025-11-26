@@ -148,6 +148,16 @@ class PathFollowerNode(Node):
             # Extract rotation matrix (indices 3-11, then reshape to 3x3)
             rot_matrix = reshaped_data[i, 3:12].reshape((3, 3))
             
+            # DEBUG: Log first waypoint raw data
+            if i == 0:
+                self.get_logger().info('='*60)
+                self.get_logger().info('VISUALIZER DEBUG: First waypoint RAW data')
+                self.get_logger().info('='*60)
+                self.get_logger().info(f'Raw data[0:3] (position): {data[0:3]}')
+                self.get_logger().info(f'Parsed position: [{position[0]:.6f}, {position[1]:.6f}, {position[2]:.6f}]')
+                self.get_logger().info(f'Rotation matrix determinant: {np.linalg.det(rot_matrix):.6f}')
+                self.get_logger().info('='*60)
+            
             # Convert rotation matrix to quaternion
             try:
                 rotation = R.from_matrix(rot_matrix)
