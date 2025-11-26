@@ -160,8 +160,8 @@ class Parameterization:
         u_params = np.zeros(n_points)
         
         # For efficiency, compute on a regular grid then interpolate
-        n_grid_u = min(200, max(50, int(np.sqrt(n_points))))
-        n_grid_v = min(200, max(50, int(np.sqrt(n_points))))
+        n_grid_u = min(2, max(2, int(np.sqrt(n_points))))
+        n_grid_v = min(2, max(2, int(np.sqrt(n_points))))
         
         x_grid = np.linspace(x_min, x_max, n_grid_u)
         y_grid = np.linspace(y_min, y_max, n_grid_v)
