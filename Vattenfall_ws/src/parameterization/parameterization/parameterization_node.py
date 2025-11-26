@@ -439,6 +439,8 @@ class ParameterizationNode(Node):
             
             # Interpolate
             xyz = self.surf.interpolate(uv_query)
+
+            self.get_logger().info(f'Interpolated points: {xyz}')
             
             # Convert to Point messages
             response.points = []
