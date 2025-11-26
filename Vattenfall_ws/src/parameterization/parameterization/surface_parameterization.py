@@ -25,8 +25,6 @@ class Parameterization:
     - Distance-preserving (isometric) parameterization
     - UV spacing ≈ surface distance
     - Arc-length based: u = ∫√(1+(∂z/∂x)²)dx, v = ∫√(1+(∂z/∂y)²)dy
-    - Results in metric tensor E ≈ 1, G ≈ 1, F ≈ 0
-    - Enables simple equidistant path planning on curved surfaces
     
     Key Features:
     - Bivariate cubic spline interpolation (UV → XYZ mapping)
@@ -162,8 +160,8 @@ class Parameterization:
         u_params = np.zeros(n_points)
         
         # For efficiency, compute on a regular grid then interpolate
-        n_grid_u = min(200, max(50, int(np.sqrt(n_points))))
-        n_grid_v = min(200, max(50, int(np.sqrt(n_points))))
+        n_grid_u = min(2, max(2, int(np.sqrt(n_points))))
+        n_grid_v = min(2, max(2, int(np.sqrt(n_points))))
         
         x_grid = np.linspace(x_min, x_max, n_grid_u)
         y_grid = np.linspace(y_min, y_max, n_grid_v)
@@ -250,90 +248,7 @@ class Parameterization:
         print(f"  UV range: u=[{uv_params[:,0].min():.3f}, {uv_params[:,0].max():.3f}], v=[{uv_params[:,1].min():.3f}, {uv_params[:,1].max():.3f}]")
         
         return uv_params
-    
-    def compute_surface_metric(self, k_neighbors=20):
-        """
-        Compute the first fundamental form (metric tensor) of the surface.
-        
-        The metric tensor G = [E F; F G] describes how distances in UV space
-        relate to distances on the actual surface:
-            ds² = E du² + 2F du dv + G dv²
-        
-        For isometric (arc-length) parameterization: E ≈ 1, G ≈ 1, F ≈ 0
-        For projection parameterization: E and G depend on surface curvature
-        
-        Note: Metric tensor is intrinsic, but we compute it in local frame
-        for consistency with UV parameterization.
-        
-        Args:
-            k_neighbors: Number of neighbors for local derivative estimation
-            
-        Returns:
-            metric_tensor: Nx3 array where each row is [E, F, G] at that point
-        """
-        if self.uv_params is None:
-            self.compute_initial_parameterization()
-        
-        if self.points_local is None:
-            raise ValueError("Local frame not computed. Call compute_local_frame() first.")
-        
-        n_points = len(self.points_local)
-        metric_tensor = np.zeros((n_points, 3))  # [E, F, G] for each point
-        
-        # Build KD-tree for efficient neighbor search in local coordinates
-        # UV was computed from local coords, so use local coords for metric
-        kdtree_local = cKDTree(self.points_local)
-        
-        if self.kdtree_uv is None:
-            self.kdtree_uv = cKDTree(self.uv_params)
-        
-        for i in range(n_points):
-            # Find neighbors in local XYZ space
-            distances, indices = kdtree_local.query(self.points_local[i], k=min(k_neighbors, n_points))
-            
-            if len(indices) < 4:
-                # Not enough neighbors, use identity metric
-                metric_tensor[i] = [1.0, 0.0, 1.0]
-                continue
-            
-            # Get neighbor coordinates in local frame
-            xyz_local_neighbors = self.points_local[indices]
-            uv_neighbors = self.uv_params[indices]
-            
-            # Compute local surface derivatives ∂r/∂u and ∂r/∂v
-            # using least squares fitting of local plane
-            try:
-                # Center the data
-                xyz_centered = xyz_local_neighbors - xyz_local_neighbors[0]
-                uv_centered = uv_neighbors - uv_neighbors[0]
-                
-                # Solve for derivatives: [∂r/∂u, ∂r/∂v] via least squares
-                # xyz_centered ≈ [∂r/∂u, ∂r/∂v] @ uv_centered.T
-                if np.linalg.matrix_rank(uv_centered) >= 2:
-                    # Compute pseudo-inverse
-                    derivatives = xyz_centered.T @ np.linalg.pinv(uv_centered.T)
-                    
-                    dr_du = derivatives[:, 0]  # ∂r/∂u in local frame
-                    dr_dv = derivatives[:, 1]  # ∂r/∂v in local frame
-                    
-                    # Compute first fundamental form coefficients
-                    # Note: Metric tensor is same in any orthonormal frame
-                    E = np.dot(dr_du, dr_du)  # ||∂r/∂u||²
-                    F = np.dot(dr_du, dr_dv)  # <∂r/∂u, ∂r/∂v>
-                    G = np.dot(dr_dv, dr_dv)  # ||∂r/∂v||²
-                    
-                    metric_tensor[i] = [E, F, G]
-                else:
-                    # Degenerate case, use identity
-                    metric_tensor[i] = [1.0, 0.0, 1.0]
-                    
-            except np.linalg.LinAlgError:
-                # Numerical issues, use identity metric
-                metric_tensor[i] = [1.0, 0.0, 1.0]
-        
-        self.metric_tensor = metric_tensor
-        return metric_tensor
-       
+      
     def build_inverse_interpolation(self):
         """
         Build cubic spline inverse interpolation from (u,v) → (x,y,z).
@@ -403,95 +318,7 @@ class Parameterization:
         xyz_global = self.local_to_global(xyz_local)
         
         return xyz_global
-    
-    def get_metric_at_uv(self, uv_query):
-        """
-        Get metric tensor components at arbitrary UV coordinates.
-        
-        Args:
-            uv_query: Nx2 array of (u,v) coordinates
-            
-        Returns:
-            metric: Nx3 array where each row is [E, F, G] at that UV point
-        """
-        if not self.is_ready:
-            raise ValueError("Interpolation not ready. Call build_inverse_interpolation() first.")
-        
-        uv_query = np.atleast_2d(uv_query)
-        
-        # Use interpolators if available, otherwise use nearest neighbor
-        if self.interpolator_E is not None:
-            E = self.interpolator_E(uv_query)
-            F = self.interpolator_F(uv_query)
-            G = self.interpolator_G(uv_query)
-            metric = np.column_stack([E, F, G])
-        else:
-            # Fallback to nearest neighbor
-            metric = np.zeros((len(uv_query), 3))
-            for i, uv in enumerate(uv_query):
-                _, idx = self.kdtree_uv.query(uv, k=1)
-                metric[i] = self.metric_tensor[idx]
-        
-        return metric
-    
-    def get_surface_distance(self, uv1, uv2):
-        """
-        Compute approximate surface distance between two UV points.
-        
-        Uses the metric tensor to compute:
-            ds² = E du² + 2F du dv + G dv²
-        
-        Args:
-            uv1, uv2: UV coordinates (2D arrays or lists)
-            
-        Returns:
-            distance: Approximate surface distance
-        """
-        if self.metric_tensor is None:
-            self.compute_surface_metric()
-        
-        # Get metric at uv1 (uses interpolation if available)
-        uv1 = np.atleast_2d(uv1)
-        metric = self.get_metric_at_uv(uv1)
-        E, F, G = metric[0]
-        
-        # Compute differential
-        du = uv2[0] - uv1[0, 0]
-        dv = uv2[1] - uv1[0, 1]
-        
-        # Apply metric tensor
-        ds_squared = E * du**2 + 2 * F * du * dv + G * dv**2
-        
-        return np.sqrt(max(0, ds_squared))
-    
-    def compute_equidistant_uv_spacing(self, desired_spacing, uv_direction='u'):
-        """
-        Compute UV spacing that produces equidistant spacing on the surface.
-        
-        Args:
-            desired_spacing: Desired spacing on the surface (in meters)
-            uv_direction: 'u' or 'v' direction
-            
-        Returns:
-            spacing_uv: UV spacing that produces desired surface spacing
-        """
-        if self.metric_tensor is None:
-            self.compute_surface_metric()
-        
-        # Get average metric in the specified direction
-        if uv_direction == 'u':
-            # E = ||∂r/∂u||²
-            avg_scale = np.sqrt(np.mean(self.metric_tensor[:, 0]))
-        else:  # 'v'
-            # G = ||∂r/∂v||²
-            avg_scale = np.sqrt(np.mean(self.metric_tensor[:, 2]))
-        
-        # To get desired spacing on surface, divide by scale factor
-        # If ||∂r/∂u|| = scale, then du = desired_spacing / scale
-        spacing_uv = desired_spacing / (avg_scale + 1e-6)
-        
-        return spacing_uv
-    
+       
     def get_uv_bounds(self):
         """
         Get the bounds of the parameter space.

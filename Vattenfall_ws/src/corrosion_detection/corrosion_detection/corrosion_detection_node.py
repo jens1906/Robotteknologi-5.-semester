@@ -6,12 +6,13 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float32MultiArray, Bool
-from tf2_msgs.msg import TFMessage  
+import tf2_ros
+from tf2_ros import TransformException  
 
 c = (480 / 2, 640 / 2)
 kernel = np.ones((5, 5), np.uint8)
 
-showImages = True
+showImages = False
 printlogger = False
 
 
@@ -35,8 +36,9 @@ class CorrosionDetector(Node):
             [-0.008, -0.005,  1.000, -6.355],
             [ 0.000,  0.000,  0.000,  1.000]
         ])
-        self.get_logger().info('Hand-Eye Calibration Matrix loaded')
-        self.get_logger().info(f'T_camera_to_ee:\n{self.T_camera_to_ee}')
+        if printlogger:
+            self.get_logger().info('Hand-Eye Calibration Matrix loaded')
+            self.get_logger().info(f'T_camera_to_ee:\n{self.T_camera_to_ee}')
         
         self.toolsizes = [30, 25]  # Example tool sizes in mm
 
@@ -44,21 +46,21 @@ class CorrosionDetector(Node):
         self.corrosion_corrosion = self.create_publisher(Float32MultiArray, '/corrosion/corrosion', 10)
         self.corrosion_workspace = self.create_publisher(Float32MultiArray, '/corrosion/workspace', 10)
         self.corrosion_tool_size = self.create_publisher(Float32MultiArray, '/corrosion/tool_size', 10)
-
-        self.ui_corrosion_add = np.zeros((480, 640), np.uint8)
-        self.ui_corrosion_remove = np.zeros((480, 640), np.uint8)
-        # Subscribers
         self.ui_corrosion_area_accept_sub = self.create_subscription(Bool, '/ui/corrosion_area_accept_pub', self.ui_corrosion_area_accept_callback, 10)        
         self.ui_corrosion_add_sub = self.create_subscription(Image, '/ui/corrosion_area_add_pub', self.ui_corrosion_add_callback, image_qos)
         self.ui_corrosion_remove_sub = self.create_subscription(Image, '/ui/corrosion_area_remove_pub', self.ui_corrosion_remove_callback, image_qos)
         self.ui_emergency_stop_sub = self.create_subscription(Bool, '/ui/emergency_stop_pub', self.ui_emergency_stop_callback, 10)
         self.ui_terminate_pub_sub = self.create_subscription(Bool, '/ui/terminate_pub', self.ui_terminate_callback, 10)
         self.ui_connected_pub_sub = self.create_subscription(Bool, '/ui/connected_pub', self.ui_connected_callback, 10)
-        self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
+        self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)        
         
-        self.tf_static_sub = self.create_subscription(TFMessage, '/tf_static', self.tf_static_callback, 10)
-        color_sub = message_filters.Subscriber(self, Image, '/realsense/camera_color_pub', qos_profile=image_qos)
-        depth_sub = message_filters.Subscriber(self, Image, '/realsense/camera_depth_pub', qos_profile=image_qos)
+        # Initialize tf2 buffer and listener for proper transform lookups
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        self.get_logger().info('Initialized tf2 listener - waiting for robot transforms...')
+        
+        color_sub = message_filters.Subscriber(self, Image, '/camera/color/image_raw', qos_profile=image_qos)
+        depth_sub = message_filters.Subscriber(self, Image, '/camera/aligned_depth_to_color/image_raw', qos_profile=image_qos)
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
 
@@ -73,8 +75,52 @@ class CorrosionDetector(Node):
         self.ui_connected_state = False
         self.last_corrosion_threshold_image = None
         self.combined_transformation_of_ur = None
+        self.tf_received = False  # Flag to track if transform is available
+        self.target_frame = 'base_link'  # Robot base frame
+        self.source_frame = 'tool0'  # End-effector frame
+        self.ui_corrosion_add = np.zeros((480, 640), np.uint8)
+        self.ui_corrosion_remove = np.zeros((480, 640), np.uint8)
+
+        # Timer to periodically warn if /tf hasn't been received
+        self.tf_warning_timer = self.create_timer(5.0, self.check_tf_status)
 
         if printlogger: self.get_logger().info('Initialized Corrosion Detector Node')
+
+    def check_tf_status(self):
+        """Periodically check if /tf has been received."""
+        if not self.tf_received:
+            self.get_logger().warn('Still waiting for /tf - robot transforms not available yet!')
+
+    def lookup_transform(self):
+        """Look up the current transform from tool0 to base_link using tf2."""
+        try:
+            # Look up the transform from source (tool0) to target (base_link)
+            transform_stamped = self.tf_buffer.lookup_transform(
+                self.target_frame,
+                self.source_frame,
+                rclpy.time.Time(),  # Get latest available transform
+                timeout=rclpy.duration.Duration(seconds=0.1)
+            )
+            
+            if not self.tf_received:
+                self.get_logger().info(f'✓ Transform available: {self.source_frame} → {self.target_frame}')
+                self.tf_received = True
+            
+            # Convert to homogeneous transformation matrix
+            t = transform_stamped.transform
+            self.combined_transformation_of_ur = self.transform_to_homogeneous_matrix(t)
+            
+            if printlogger:
+                self.get_logger().info(f'Transform: x={t.translation.x:.3f}, '
+                                     f'y={t.translation.y:.3f}, '
+                                     f'z={t.translation.z:.3f}')
+            
+            return True
+            
+        except TransformException as ex:
+            if self.tf_received:  # Only log if we previously had it
+                self.get_logger().warn(f'Transform lookup failed: {ex}')
+            return False
 
     def ui_corrosion_area_accept_callback(self, msg):
         self.corrosion_accepted = msg.data
@@ -107,22 +153,9 @@ class CorrosionDetector(Node):
         self.get_logger().info('Terminate command received, stopping activities')
 
     def quaternion_to_rotation_matrix(self, q):
-        """
-        Convert a quaternion to a 3x3 rotation matrix.
-        
-        Args:
-            q: quaternion with attributes x, y, z, w
-            
-        Returns:
-            3x3 rotation matrix as numpy array
-        """
         x, y, z, w = q.x, q.y, q.z, q.w
-        
-        # Normalize quaternion
         norm = np.sqrt(x**2 + y**2 + z**2 + w**2)
-        x, y, z, w = x/norm, y/norm, z/norm, w/norm
-        
-        # Convert to rotation matrix
+        x, y, z, w = x/norm, y/norm, z/norm, w/norm        
         R = np.array([
             [1 - 2*(y**2 + z**2),     2*(x*y - w*z),     2*(x*z + w*y)],
             [    2*(x*y + w*z), 1 - 2*(x**2 + z**2),     2*(y*z - w*x)],
@@ -131,41 +164,21 @@ class CorrosionDetector(Node):
         return R
 
     def transform_to_homogeneous_matrix(self, transform):
-        """
-        Convert a Transform (translation + rotation) to a 4x4 homogeneous transformation matrix.
-        
-        Args:
-            transform: geometry_msgs/Transform with translation and rotation
-            
-        Returns:
-            4x4 homogeneous transformation matrix
-        """
-        # Extract translation
-        tx = transform.translation.x
-        ty = transform.translation.y
-        tz = transform.translation.z
-        
-        # Convert quaternion rotation to 3x3 rotation matrix
+        tx, ty, tz = transform.translation.x, transform.translation.y, transform.translation.z
         R = self.quaternion_to_rotation_matrix(transform.rotation)
-        
-        # Create 4x4 homogeneous transformation matrix
         T = np.eye(4)
         T[0:3, 0:3] = R
         T[0:3, 3] = [tx, ty, tz]
-        
         return T
 
     def tf_static_callback(self, msg):
-        """
-        Callback for /tf_static topic.
-        This receives static transform information between frames and combines them.
+        if not self.tf_static_received:
+            self.get_logger().info('✓ Received /tf_static - robot transforms now available!')
+            self.tf_static_received = True
         
-        Args:
-            msg: TFMessage containing TransformStamped objects
-        """
         if printlogger:
-            self.get_logger().info(f'Received TF Static with {len(msg.transforms)} transforms')
-        
+            self.get_logger().info(f'Received TF Static with {len(msg.transforms)} transforms')        
+        self.get_logger().info(f'Received TF Static with {len(msg.transforms)} transforms')
         # Initialize combined transformation as identity matrix
         combined_transformation = np.eye(4)
         
@@ -173,15 +186,9 @@ class CorrosionDetector(Node):
         for transform in msg.transforms:
             parent_frame = transform.header.frame_id
             child_frame = transform.child_frame_id
-            
-            # Extract translation and rotation
             translation = transform.transform.translation
             rotation = transform.transform.rotation
-            
-            # Convert transform to 4x4 homogeneous matrix
             T = self.transform_to_homogeneous_matrix(transform.transform)
-            
-            # Multiply with accumulated transformation
             combined_transformation = combined_transformation @ T
             
             if printlogger:
@@ -190,10 +197,7 @@ class CorrosionDetector(Node):
                     f'  Position: x={translation.x:.3f}, y={translation.y:.3f}, z={translation.z:.3f}\n'
                     f'  Rotation: x={rotation.x:.3f}, y={rotation.y:.3f}, z={rotation.z:.3f}, w={rotation.w:.3f}'
                 )
-        
-        # Save the combined transformation to instance variable
-        self.combined_transformation_of_ur = combined_transformation
-        
+        self.combined_transformation_of_ur = combined_transformation        
         if printlogger:
             self.get_logger().info('Combined Transformation Matrix (End-Effector to Base):')
             self.get_logger().info(f'\n{self.combined_transformation_of_ur}')
@@ -244,11 +248,14 @@ class CorrosionDetector(Node):
 
 
     def image_match(self, color_msg, depth_msg):
+        # Look up the current transform (updates every frame with robot movement)
+        if not self.lookup_transform():
+            if printlogger:
+                self.get_logger().info('Skipping image processing - transform not available')
+            return        
         if printlogger: self.get_logger().info(f'Image and depth matched {color_msg.header.stamp.sec}.{color_msg.header.stamp.nanosec}')
-        
-        color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
+        color_image = cv.cvtColor(np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3), cv.COLOR_RGB2BGR)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
-
 
         # Check if UI masks changed
         ui_changed = self.arrays_differ(self.last_added_area, self.ui_corrosion_add) or \
@@ -259,28 +266,9 @@ class CorrosionDetector(Node):
             should_process = (not self.first_frame_received) or ui_changed or self.movement_change or self.ui_connected_state==False
             
             if should_process:
-                thresholded_image = self.threshold_corrosion(color_image)
                 color_threshold_image = color_image.copy()
-
-                # Convert threshold to grayscale (single channel)
-                thresh_gray = cv.cvtColor(thresholded_image, cv.COLOR_BGR2GRAY)
-
-                # Combine: add UI painted areas, remove UI erased areas
-                combined_mask = cv.bitwise_or(thresh_gray, self.ui_corrosion_add)
-                combined_mask = cv.bitwise_and(combined_mask, cv.bitwise_not(self.ui_corrosion_remove))
-
-                # Clean the combined mask (your existing morphology)
-                cleaned_mask = self.clean_image(cv.merge([combined_mask, combined_mask, combined_mask]))
-                cleaned_gray = cv.cvtColor(cleaned_mask, cv.COLOR_BGR2GRAY)
-
-                # Edge detection on the cleaned, combined mask
-                edge = cv.Canny(cleaned_gray, 100, 200)
-                
-                # Dilate edges to create an offset/buffer (expand outward by ~5 pixels)
-                edge_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5))  # Larger kernel for bigger offset
-                edge = cv.dilate(edge, edge_kernel, iterations=1)  # 1 iteration with large kernel
-
-                # Overlay green edges on original color image
+                edge = self.Threshold_to_edge_with_edits(color_image)
+                edge = cv.dilate(edge, cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5)), iterations=1) 
                 color_threshold_image[edge > 0] = [0, 255, 0]
                 
                 # Save state for next comparison
@@ -296,6 +284,11 @@ class CorrosionDetector(Node):
         elif self.corrosion_accepted and self.running_status == False:
             self.running_status = True
             xyz_data, xyz_offset = self.combine_and_transform(self.edge_to_scatter_plot(color_image), depth_image)
+            
+            # Visualize the 3D point cloud before publishing
+            if showImages:
+                self.visualize_point_cloud(xyz_data, xyz_offset, color_image)
+            
             msg = Float32MultiArray()
             msg.data = xyz_data.flatten().tolist()
             self.corrosion_corrosion.publish(msg)
@@ -336,28 +329,24 @@ class CorrosionDetector(Node):
         img_final_erode = cv.erode(img_dilate, kernel, iterations=3)
         return img_final_erode
 
-    def edge_to_scatter_plot(self, image, threshold1=100, threshold2=200):
+    def Threshold_to_edge_with_edits(self, image):
         thresholded_image = self.threshold_corrosion(image)
-
-        # Convert threshold to grayscale (single channel)
         thresh_gray = cv.cvtColor(thresholded_image, cv.COLOR_BGR2GRAY)
-
-        # Combine: add UI painted areas, remove UI erased areas
         combined_mask = cv.bitwise_or(thresh_gray, self.ui_corrosion_add)
         combined_mask = cv.bitwise_and(combined_mask, cv.bitwise_not(self.ui_corrosion_remove))
-
-        # Clean the combined mask (your existing morphology)
         cleaned_mask = self.clean_image(cv.merge([combined_mask, combined_mask, combined_mask]))
-        cleaned_gray = cv.cvtColor(cleaned_mask, cv.COLOR_BGR2GRAY)
-        edges = cv.Canny(cleaned_gray, 100, 200)
-        
+        edge = cv.Canny(cleaned_mask, 100, 200)
+        return edge
+
+    def edge_to_scatter_plot(self, image, threshold1=100, threshold2=200):
+        edges = self.Threshold_to_edge_with_edits(image)
         contours, _ = cv.findContours(edges, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
         filled_mask = np.zeros_like(image[:, :, 0])
         cv.drawContours(filled_mask, contours, -1, 255, thickness=cv.FILLED)
         
         # Apply offset by dilating the filled mask to create workspace boundary
         # Workspace scale factor: 3.0 = 3x bigger workspace area around corrosion
-        workspace_scale = 3.0
+        workspace_scale = 1.0
         offset_kernel_size = int(max(self.toolsizes) / 0.8 * workspace_scale) * 2 + 1  # Scaled kernel size
         offset_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (offset_kernel_size, offset_kernel_size))
         filled_mask_offset = cv.dilate(filled_mask, offset_kernel, iterations=1)
@@ -375,21 +364,6 @@ class CorrosionDetector(Node):
         return scatter_data_original, scatter_data
 
     def apply_hand_eye_transform(self, xyz_camera):
-        """
-        Apply hand-eye calibration and UR transformation to transform points from camera frame to robot base frame.
-        
-        Transformation chain:
-        1. Camera frame -> End-effector frame (via T_camera_to_ee)
-        2. End-effector frame -> Robot base frame (via combined_transformation_of_ur)
-        
-        Combined: T_total = combined_transformation_of_ur @ T_camera_to_ee
-        
-        Args:
-            xyz_camera: (N, 3) array of points in camera coordinate frame
-            
-        Returns:
-            xyz_base: (N, 3) array of points in robot base coordinate frame (or end-effector if UR transform not available)
-        """
         if len(xyz_camera) == 0:
             return xyz_camera
         
@@ -448,8 +422,76 @@ class CorrosionDetector(Node):
             self.get_logger().info(f'Transformed {len(xyz_ee_original)} original points and {len(xyz_ee_offset)} offset points to end-effector frame')
         
         return xyz_ee_original, xyz_ee_offset
+    
+    def visualize_point_cloud(self, xyz_corrosion, xyz_workspace, color_image):
+        """
+        Visualize the 3D point cloud in base frame coordinates.
+        Shows both the corrosion area and workspace boundary.
+        """
+        try:
+            import matplotlib.pyplot as plt
+            from mpl_toolkits.mplot3d import Axes3D
+            
+            fig = plt.figure(figsize=(15, 5))
+            
+            # 3D scatter plot
+            ax1 = fig.add_subplot(131, projection='3d')
+            if len(xyz_corrosion) > 0:
+                ax1.scatter(xyz_corrosion[:, 0], xyz_corrosion[:, 1], xyz_corrosion[:, 2], 
+                           c='red', marker='.', s=1, label='Corrosion Area')
+            if len(xyz_workspace) > 0:
+                ax1.scatter(xyz_workspace[:, 0], xyz_workspace[:, 1], xyz_workspace[:, 2], 
+                           c='blue', marker='.', s=0.5, alpha=0.3, label='Workspace')
+            ax1.set_xlabel('X (mm)')
+            ax1.set_ylabel('Y (mm)')
+            ax1.set_zlabel('Z (mm)')
+            ax1.set_title('3D Point Cloud (Base Frame)')
+            ax1.legend()
+            
+            # Top view (XY plane)
+            ax2 = fig.add_subplot(132)
+            if len(xyz_corrosion) > 0:
+                ax2.scatter(xyz_corrosion[:, 0], xyz_corrosion[:, 1], c='red', marker='.', s=1, label='Corrosion')
+            if len(xyz_workspace) > 0:
+                ax2.scatter(xyz_workspace[:, 0], xyz_workspace[:, 1], c='blue', marker='.', s=0.5, alpha=0.3, label='Workspace')
+            ax2.set_xlabel('X (mm)')
+            ax2.set_ylabel('Y (mm)')
+            ax2.set_title('Top View (XY Plane)')
+            ax2.axis('equal')
+            ax2.legend()
+            ax2.grid(True)
+            
+            # Original 2D detection
+            ax3 = fig.add_subplot(133)
+            ax3.imshow(cv.cvtColor(color_image, cv.COLOR_BGR2RGB))
+            if hasattr(self, 'scatter_data_original') and len(self.scatter_data_original) > 0:
+                ax3.scatter(self.scatter_data_original[:, 0], self.scatter_data_original[:, 1], 
+                           c='red', marker='.', s=1, alpha=0.5)
+            ax3.set_title('2D Detection (Camera View)')
+            ax3.axis('off')
+            
+            plt.tight_layout()
+            
+            # Log statistics
+            self.get_logger().info(f'Point cloud statistics:')
+            self.get_logger().info(f'  Corrosion points: {len(xyz_corrosion)}')
+            self.get_logger().info(f'  Workspace points: {len(xyz_workspace)}')
+            if len(xyz_corrosion) > 0:
+                self.get_logger().info(f'  X range: [{xyz_corrosion[:, 0].min():.1f}, {xyz_corrosion[:, 0].max():.1f}] mm')
+                self.get_logger().info(f'  Y range: [{xyz_corrosion[:, 1].min():.1f}, {xyz_corrosion[:, 1].max():.1f}] mm')
+                self.get_logger().info(f'  Z range: [{xyz_corrosion[:, 2].min():.1f}, {xyz_corrosion[:, 2].max():.1f}] mm')
+            
+            plt.show(block=False)
+            plt.pause(20)  # Show for 3 seconds
+            plt.close()
+            
+        except ImportError:
+            self.get_logger().warn('matplotlib not available, skipping visualization')
+        except Exception as e:
+            self.get_logger().error(f'Visualization error: {e}')
 
     def destroy_node(self):
+
         
 
 

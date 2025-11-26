@@ -1,14 +1,25 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.substitutions import FindPackageShare
+from pathlib import Path
 
 def generate_launch_description():
+    # Get path to realsense_wrapper launch file
+    #realsense_wrapper_share = FindPackageShare('realsense_wrapper').find('realsense_wrapper')
+    #realsense_launch = Path(realsense_wrapper_share) / 'launch' / 'rs_launch.py'
+    
     return LaunchDescription([
+        # Include RealSense wrapper launch
+        #IncludeLaunchDescription(
+        #    PythonLaunchDescriptionSource(str(realsense_launch))
+        #),
         Node(
             package='realsense_publisher',
             executable='realsense_publisher_node',
             name='realsense_publisher',
             output='screen',
-            parameters=[{'some_param': True}],
         ),
         Node(
             package='path_planning',
