@@ -1,22 +1,3 @@
-"""
-RealSense Camera Launch File
-
-Launches the realsense2_camera node with proper configuration:
-- Resolution: 640x480
-- Framerate: 30 fps
-- Depth aligned to color camera
-- Synchronized color and depth frames
-
-Topics published:
-- /camera/color/image_raw - Color image (640x480 @ 30fps)
-- /camera/aligned_depth_to_color/image_raw - Aligned depth (640x480 @ 30fps)
-- /camera/color/camera_info - Color camera calibration
-- /camera/aligned_depth_to_color/camera_info - Depth camera calibration
-
-Usage:
-    ros2 launch realsense_wrapper rs_launch.py
-"""
-
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration

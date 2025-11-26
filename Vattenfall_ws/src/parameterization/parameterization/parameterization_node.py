@@ -65,6 +65,7 @@ class ParameterizationNode(Node):
         self.corrosion_boundary_uv = None  # Boundary points in UV space
         self.pending_corrosion_data = None  # Store corrosion data if received before parameterization ready
         self.retry_timer = None  # Timer for retrying corrosion processing
+        self.data_published = False  # Flag to publish bounds/boundary only once
         
         # Create subscriber for corrosion scatter plot
         self.corrosion_plot_sub = self.create_subscription(
@@ -394,6 +395,10 @@ class ParameterizationNode(Node):
             # Convert message to UV array
             uv_path = np.array(msg.data).reshape(-1, 2)
             
+            # Force print UV path stats
+            self.get_logger().warn(f'UV PATH RECEIVED: {len(uv_path)} points')
+            self.get_logger().warn(f'UV PATH RANGE: U=[{np.min(uv_path[:, 0]):.3f}, {np.max(uv_path[:, 0]):.3f}], V=[{np.min(uv_path[:, 1]):.3f}, {np.max(uv_path[:, 1]):.3f}]')
+            
             if len(uv_path) == 0:
                 self.get_logger().warn('Received empty UV path')
                 return
@@ -438,6 +443,8 @@ class ParameterizationNode(Node):
             
             # Interpolate
             xyz = self.surf.interpolate(uv_query)
+
+            self.get_logger().info(f'Interpolated points: {xyz}')
             
             # Convert to Point messages
             response.points = []
@@ -556,8 +563,11 @@ class ParameterizationNode(Node):
         ready_msg.data = is_ready
         self.ready_pub.publish(ready_msg)
         
-        # Publish corrosion UV bounds and boundary when ready
-        if is_ready:
+        # Publish corrosion UV bounds and boundary ONLY ONCE when ready (not every second)
+        if is_ready and not self.data_published:
+            self.data_published = True
+            self.get_logger().info('Publishing corrosion bounds and boundary (once)')
+            
             # Publish UV parameter space bounds
             bounds_msg = Float64MultiArray()
             bounds_msg.data = [
