@@ -122,11 +122,6 @@ class PathPlanner(Node):
                 ByteMultiArray,
                 '/path/on_surface',
                 10)
-            
-            self.reset_parameteration_ready = self.create_publisher(
-                Bool,
-                '//parameterization/ready',
-                10)
                     
             # Debug info
             self.get_logger().info('Path Planner node initialized')
@@ -360,7 +355,6 @@ class PathPlanner(Node):
             self.get_logger().warn('On-surface flags not available')
 
         self.parameterization_ready = False  # Reset for next cycle
-        self.reset_parameteration_ready.publish(Bool(data=False)) # Resets parameterization ready
 
 
 def main():
