@@ -4,46 +4,34 @@ joint_limits:
     max_velocity: 3.15
     has_acceleration_limits: true
     max_acceleration: 10.0
-    has_position_limits: true
-    min_position: -6.2832  # -360 degrees
-    max_position: 6.2832   # +360 degrees
+    has_position_limits: false
   shoulder_lift_joint:
     has_velocity_limits: true
     max_velocity: 3.15
     has_acceleration_limits: true
     max_acceleration: 10.0
-    has_position_limits: true
-    min_position: -6.2832
-    max_position: 6.2832
+    has_position_limits: false
   elbow_joint:
     has_velocity_limits: true
     max_velocity: 3.15
     has_acceleration_limits: true
     max_acceleration: 10.0
-    has_position_limits: true
-    min_position: -6.2832
-    max_position: 6.2832
+    has_position_limits: false
   wrist_1_joint:
     has_velocity_limits: true
     max_velocity: 3.2
     has_acceleration_limits: true
     max_acceleration: 10.0
-    has_position_limits: true
-    min_position: -6.2832
-    max_position: 6.2832
+    has_position_limits: false
   wrist_2_joint:
     has_velocity_limits: true
     max_velocity: 3.2
     has_acceleration_limits: true
     max_acceleration: 10.0
-    has_position_limits: true
-    min_position: -6.2832
-    max_position: 6.2832
+    has_position_limits: false
   wrist_3_joint:
     has_velocity_limits: true
     max_velocity: 3.2
     has_acceleration_limits: true
     max_acceleration: 10.0
-    has_position_limits: true
-    min_position: -6.2832
-    max_position: 6.2832
+    has_position_limits: false
