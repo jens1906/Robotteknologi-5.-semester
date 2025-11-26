@@ -7,7 +7,7 @@ interpolation and surface normal computation services.
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Point
-from std_msgs.msg import Header, Float64MultiArray, Float32MultiArray
+from std_msgs.msg import Header, Float64MultiArray, Float32MultiArray, Bool
 import numpy as np
 from scipy.spatial import cKDTree, ConvexHull
 
@@ -81,10 +81,29 @@ class ParameterizationNode(Node):
             10
         )
         
-        # Create publisher
+        # Create publishers
         self.status_pub = self.create_publisher(
             ParameterizationStatus,
             '/parameterization/status',
+            10
+        )
+        
+        # Additional publishers for path_planning node (standard ROS messages)
+        self.ready_pub = self.create_publisher(
+            Bool,
+            '/parameterization/ready',
+            10
+        )
+        
+        self.uv_bounds_pub = self.create_publisher(
+            Float64MultiArray,
+            '/parameterization/uv_bounds',
+            10
+        )
+        
+        self.uv_boundary_pub = self.create_publisher(
+            Float64MultiArray,
+            '/parameterization/uv_boundary',
             10
         )
 
@@ -503,7 +522,8 @@ class ParameterizationNode(Node):
         
         # Only report ready when both workspace parameterization AND corrosion bounds are available
         # This prevents path planner from starting with workspace bounds instead of corrosion bounds
-        msg.is_ready = self.surf.is_ready and self.corrosion_uv_bounds is not None
+        is_ready = self.surf.is_ready and self.corrosion_uv_bounds is not None
+        msg.is_ready = is_ready
         
         if self.surf.is_ready:
             try:
@@ -530,6 +550,29 @@ class ParameterizationNode(Node):
             msg.std_error = 0.0
         
         self.status_pub.publish(msg)
+        
+        # Publish ready status for path planning
+        ready_msg = Bool()
+        ready_msg.data = is_ready
+        self.ready_pub.publish(ready_msg)
+        
+        # Publish corrosion UV bounds and boundary when ready
+        if is_ready:
+            # Publish UV parameter space bounds
+            bounds_msg = Float64MultiArray()
+            bounds_msg.data = [
+                self.corrosion_uv_bounds['u_min'],
+                self.corrosion_uv_bounds['u_max'],
+                self.corrosion_uv_bounds['v_min'],
+                self.corrosion_uv_bounds['v_max']
+            ]
+            self.uv_bounds_pub.publish(bounds_msg)
+            
+            # Publish corrosion boundary points
+            if self.corrosion_boundary_uv is not None:
+                boundary_msg = Float64MultiArray()
+                boundary_msg.data = self.corrosion_boundary_uv.flatten().tolist()
+                self.uv_boundary_pub.publish(boundary_msg)
 
 
 def main(args=None):
