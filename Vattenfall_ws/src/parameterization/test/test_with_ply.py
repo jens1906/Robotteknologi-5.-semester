@@ -256,15 +256,6 @@ def test_parameterization(ply_file_path):
     print(f"   U range: [{bounds['u_min']:.3f}, {bounds['u_max']:.3f}]")
     print(f"   V range: [{bounds['v_min']:.3f}, {bounds['v_max']:.3f}]")
     
-    # Compute surface metric tensor
-    # print("\n5. Computing surface metric tensor...")
-    # k_neighbors = min(20, len(points) // 10)
-    # metric = surf.compute_surface_metric(k_neighbors=k_neighbors)
-    # print(f"   Metric tensor computed using {k_neighbors} neighbors")
-    # print(f"   Mean E (∂x/∂u magnitude²): {np.mean(metric[:, 0]):.6f}")
-    # print(f"   Mean F (∂x/∂u · ∂x/∂v): {np.mean(metric[:, 1]):.6f}")
-    # print(f"   Mean G (∂x/∂v magnitude²): {np.mean(metric[:, 2]):.6f}")
-    
     # Build interpolation
     print("\n5. Building inverse interpolation...")
     surf.build_inverse_interpolation()
@@ -280,14 +271,6 @@ def test_parameterization(ply_file_path):
     # print(f"   Max error: {metrics['max_error']:.6f}")
     # print(f"   RMSE: {metrics['rmse']:.6f}")
     # print(f"   Std deviation: {metrics['std_error']:.6f}")
-    
-    # # Conformal quality metrics
-    # if 'mean_isotropy_error' in metrics:
-    #     print(f"\n   Conformal Quality Metrics:")
-    #     print(f"   Isotropy error: {metrics['mean_isotropy_error']:.6f} (closer to 0 is better)")
-    #     print(f"   Orthogonality error: {metrics['mean_orthogonality_error']:.6f} (closer to 0 is better)")
-    #     print(f"   Mean scale U: {metrics['mean_scale_u']:.6f}")
-    #     print(f"   Mean scale V: {metrics['mean_scale_v']:.6f}")
     
     # Test interpolation
     print("\n6. Testing interpolation...")
@@ -314,45 +297,6 @@ def test_parameterization(ply_file_path):
     
     print(f"    Round-trip transformation tested on {n_transform} points")
     print(f"    Max reconstruction error: {np.max(transform_errors):.10f}")
-    
-    # Generate example scanning path with equidistant spacing
-    # print("\n8. Generating iso-parametric scanning path...")
-    # desired_spacing = 0.05  # 5cm on surface
-    
-    # # Compute equidistant UV spacing
-    # spacing_u = surf.compute_equidistant_uv_spacing(desired_spacing, uv_direction='u')
-    # spacing_v = surf.compute_equidistant_uv_spacing(desired_spacing, uv_direction='v')
-    
-    # print(f"    Equidistant UV spacing for {desired_spacing*1000:.1f}mm:")
-    # print(f"    Δu = {spacing_u:.6f}, Δv = {spacing_v:.6f}")
-    
-    # # Get current bounds
-    # current_bounds = surf.get_uv_bounds()
-    
-    # # Generate iso-v curves
-    # num_passes = int((current_bounds['v_max'] - current_bounds['v_min']) / spacing_v)
-    # num_passes = max(5, min(num_passes, 15))  # Between 5 and 15
-    # points_per_pass = 20
-    
-    # path_uv = []
-    # for i in range(num_passes):
-    #     v = current_bounds['v_min'] + (current_bounds['v_max'] - current_bounds['v_min']) * i / (num_passes - 1)
-    #     u_line = np.linspace(current_bounds['u_min'], current_bounds['u_max'], points_per_pass)
-        
-    #     if i % 2 == 1:
-    #         u_line = u_line[::-1]  # Alternate direction
-        
-    #     for u in u_line:
-    #         path_uv.append([u, v])
-    
-    # path_uv = np.array(path_uv)
-    # path_3d = surf.interpolate(path_uv)
-    # path_length = np.sum(np.linalg.norm(np.diff(path_3d, axis=0), axis=1))
-    
-    # print(f"    Generated iso-parametric scanning path")
-    # print(f"    Waypoints: {len(path_3d)}")
-    # print(f"    Path length: {path_length:.2f} units")
-    # print(f"    Number of passes: {num_passes}")
     
     # Launch interactive visualization
     print("\n8. Launching interactive visualization...")
