@@ -87,7 +87,7 @@ class TLXWindow(QMainWindow):
             "effort",
             "frustration",
         ]
-        lines = [f"{key}: {data[key]}" for key in order]
+        lines = [f"{key.replace('_', ' ').title()}: {data[key]}" for key in order]
         content = "\n".join(lines) + "\n"
         with open(filename, "w", encoding="utf-8") as f:
             f.write(content)
