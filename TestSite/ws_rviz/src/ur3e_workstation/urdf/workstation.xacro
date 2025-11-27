@@ -11,6 +11,7 @@
   <xacro:arg name="script_filename" default=""/>
   <xacro:arg name="output_recipe_filename" default=""/>
   <xacro:arg name="input_recipe_filename" default=""/>
+  <xacro:arg name="base_at_world_origin" default="false"/>
 
   <!-- ==================== World ==================== -->
   <link name="world"/>
@@ -59,15 +60,27 @@
 
   <!-- ==================== UR3e Robot ==================== -->
   <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+  <!-- Select robot parent and pose based on base_at_world_origin -->
+  <xacro:if value="$(arg base_at_world_origin)">
+    <xacro:property name="robot_parent" value="world"/>
+    <xacro:property name="robot_xyz" value="0 0 0"/>
+    <xacro:property name="robot_rpy" value="0 0 0"/>
+  </xacro:if>
+  <xacro:unless value="$(arg base_at_world_origin)">
+    <xacro:property name="robot_parent" value="mount"/>
+    <xacro:property name="robot_xyz" value="0 -0.218 0"/>
+    <xacro:property name="robot_rpy" value="-1.5708 0 3.1416"/>
+  </xacro:unless>
+
   <xacro:ur_robot
     name="$(arg ur_type)"
     tf_prefix=""
-    parent="mount"
+    parent="${robot_parent}"
     joint_limits_parameters_file="$(find ur_description)/config/$(arg ur_type)/joint_limits.yaml"
     kinematics_parameters_file="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"
     physical_parameters_file="$(find ur_description)/config/$(arg ur_type)/physical_parameters.yaml"
     visual_parameters_file="$(find ur_description)/config/$(arg ur_type)/visual_parameters.yaml">
-    <origin xyz="0 -0.218 0" rpy="-1.5708 0 3.1416"/>
+    <origin xyz="${robot_xyz}" rpy="${robot_rpy}"/>
   </xacro:ur_robot>
 
   <!-- Add ros2_control for the UR robot -->

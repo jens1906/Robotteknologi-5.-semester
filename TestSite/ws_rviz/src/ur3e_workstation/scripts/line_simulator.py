@@ -27,7 +27,7 @@ class LineSimulator(Node):
         # Line reference point (center of line) in robot base frame
         # UR3e workspace: X,Y: ±0.5m safe zone, Z: 0.15-0.6m
         # These coordinates are relative to base_link (robot base)
-        self.line_center = np.array([0.0, -0.3, 0.2])  # [x, y, z] in meters - safe workspace position
+        self.line_center = np.array([0, -0.2, 0])  # [x, y, z] in meters - safe workspace position
         
         # Line orientation (Euler angles in degrees: roll, pitch, yaw)
         # This rotates the line direction in the base frame
