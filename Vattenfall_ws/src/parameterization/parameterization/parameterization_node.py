@@ -391,10 +391,20 @@ class ParameterizationNode(Node):
             # Convert message to UV array
             uv_path = np.array(msg.data).reshape(-1, 2)
             
+            self.get_logger().warn(f'UV path contains {uv_path} NaN values')
+
+            # Force print UV path stats
+            self.get_logger().warn(f'UV PATH RECEIVED: {len(uv_path)} points')
+            self.get_logger().warn(f'UV PATH RANGE: U=[{np.min(uv_path[:, 0]):.3f}, {np.max(uv_path[:, 0]):.3f}], V=[{np.min(uv_path[:, 1]):.3f}, {np.max(uv_path[:, 1]):.3f}]')
+            
             if len(uv_path) == 0:
                 self.get_logger().warn('Received empty UV path')
                 return
             
+            #Print amount of nan values in UV path
+            num_nans = np.sum(np.isnan(uv_path))
+            self.get_logger().warn(f'UV path contains {num_nans} NaN values')
+
             # Interpolate to XYZ
             xyz_path = self.surf.interpolate(uv_path)
             
@@ -403,7 +413,10 @@ class ParameterizationNode(Node):
             xyz_msg.data = xyz_path.flatten().tolist()
             self.xyz_path_pub.publish(xyz_msg)
             
+            #print nan values in xyz path
+            self.get_logger().warn(f'XYZ path contains {xyz_path} NaN values')
             self.get_logger().info(f'Converted UV path to XYZ: {len(xyz_path)} points')
+            self.get_logger().info(f'XYZ PATH RANGE: X=[{np.min(xyz_path[:, 0]):.1f}, {np.max(xyz_path[:, 0]):.1f}], Y=[{np.min(xyz_path[:, 1]):.1f}, {np.max(xyz_path[:, 1]):.1f}], Z=[{np.min(xyz_path[:, 2]):.1f}, {np.max(xyz_path[:, 2]):.1f}] mm')
         
         except Exception as e:
             self.get_logger().error(f'Error converting UV path: {str(e)}')
@@ -436,7 +449,10 @@ class ParameterizationNode(Node):
             # Interpolate
             xyz = self.surf.interpolate(uv_query)
 
+            # Log interpolated points 
+
             self.get_logger().info(f'Interpolated points: {xyz}')
+            self.get_logger().info(f'Number of interpolated points: {len(xyz)}')
             
             # Convert to Point messages
             response.points = []
@@ -454,7 +470,6 @@ class ParameterizationNode(Node):
             response.success = False
             response.message = f'Interpolation error: {str(e)}'
             self.get_logger().error(response.message)
-        
         return response
     
 

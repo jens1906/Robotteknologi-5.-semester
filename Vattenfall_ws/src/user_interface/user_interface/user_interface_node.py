@@ -82,8 +82,10 @@ class UserInterfaceNode(Node):
             self.signal_emitter.painting_color_signal.emit("ffffff")  # White for color view
             if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
         elif self.ui_instance.camerafeed[0] == 1 and self.ui_instance.camerafeed[1] == 1:
+            # Apply median filter to reduce noise in depth visualization
+            depth_filtered = cv.medianBlur(depth_image, 10)
             self.signal_emitter.data_signal.emit(f"Depth: {depth_image.shape[1]}x{depth_image.shape[0]}")
-            self.signal_emitter.image_signal.emit(depth_image)
+            self.signal_emitter.image_signal.emit(depth_filtered)
             self.signal_emitter.painting_color_signal.emit("B3B3B3")  # Gray for depth view
         elif self.ui_instance.camerafeed[0] == 0 and self.ui_instance.camerafeed[1] == 1 and not self.ui_instance.is_painting:            
             self.signal_emitter.data_signal.emit(f"Thresholded: {self.last_Threshold_frame.shape[1]}x{self.last_Threshold_frame.shape[0]}")

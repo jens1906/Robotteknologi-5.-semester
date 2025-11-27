@@ -41,6 +41,10 @@ class CartesianPathFollower(Node):
         self.get_logger().info('Cartesian Path Follower - Continuous Motion')
         self.get_logger().info('='*60)
         
+        # Visualization publisher
+        from visualization_msgs.msg import MarkerArray, Marker
+        self.viz_publisher = self.create_publisher(MarkerArray, '/target_poses_viz', 10)
+        
         # Create service client for Cartesian path
         self.cartesian_path_client = self.create_client(
             GetCartesianPath,
@@ -92,11 +96,50 @@ class CartesianPathFollower(Node):
         
         data = np.array(msg.data)
         
+        # Check for quaternion format first: [x,y,z,qx,qy,qz,qw] = 7 values per point
+        if len(data) % 7 == 0:
+            self.get_logger().info('Detected quaternion format: [x,y,z,qx,qy,qz,qw]')
+            num_waypoints = len(data) // 7
+            self.get_logger().info(f'Parsing {num_waypoints} waypoints...')
+            
+            self.waypoints = []
+            for i in range(num_waypoints):
+                idx = i * 7
+                try:
+                    # Extract position and quaternion (already in correct frame)
+                    position = np.array(data[idx:idx+3])
+                    quat = np.array(data[idx+3:idx+7])  # [qx, qy, qz, qw]
+                    
+                    pose = Pose()
+                    pose.position.x = float(position[0])
+                    pose.position.y = float(position[1])
+                    pose.position.z = float(position[2])
+                    pose.orientation.x = float(quat[0])
+                    pose.orientation.y = float(quat[1])
+                    pose.orientation.z = float(quat[2])
+                    pose.orientation.w = float(quat[3])
+                    
+                    self.waypoints.append(pose)
+                    
+                    if i == 0 or i == num_waypoints - 1:
+                        self.get_logger().info(
+                            f'  Point {i}: pos=[{position[0]:.3f}, {position[1]:.3f}, {position[2]:.3f}]'
+                        )
+                        
+                except Exception as e:
+                    self.get_logger().error(f'Failed to parse waypoint {i}: {e}')
+                    return
+            
+            self.path_received = True
+            self.get_logger().info(f'✓ Successfully parsed {len(self.waypoints)} waypoints (quaternion format)')
+            return
+        
+        # Original rotation matrix format check
         if len(data) % 12 != 0:
-            self.get_logger().error(f'Invalid path data length: {len(data)}')
+            self.get_logger().error(f'Invalid path data length: {len(data)} (expected multiple of 7 or 12)')
             return
         num_waypoints = len(data) // 12
-        self.get_logger().info(f'Parsing {num_waypoints} waypoints...')
+        self.get_logger().info(f'Parsing {num_waypoints} waypoints (rotation matrix format)...')
 
         # Heuristic auto-detection for format: "rotation-first" vs "position-first"
         # rotation-first: [r11..r33, x,y,z] per waypoint
@@ -137,7 +180,6 @@ class CartesianPathFollower(Node):
                 chosen = 'rot_first'
 
         self.get_logger().info(f'Detected input format: {chosen} (det_pos={det_pos:.3f}, det_rot={det_rot:.3f})')
-
         self.waypoints = []
         positions = []
 
@@ -317,6 +359,76 @@ class CartesianPathFollower(Node):
         self.get_logger().info(f'Orientation smoothing: {len(waypoints)} -> {len(smoothed)} waypoints')
         return smoothed
     
+    def visualize_target_poses(self, poses, namespace='target_poses'):
+        """Publish visualization markers for target poses in RViz"""
+        from visualization_msgs.msg import MarkerArray, Marker
+        from builtin_interfaces.msg import Duration as MarkerDuration
+        
+        marker_array = MarkerArray()
+        
+        for i, pose in enumerate(poses):
+            # Create a sphere marker for position
+            sphere = Marker()
+            sphere.header.frame_id = 'world'
+            sphere.header.stamp = self.get_clock().now().to_msg()
+            sphere.ns = namespace
+            sphere.id = i * 2
+            sphere.type = Marker.SPHERE
+            sphere.action = Marker.ADD
+            sphere.pose = pose
+            sphere.scale.x = 0.05
+            sphere.scale.y = 0.05
+            sphere.scale.z = 0.05
+            sphere.color.r = 1.0
+            sphere.color.g = 0.0
+            sphere.color.b = 0.0
+            sphere.color.a = 0.8
+            sphere.lifetime = MarkerDuration(sec=30)
+            marker_array.markers.append(sphere)
+            
+            # Create an arrow marker for orientation
+            arrow = Marker()
+            arrow.header.frame_id = 'world'
+            arrow.header.stamp = self.get_clock().now().to_msg()
+            arrow.ns = namespace + '_orientation'
+            arrow.id = i * 2 + 1
+            arrow.type = Marker.ARROW
+            arrow.action = Marker.ADD
+            arrow.pose = pose
+            arrow.scale.x = 0.15  # Arrow length
+            arrow.scale.y = 0.02  # Arrow width
+            arrow.scale.z = 0.02  # Arrow height
+            arrow.color.r = 0.0
+            arrow.color.g = 1.0
+            arrow.color.b = 0.0
+            arrow.color.a = 0.8
+            arrow.lifetime = MarkerDuration(sec=30)
+            marker_array.markers.append(arrow)
+            
+            # Add text label
+            text = Marker()
+            text.header.frame_id = 'world'
+            text.header.stamp = self.get_clock().now().to_msg()
+            text.ns = namespace + '_labels'
+            text.id = i
+            text.type = Marker.TEXT_VIEW_FACING
+            text.action = Marker.ADD
+            text.pose.position.x = pose.position.x
+            text.pose.position.y = pose.position.y
+            text.pose.position.z = pose.position.z + 0.1  # Above the sphere
+            text.pose.orientation.w = 1.0
+            text.scale.z = 0.05
+            text.color.r = 1.0
+            text.color.g = 1.0
+            text.color.b = 1.0
+            text.color.a = 1.0
+            text.text = f'Target {i}\n[{pose.position.x:.2f}, {pose.position.y:.2f}, {pose.position.z:.2f}]'
+            text.lifetime = MarkerDuration(sec=30)
+            marker_array.markers.append(text)
+        
+        self.viz_publisher.publish(marker_array)
+        self.get_logger().info(f'✓ Published {len(poses)} target pose visualizations to /target_poses_viz')
+    
     def execute_cartesian_path(self):
         """
         Compute and execute a single continuous Cartesian trajectory through all waypoints.
@@ -335,7 +447,9 @@ class CartesianPathFollower(Node):
         
         try:
             # Apply -90° rotation around global X-axis for correct end effector orientation
-            rotation_correction = R.from_euler('x', +90, degrees=True)
+            # UPDATE: Try simpler orientation - tool pointing down
+            # rotation_correction = R.from_euler('x', +90, degrees=True)
+            rotation_correction = R.from_euler('xyz', [0, 0, 0], degrees=True)  # Identity - no rotation
             
             # Correct all waypoint orientations
             corrected_waypoints = []
@@ -347,9 +461,22 @@ class CartesianPathFollower(Node):
                     waypoint.orientation.w
                 ])
                 
+                self.get_logger().info(f'  Waypoint {i} original quat: [{original_quat[0]:.3f}, '
+                                      f'{original_quat[1]:.3f}, {original_quat[2]:.3f}, {original_quat[3]:.3f}]')
+                
                 original_rotation = R.from_quat(original_quat)
-                corrected_rotation = rotation_correction * original_rotation
+                original_euler = original_rotation.as_euler('xyz', degrees=True)
+                self.get_logger().info(f'  Waypoint {i} original euler (deg): [{original_euler[0]:.1f}, '
+                                      f'{original_euler[1]:.1f}, {original_euler[2]:.1f}]')
+                
+                # Use original orientation (identity) for simpler path planning
+                corrected_rotation = original_rotation  # No correction
                 corrected_quat = corrected_rotation.as_quat()
+                corrected_euler = corrected_rotation.as_euler('xyz', degrees=True)
+                
+                self.get_logger().info(f'  Waypoint {i} using euler (deg): [{corrected_euler[0]:.1f}, '
+                                      f'{corrected_euler[1]:.1f}, {corrected_euler[2]:.1f}]')
+                self.get_logger().info('  (Using identity orientation - tool pointing down)')
                 
                 corrected_pose = Pose()
                 corrected_pose.position = waypoint.position
@@ -360,13 +487,18 @@ class CartesianPathFollower(Node):
                 
                 corrected_waypoints.append(corrected_pose)
                 
-                if i % 2 == 0:  # Log every other waypoint
-                    self.get_logger().info(f'  Waypoint {i}: pos=[{corrected_pose.position.x:.3f}, '
-                                          f'{corrected_pose.position.y:.3f}, {corrected_pose.position.z:.3f}]')
+                self.get_logger().info(f'  Waypoint {i}: pos=[{corrected_pose.position.x:.3f}, '
+                                      f'{corrected_pose.position.y:.3f}, {corrected_pose.position.z:.3f}]')
             
             # CRITICAL: Smooth large orientation changes by inserting intermediate waypoints
             self.get_logger().info('Analyzing orientation changes...')
             corrected_waypoints = self.smooth_orientations(corrected_waypoints, max_angle_deg=15.0)
+            
+            # Visualize target poses in RViz
+            self.get_logger().info('Publishing target pose visualizations to RViz...')
+            self.visualize_target_poses(corrected_waypoints, namespace='corrected_targets')
+            self.get_logger().info('⚠ CHECK RVIZ: Red spheres show target positions, green arrows show orientations')
+            self.get_logger().info('⚠ Add /target_poses_viz topic in RViz if not visible')
             
             # IMPORTANT: Move to first waypoint using joint-space planning
             # This establishes a good starting position for Cartesian planning
@@ -659,8 +791,8 @@ class CartesianPathFollower(Node):
         goal_msg.request.workspace_parameters.header.stamp = self.get_clock().now().to_msg()
         
         goal_msg.request.group_name = 'ur_manipulator'
-        goal_msg.request.num_planning_attempts = 20  # More attempts
-        goal_msg.request.allowed_planning_time = 10.0  # More time
+        goal_msg.request.num_planning_attempts = 30  # Even more attempts
+        goal_msg.request.allowed_planning_time = 20.0  # Much more time
         goal_msg.request.max_velocity_scaling_factor = 0.2  # Slower for safety
         goal_msg.request.max_acceleration_scaling_factor = 0.2
         goal_msg.request.planner_id = "RRTConnectkConfigDefault"
@@ -700,16 +832,18 @@ class CartesianPathFollower(Node):
         
         if relaxed:
             # Very relaxed orientation for difficult waypoints
-            orientation_constraint.absolute_x_axis_tolerance = 1.5  # ~85 degrees
-            orientation_constraint.absolute_y_axis_tolerance = 1.5
-            orientation_constraint.absolute_z_axis_tolerance = 1.5
-            orientation_constraint.weight = 0.1  # Very low weight
+            orientation_constraint.absolute_x_axis_tolerance = 3.14  # Allow full rotation
+            orientation_constraint.absolute_y_axis_tolerance = 3.14
+            orientation_constraint.absolute_z_axis_tolerance = 3.14
+            orientation_constraint.weight = 0.01  # Minimal weight - almost ignore orientation
+            self.get_logger().info('  Using VERY relaxed orientation constraints (almost position-only)')
         else:
             # Normal relaxed orientation
-            orientation_constraint.absolute_x_axis_tolerance = 0.5  # ~30 degrees
-            orientation_constraint.absolute_y_axis_tolerance = 0.5
-            orientation_constraint.absolute_z_axis_tolerance = 0.5
-            orientation_constraint.weight = 0.5
+            orientation_constraint.absolute_x_axis_tolerance = 1.0  # ~60 degrees
+            orientation_constraint.absolute_y_axis_tolerance = 1.0
+            orientation_constraint.absolute_z_axis_tolerance = 1.0
+            orientation_constraint.weight = 0.3  # Lower weight
+            self.get_logger().info('  Using relaxed orientation constraints (~60° tolerance)')
         
         goal_constraints = Constraints()
         goal_constraints.position_constraints.append(position_constraint)
@@ -718,27 +852,79 @@ class CartesianPathFollower(Node):
         
         goal_msg.planning_options.planning_scene_diff.is_diff = True
         goal_msg.planning_options.planning_scene_diff.robot_state.is_diff = True
-        goal_msg.planning_options.plan_only = False
+        goal_msg.planning_options.plan_only = True  # Plan only first, execute separately
         
-        # Send goal
-        self.get_logger().info('Planning to first waypoint with relaxed constraints...')
-        send_goal_future = move_group_client.send_goal_async(goal_msg)
-        rclpy.spin_until_future_complete(self, send_goal_future, timeout_sec=10.0)
+        # Wait for planning scene to stabilize
+        self.get_logger().info('Waiting for planning scene to stabilize...')
+        import time
+        time.sleep(2.0)  # Longer wait for stability
         
-        if not send_goal_future.done():
-            self.get_logger().error('Planning goal submission timed out')
-            return False
+        # Retry loop for handling environment changes
+        max_retries = 5  # More retries
+        for attempt in range(max_retries):
+            if attempt > 0:
+                self.get_logger().info(f'Retry attempt {attempt + 1}/{max_retries}...')
+                time.sleep(2.0)  # Longer wait between retries
             
-        if not send_goal_future.result().accepted:
-            self.get_logger().error('Planning goal rejected by MoveGroup')
-            return False
+            # Send goal
+            self.get_logger().info('Planning to first waypoint with relaxed constraints...')
+            send_goal_future = move_group_client.send_goal_async(goal_msg)
+            rclpy.spin_until_future_complete(self, send_goal_future, timeout_sec=10.0)
+            
+            if not send_goal_future.done():
+                self.get_logger().error('Planning goal submission timed out')
+                if attempt == max_retries - 1:
+                    return False
+                continue
+                
+            if not send_goal_future.result().accepted:
+                self.get_logger().error('Planning goal rejected by MoveGroup')
+                if attempt == max_retries - 1:
+                    return False
+                continue
+            
+            goal_handle = send_goal_future.result()
+            self.get_logger().info('✓ Planning goal accepted, computing path...')
+            
+            # Wait for result with longer timeout
+            get_result_future = goal_handle.get_result_async()
+            rclpy.spin_until_future_complete(self, get_result_future, timeout_sec=40.0)  # Longer timeout
+            
+            if not get_result_future.done():
+                self.get_logger().error('Planning timed out after 40 seconds')
+                if attempt == max_retries - 1:
+                    self.get_logger().error('Possible issues:')
+                    self.get_logger().error('  - Waypoint orientation not achievable')
+                    self.get_logger().error('  - Robot in collision or near singularity')
+                    self.get_logger().error('  - MoveIt planning taking too long')
+                    return False
+                continue
+            
+            if not get_result_future.done():
+                self.get_logger().error('Planning and execution timed out after 30 seconds')
+                if attempt == max_retries - 1:
+                    self.get_logger().error('Possible issues:')
+                    self.get_logger().error('  - Waypoint orientation not achievable')
+                    self.get_logger().error('  - Robot in collision or near singularity')
+                    self.get_logger().error('  - MoveIt planning taking too long')
+                    return False
+                continue
+            
+            result = get_result_future.result().result
+            
+            from moveit_msgs.msg import MoveItErrorCodes
+            if result.error_code.val == MoveItErrorCodes.SUCCESS:
+                self.get_logger().info('✓ Successfully reached first waypoint!')
+                return True
+            elif result.error_code.val == -4:  # MOTION_PLAN_INVALIDATED_BY_ENVIRONMENT_CHANGE
+                self.get_logger().warn(f'⚠ Planning scene changed during planning (attempt {attempt + 1}/{max_retries})')
+                if attempt < max_retries - 1:
+                    continue  # Retry
+                # Fall through to error handling on last attempt
+            else:
+                # Other error - don't retry
+                break
         
-        goal_handle = send_goal_future.result()
-        self.get_logger().info('✓ Planning goal accepted, computing path...')
-        
-        # Wait for result with longer timeout
-        get_result_future = goal_handle.get_result_async()
-        rclpy.spin_until_future_complete(self, get_result_future, timeout_sec=30.0)
         
         if not get_result_future.done():
             self.get_logger().error('Planning and execution timed out after 30 seconds')
@@ -750,44 +936,87 @@ class CartesianPathFollower(Node):
         
         result = get_result_future.result().result
         
+        # Decode error codes
         from moveit_msgs.msg import MoveItErrorCodes
         if result.error_code.val == MoveItErrorCodes.SUCCESS:
-            self.get_logger().info('✓ Successfully reached first waypoint!')
-            return True
-        else:
-            # Decode error codes
-            error_meanings = {
-                1: 'SUCCESS',
-                -1: 'FAILURE', 
-                -2: 'PLANNING_FAILED',
-                -3: 'INVALID_MOTION_PLAN',
-                -4: 'MOTION_PLAN_INVALIDATED_BY_ENVIRONMENT_CHANGE',
-                -5: 'CONTROL_FAILED',
-                -10: 'PREEMPTED',
-                -11: 'START_STATE_IN_COLLISION',
-                -12: 'START_STATE_VIOLATES_PATH_CONSTRAINTS', 
-                -13: 'GOAL_IN_COLLISION',
-                -14: 'GOAL_VIOLATES_PATH_CONSTRAINTS',
-                -15: 'GOAL_CONSTRAINTS_VIOLATED',
-                -16: 'INVALID_GROUP_NAME',
-                -31: 'NO_IK_SOLUTION',
-                99999: 'TIMEOUT'
-            }
-            error_name = error_meanings.get(result.error_code.val, f'UNKNOWN_ERROR_{result.error_code.val}')
+            self.get_logger().info('✓ Planning successful!')
             
-            self.get_logger().error(f'✗ Planning failed: {error_name} (code {result.error_code.val})')
-            
-            if result.error_code.val == -31:  # NO_IK_SOLUTION
-                self.get_logger().error('The waypoint pose cannot be reached by the robot')
-                self.get_logger().error('Try adjusting the waypoint position or orientation')
-            elif result.error_code.val == -13:  # GOAL_IN_COLLISION
-                self.get_logger().error('The waypoint would cause a collision')
-            elif result.error_code.val == -2:  # PLANNING_FAILED
-                self.get_logger().error('MoveIt could not find a path to the waypoint')
-            elif result.error_code.val == 99999:  # TIMEOUT
-                self.get_logger().error('Planning took too long - waypoint might be unreachable')
-            
-            return False
+            # Now execute the planned trajectory
+            if result.planned_trajectory and len(result.planned_trajectory.joint_trajectory.points) > 0:
+                self.get_logger().info('Executing planned trajectory...')
+                
+                # Execute using ExecuteTrajectory action
+                from moveit_msgs.action import ExecuteTrajectory
+                execute_client = ActionClient(self, ExecuteTrajectory, '/execute_trajectory')
+                
+                if not execute_client.wait_for_server(timeout_sec=5.0):
+                    self.get_logger().error('ExecuteTrajectory action not available')
+                    return False
+                
+                exec_goal = ExecuteTrajectory.Goal()
+                exec_goal.trajectory = result.planned_trajectory
+                
+                exec_future = execute_client.send_goal_async(exec_goal)
+                rclpy.spin_until_future_complete(self, exec_future, timeout_sec=5.0)
+                
+                if not exec_future.done() or not exec_future.result().accepted:
+                    self.get_logger().error('✗ Trajectory execution rejected')
+                    return False
+                
+                exec_handle = exec_future.result()
+                self.get_logger().info('Executing...')
+                
+                # Wait for execution
+                exec_result_future = exec_handle.get_result_async()
+                rclpy.spin_until_future_complete(self, exec_result_future, timeout_sec=30.0)
+                
+                if not exec_result_future.done():
+                    self.get_logger().error('Execution timed out')
+                    return False
+                
+                exec_result = exec_result_future.result().result
+                if exec_result.error_code.val == MoveItErrorCodes.SUCCESS:
+                    self.get_logger().info('✓ Successfully reached first waypoint!')
+                    return True
+                else:
+                    self.get_logger().error(f'Execution failed: {exec_result.error_code.val}')
+                    return False
+            else:
+                self.get_logger().error('No trajectory in planning result')
+                return False
+        
+        error_meanings = {
+            1: 'SUCCESS',
+            -1: 'FAILURE', 
+            -2: 'PLANNING_FAILED',
+            -3: 'INVALID_MOTION_PLAN',
+            -4: 'MOTION_PLAN_INVALIDATED_BY_ENVIRONMENT_CHANGE',
+            -5: 'CONTROL_FAILED',
+            -10: 'PREEMPTED',
+            -11: 'START_STATE_IN_COLLISION',
+            -12: 'START_STATE_VIOLATES_PATH_CONSTRAINTS', 
+            -13: 'GOAL_IN_COLLISION',
+            -14: 'GOAL_VIOLATES_PATH_CONSTRAINTS',
+            -15: 'GOAL_CONSTRAINTS_VIOLATED',
+            -16: 'INVALID_GROUP_NAME',
+            -31: 'NO_IK_SOLUTION',
+            99999: 'TIMEOUT'
+        }
+        error_name = error_meanings.get(result.error_code.val, f'UNKNOWN_ERROR_{result.error_code.val}')
+        
+        self.get_logger().error(f'✗ Planning failed: {error_name} (code {result.error_code.val})')
+        
+        if result.error_code.val == -31:  # NO_IK_SOLUTION
+            self.get_logger().error('The waypoint pose cannot be reached by the robot')
+            self.get_logger().error('Try adjusting the waypoint position or orientation')
+        elif result.error_code.val == -13:  # GOAL_IN_COLLISION
+            self.get_logger().error('The waypoint would cause a collision')
+        elif result.error_code.val == -2:  # PLANNING_FAILED
+            self.get_logger().error('MoveIt could not find a path to the waypoint')
+        elif result.error_code.val == 99999:  # TIMEOUT
+            self.get_logger().error('Planning took too long - waypoint might be unreachable')
+        
+        return False
     
     def move_to_position_only(self, target_pose):
         """
