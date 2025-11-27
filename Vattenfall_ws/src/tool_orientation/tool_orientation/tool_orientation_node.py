@@ -293,7 +293,7 @@ if ROS2_AVAILABLE:
             self.declare_parameter('dt', 0.1)
             self.declare_parameter('neighbor_range', 3)
             self.declare_parameter('off_surface_height', 0.05)  # 5 cm in meters
-            self.declare_parameter('frame_id', 'base_link')  # Coordinate frame for visualization
+            self.declare_parameter('frame_id', 'ee_link')  # Coordinate frame for visualization
             
             #Storage for received data
             self.path_xyz = None
