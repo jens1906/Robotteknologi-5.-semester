@@ -7,12 +7,13 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDur
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float32MultiArray, Bool
 import tf2_ros
-from tf2_ros import TransformException  
+from tf2_ros import TransformException
+from scipy.ndimage import median_filter  
 
 c = (480 / 2, 640 / 2)
 kernel = np.ones((5, 5), np.uint8)
 
-showImages = False
+showImages = True
 printlogger = False
 
 
@@ -391,12 +392,22 @@ class CorrosionDetector(Node):
             if printlogger:
                 self.get_logger().warn('Combined UR transformation not available, returning end-effector frame coordinates')
             
-            return xyz_ee
+            return 
+            
+    def median_filter_depth(self, depth, kernel_size=9):
+        # Apply median filter to depth image to reduce noise
+        # scipy.ndimage.median_filter works with any data type (including uint16)
+        # kernel_size is used as the filter size for the median filter
+        filtered_depth = median_filter(depth, size=kernel_size)
+        return filtered_depth
+    
 
     def combine_and_transform(self, scatter_data_tuple, depth, depthFiles=None):
         # Unpack the tuple (original, offset)
         scatter_data_original, scatter_data_offset = scatter_data_tuple
         
+        depth = self.median_filter_depth(depth, kernel_size=9)
+
         # Check if scatter_data is empty
         if scatter_data_offset is None or len(scatter_data_offset) == 0:
             if printlogger: self.get_logger().warn('No scatter data to transform')
@@ -482,8 +493,8 @@ class CorrosionDetector(Node):
                 self.get_logger().info(f'  Z range: [{xyz_corrosion[:, 2].min():.1f}, {xyz_corrosion[:, 2].max():.1f}] mm')
             
             plt.show(block=False)
-            plt.pause(20)  # Show for 3 seconds
-            plt.close()
+            plt.pause(200)
+            plt.close(fig)
             
         except ImportError:
             self.get_logger().warn('matplotlib not available, skipping visualization')
