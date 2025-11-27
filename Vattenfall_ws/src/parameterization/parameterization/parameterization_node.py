@@ -189,10 +189,6 @@ class ParameterizationNode(Node):
             self.surf.compute_initial_parameterization()
             self.get_logger().info('Arc-length UV parameterization computed')
             
-            # Compute surface metric tensor (E, F, G)
-            #self.surf.compute_surface_metric(k_neighbors=self.metric_neighbors)
-            #self.get_logger().info('Surface metric tensor computed')
-            
             # Build cubic spline inverse interpolation
             self.surf.build_inverse_interpolation()
             self.get_logger().info('Cubic spline inverse interpolation built')
