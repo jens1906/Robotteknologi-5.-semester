@@ -1,0 +1,169 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="ur3e_setup">
+
+  <!-- Import main macro -->
+  <xacro:include filename="$(find ur_description)/urdf/ur_macro.xacro"/>
+
+  <!-- Define world link -->
+  <link name="world"/>
+
+  <!-- Parameters -->
+  <xacro:arg name="name" default="ur"/>
+  <xacro:arg name="ur_type" default="ur3e"/>
+  <xacro:arg name="tf_prefix" default=""/>
+  <xacro:arg name="joint_limits_parameters_file" default="$(find ur_description)/config/$(arg ur_type)/joint_limits.yaml"/>
+  <xacro:arg name="kinematics_parameters_file" default="$(find ur_description)/config/$(arg ur_type)/default_kinematics.yaml"/>
+  <xacro:arg name="physical_parameters_file" default="$(find ur_description)/config/$(arg ur_type)/physical_parameters.yaml"/>
+  <xacro:arg name="visual_parameters_file" default="$(find ur_description)/config/$(arg ur_type)/visual_parameters.yaml"/>
+  <xacro:arg name="use_mock_hardware" default="false"/>
+  <xacro:arg name="robot_ip" default="0.0.0.0"/>
+  <xacro:arg name="sim_gazebo" default="false"/>
+  <xacro:arg name="sim_ignition" default="false"/>
+
+  <!-- Instantiate robot -->
+  <xacro:ur_robot
+    name="$(arg name)"
+    tf_prefix="$(arg tf_prefix)"
+    parent="world"
+    joint_limits_parameters_file="$(arg joint_limits_parameters_file)"
+    kinematics_parameters_file="$(arg kinematics_parameters_file)"
+    physical_parameters_file="$(arg physical_parameters_file)"
+    visual_parameters_file="$(arg visual_parameters_file)"
+    use_mock_hardware="$(arg use_mock_hardware)"
+    robot_ip="$(arg robot_ip)"
+    sim_gazebo="$(arg sim_gazebo)"
+    sim_ignition="$(arg sim_ignition)"
+    >
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </xacro:ur_robot>
+
+  <!-- ================================================================== -->
+  <!-- 1. CAMERA MOUNT & CAMERA (Attached to tool0)                       -->
+  <!-- ================================================================== -->
+
+  <!-- Camera Mount Link -->
+  <link name="Camera_Mount">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <!-- Using your actual STL file. Scale 0.001 assumes the STL is in mm -->
+        <mesh filename="package://ur3e_setup_description/meshes/visual/RealsenseHolder.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="grey">
+        <color rgba="0.5 0.5 0.5 1.0"/>
+      </material>
+    </visual>D
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://ur3e_setup_description/meshes/visual/RealsenseHolder.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Joint: Connect Mount to Robot Flange (tool0) -->
+  <joint name="tool0_to_mount" type="fixed">
+    <parent link="tool0"/>
+    <child link="Camera_Mount"/>
+    <origin xyz="0 0 -0.08" rpy="0 0 0"/> <!-- Adjust xyz/rpy to fit your mount -->
+  </joint>
+
+  <!-- Camera Link -->
+  <link name="Realsense_Camera">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <!-- Using your actual STL file for the camera -->
+        <mesh filename="package://ur3e_setup_description/meshes/visual/RSD435.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://ur3e_setup_description/meshes/visual/RSD435.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Joint: Connect Camera to Mount -->
+  <joint name="mount_to_camera" type="fixed">
+    <parent link="Camera_Mount"/>
+    <child link="Realsense_Camera"/>
+    <origin xyz="0.0 0.045 0.075" rpy="0 0 0"/> <!-- Adjust xyz/rpy to where camera sits on mount -->
+  </joint>
+
+
+  <!-- ================================================================== -->
+  <!-- 2. THE "COMBINED" OBJECT (Attached to World)                       -->
+  <!--    Structure: World -> UR3e_Mount -> Bundplade -> Windmill_Curve   -->
+  <!-- ================================================================== -->
+
+  <!-- Part 1: UR3e Mount (Attached to World) -->
+  <link name="UR3e_Mount">
+    <visual>
+      <geometry>
+        <mesh filename="package://ur3e_setup_description/meshes/visual/UR3e_mount.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.0 1.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://ur3e_setup_description/meshes/visual/UR3e_mount.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="world_to_mount" type="fixed">
+    <parent link="world"/>
+    <child link="UR3e_Mount"/>
+    <origin xyz="0 0 -0.218" rpy="-1.57 0 0"/> <!-- Mount is at world origin (under robot base) -->
+  </joint>
+
+  <!-- Part 2: Bundplade (Attached to UR3e_Mount) -->
+  <link name="Bundplade">
+    <visual>
+      <geometry>
+        <mesh filename="package://ur3e_setup_description/meshes/visual/Bundplade.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://ur3e_setup_description/meshes/visual/Bundplade.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="mount_to_bundplade" type="fixed">
+    <parent link="UR3e_Mount"/>
+    <child link="Bundplade"/>
+    <origin xyz="0.24 0 -0.2" rpy="0 -1.57 0"/> <!-- Adjust Z to put it under the mount -->
+  </joint>
+
+  <!-- Part 3: Windmill Curve (Attached to Bundplade) -->
+  <link name="Windmill_Curve">
+    <visual>
+      <geometry>
+        <mesh filename="package://ur3e_setup_description/meshes/visual/TestpladeKurve_v3.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://ur3e_setup_description/meshes/visual/TestpladeKurve_v3.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="bundplade_to_curve" type="fixed">
+    <parent link="Bundplade"/>
+    <child link="Windmill_Curve"/>
+    <origin xyz="0.2 2.9375 -0.40" rpy="1.57 0 0"/> <!-- Adjust Z to put it on top of bundplade -->
+  </joint>
+
+</robot>

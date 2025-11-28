@@ -1,0 +1,55 @@
+# MoveIt Controller Configuration for UR3e
+/**:
+  ros__parameters:
+    # Trajectory execution settings
+    trajectory_execution:
+      allowed_execution_duration_scaling: 3.0  # Allow trajectories to take up to 3x longer
+      allowed_goal_duration_margin: 5.0        # Allow 5 second margin for goal completion
+      allowed_start_tolerance: 0.2              # Very permissive start position tolerance (0.2 rad ≈ 11.5°)
+
+    # Planning scene monitor settings  
+    planning_scene_monitor_options:
+      name: "planning_scene_monitor"
+      robot_description: "robot_description"
+      joint_state_topic: "/joint_states"
+      attached_collision_object_topic: "/attached_collision_object"
+      publish_planning_scene_topic: "/planning_scene"
+      monitored_planning_scene_topic: "/monitored_planning_scene"
+      wait_for_initial_state_timeout: 30.0
+
+    # OMPL planning settings - be more permissive with state checking
+    ompl:
+      enforce_joint_model_state_space: false
+      start_state_max_bounds_error: 1.0
+      start_state_max_dt: 1e-5
+      goal_state_max_bounds_error: 1.0
+      projection_evaluator: joints(shoulder_pan_joint,shoulder_lift_joint)
+      
+    # Planning pipeline settings - REMOVED to let launch file control adapters
+    # (having this here causes it to override launch file configuration)
+      
+    # Controller manager and controllers
+    moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
+    
+    # Controller list - these should match your robot driver's controllers
+    moveit_simple_controller_manager:
+      controller_names:
+        - scaled_joint_trajectory_controller
+      scaled_joint_trajectory_controller:
+        type: FollowJointTrajectory
+        action_ns: follow_joint_trajectory
+        default: true
+        joints:
+          - shoulder_pan_joint
+          - shoulder_lift_joint
+          - elbow_joint
+          - wrist_1_joint
+          - wrist_2_joint
+          - wrist_3_joint
+        # Configure MoveIt to send very permissive trajectory tolerances
+        default_goal_tolerance: 0.5  # 0.5 radians ≈ 28.6 degrees (very permissive)
+        goal_time_tolerance: 10.0    # Allow 10 seconds extra for trajectory completion  
+        path_tolerance: 0.5          # Very permissive path following tolerance
+        # Disable strict validation
+        allow_partial_joints_goal: true
+        allow_nonzero_velocity_at_trajectory_end: true

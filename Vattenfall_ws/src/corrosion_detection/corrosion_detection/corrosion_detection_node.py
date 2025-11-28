@@ -8,7 +8,9 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import Float32MultiArray, Bool
 import tf2_ros
 from tf2_ros import TransformException
-from scipy.ndimage import median_filter  
+from scipy.ndimage import median_filter
+import os
+from datetime import datetime  
 
 c = (480 / 2, 640 / 2)
 kernel = np.ones((5, 5), np.uint8)
@@ -81,6 +83,13 @@ class CorrosionDetector(Node):
         self.source_frame = 'tool0'  # End-effector frame
         self.ui_corrosion_add = np.zeros((480, 640), np.uint8)
         self.ui_corrosion_remove = np.zeros((480, 640), np.uint8)
+
+        # Create save directory if it doesn't exist
+        # Use home directory to ensure consistent location regardless of install/source space
+        home_dir = os.path.expanduser('~')
+        self.save_dir = os.path.join(home_dir, 'Documents/GitHub/Robotteknologi-5.-semester/Vattenfall_ws/src/corrosion_detection/Saved_data')
+        os.makedirs(self.save_dir, exist_ok=True)
+        self.get_logger().info(f'Save directory: {self.save_dir}')
 
         # Timer to periodically warn if /tf hasn't been received
         self.tf_warning_timer = self.create_timer(5.0, self.check_tf_status)
@@ -302,6 +311,14 @@ class CorrosionDetector(Node):
             msg = Float32MultiArray()
             msg.data = self.toolsizes
             self.corrosion_tool_size.publish(msg)
+
+            # Save to file original image, depth, corrosion point cloud and workspace pointcloud for record keeping
+            self.save_data(color_image, depth_image, xyz_data, xyz_offset)
+
+
+
+
+
         else:
             if printlogger: self.get_logger().info(f'Corrosion detection is already running, wait for ROBODK to complete {self.corrosion_accepted} {self.running_status}')
 
@@ -500,6 +517,44 @@ class CorrosionDetector(Node):
             self.get_logger().warn('matplotlib not available, skipping visualization')
         except Exception as e:
             self.get_logger().error(f'Visualization error: {e}')
+
+    def save_data(self, color_image, depth_image, xyz_corrosion, xyz_workspace):
+        """
+        Save color image, depth image, corrosion point cloud, and workspace point cloud to files.
+        Creates a timestamped folder for each capture to keep related data together.
+        """
+        try:
+            # Generate timestamp for unique folder name
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Create a timestamped subfolder for this capture
+            capture_dir = os.path.join(self.save_dir, f'capture_{timestamp}')
+            os.makedirs(capture_dir, exist_ok=True)
+            
+            # Save color image
+            color_filename = os.path.join(capture_dir, 'color.png')
+            cv.imwrite(color_filename, color_image)
+            
+            # Save depth image as numpy array (preserves full precision)
+            depth_filename = os.path.join(capture_dir, 'depth.npy')
+            np.save(depth_filename, depth_image)
+            
+            # Save corrosion point cloud
+            corrosion_filename = os.path.join(capture_dir, 'corrosion_pointcloud.npy')
+            np.save(corrosion_filename, xyz_corrosion)
+            
+            # Save workspace point cloud
+            workspace_filename = os.path.join(capture_dir, 'workspace_pointcloud.npy')
+            np.save(workspace_filename, xyz_workspace)
+            
+            self.get_logger().info(f'Data saved successfully to: {capture_dir}')
+            self.get_logger().info(f'  - Color image: color.png')
+            self.get_logger().info(f'  - Depth data: depth.npy')
+            self.get_logger().info(f'  - Corrosion points: corrosion_pointcloud.npy ({len(xyz_corrosion)} points)')
+            self.get_logger().info(f'  - Workspace points: workspace_pointcloud.npy ({len(xyz_workspace)} points)')
+            
+        except Exception as e:
+            self.get_logger().error(f'Failed to save data: {e}')
 
     def destroy_node(self):
 
