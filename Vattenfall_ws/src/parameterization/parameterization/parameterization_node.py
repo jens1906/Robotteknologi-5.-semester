@@ -391,7 +391,10 @@ class ParameterizationNode(Node):
             # Convert message to UV array
             uv_path = np.array(msg.data).reshape(-1, 2)
             
-            self.get_logger().warn(f'UV path contains {uv_path} NaN values')
+            # Check for NaN values
+            num_nans = np.sum(np.isnan(uv_path))
+            if num_nans > 0:
+                self.get_logger().warn(f'UV path contains {num_nans} NaN values!')
 
             # Force print UV path stats
             self.get_logger().warn(f'UV PATH RECEIVED: {len(uv_path)} points')
@@ -413,8 +416,10 @@ class ParameterizationNode(Node):
             xyz_msg.data = xyz_path.flatten().tolist()
             self.xyz_path_pub.publish(xyz_msg)
             
-            #print nan values in xyz path
-            self.get_logger().warn(f'XYZ path contains {xyz_path} NaN values')
+            # Check for NaN values in XYZ path
+            num_nans_xyz = np.sum(np.isnan(xyz_path))
+            if num_nans_xyz > 0:
+                self.get_logger().error(f'XYZ path contains {num_nans_xyz} NaN values! Interpolation may have failed.')
             self.get_logger().info(f'Converted UV path to XYZ: {len(xyz_path)} points')
             self.get_logger().info(f'XYZ PATH RANGE: X=[{np.min(xyz_path[:, 0]):.1f}, {np.max(xyz_path[:, 0]):.1f}], Y=[{np.min(xyz_path[:, 1]):.1f}, {np.max(xyz_path[:, 1]):.1f}], Z=[{np.min(xyz_path[:, 2]):.1f}, {np.max(xyz_path[:, 2]):.1f}] mm')
         

@@ -5,6 +5,7 @@ import numpy as np
 try:
     import rclpy
     from rclpy.node import Node
+    from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy, QoSHistoryPolicy
     from std_msgs.msg import Float64MultiArray, ByteMultiArray
     from geometry_msgs.msg import PoseArray, Pose
     from scipy.spatial.transform import Rotation as R
@@ -266,11 +267,19 @@ if ROS2_AVAILABLE:
         def __init__(self):
             super().__init__('tool_orientation_node')
             
+            # QoS profile for path topic - TRANSIENT_LOCAL ensures late-joining subscribers get the message
+            path_qos = QoSProfile(
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                history=QoSHistoryPolicy.KEEP_LAST,
+                depth=1
+            )
+            
             #Publisher for trajectory with quaternions (unified format)
             self.trajectory_pub = self.create_publisher(
                 PoseArray,
                 '/tool_orientation/path',
-                10
+                qos_profile=path_qos
             )
             
             #Subscriber for input path points
@@ -293,15 +302,48 @@ if ROS2_AVAILABLE:
             self.declare_parameter('dt', 0.1)
             self.declare_parameter('neighbor_range', 3)
             self.declare_parameter('off_surface_height', 0.05)  # 5 cm in meters
-            self.declare_parameter('frame_id', 'ee_link')  # Coordinate frame for visualization
+            self.declare_parameter('use_identity_orientation', True)  # Use simple downward orientation instead of surface normals
+            self.declare_parameter('orientation_rotation_axis', 'x')  # 'x', 'y', or 'z' - which axis to rotate 90° around
+            self.declare_parameter('orientation_rotation_angle_deg', 0)  # Rotation angle in degrees (0, 90, 180, 270)
+            self.declare_parameter('frame_id', 'world')  # MoveIt planning frame
+            
+            # Transform from world to base_link (from tf2_echo world base_link)
+            T_world_to_base = np.array([
+                [-1.000, -0.000,  0.000,  0.200],
+                [-0.000,  0.000, -1.000, -0.218],
+                [-0.000, -1.000, -0.000,  -0.650],
+                [ 0.000,  0.000,  0.000,  1.000]
+            ])
+            
+            # We need the INVERSE: base_link to world
+            # Calculate inverse of homogeneous transformation matrix
+            R = T_world_to_base[:3, :3]  # Rotation part
+            t = T_world_to_base[:3, 3]   # Translation part
+            
+            # Inverse: R^T and -R^T @ t
+            R_inv = R.T
+            t_inv = -R_inv @ t
+            
+            self.T_base_to_world = np.eye(4)
+            self.T_base_to_world[:3, :3] = R_inv
+            self.T_base_to_world[:3, 3] = t_inv
+            
+            self.get_logger().info('Transform base_link → world:')
+            self.get_logger().info(f'  Translation: [{t_inv[0]:.3f}, {t_inv[1]:.3f}, {t_inv[2]:.3f}]')
             
             #Storage for received data
             self.path_xyz = None
             self.on_surface = None
             self.data_processed = False  # Flag to avoid reprocessing same data
+            self.last_trajectory_msg = None  # Store last published trajectory for re-publishing
+            
+            # Timer to republish the path periodically (every 2 seconds) for late-joining subscribers
+            # Disabled by default - uncomment if needed for late-joining subscribers
+            # self.republish_timer = self.create_timer(2.0, self.republish_trajectory)
             
             self.get_logger().info('Tool Orientation Node initialized')
             self.get_logger().info('Publishing to: /tool_orientation/path (PoseArray with quaternions)')
+            self.get_logger().info('Path published once with TRANSIENT_LOCAL durability for late-joining subscribers')
         
         def on_surface_callback(self, msg):
             #Callback for receiving on_surface boolean array
@@ -381,21 +423,82 @@ if ROS2_AVAILABLE:
             self.get_logger().info(f'                        Y=[{np.min(adjusted_positions[:,1]):.4f}, {np.max(adjusted_positions[:,1]):.4f}] m')
             self.get_logger().info(f'                        Z=[{np.min(adjusted_positions[:,2]):.4f}, {np.max(adjusted_positions[:,2]):.4f}] m')
             
+            # Transform positions from base_link to world frame
+            ones = np.ones((len(adjusted_positions), 1))
+            positions_homogeneous = np.hstack([adjusted_positions, ones])  # Nx4
+            positions_world_homogeneous = (self.T_base_to_world @ positions_homogeneous.T).T  # Apply transform
+            positions_world = positions_world_homogeneous[:, :3]  # Extract XYZ
+            
+            # Transform orientations from base_link to world frame
+            R_base_to_world = self.T_base_to_world[:3, :3]  # Extract rotation matrix
+            
+            # Option to use identity orientation (simpler, more reachable)
+            use_identity = self.get_parameter('use_identity_orientation').value
+            if use_identity:
+                # Identity orientation in world frame (tool pointing down along world Z)
+                identity_orientation = np.eye(3)
+                orientations_world = np.array([identity_orientation for _ in range(len(orientations))])
+                self.get_logger().info('Using identity orientation (tool pointing down) for all waypoints')
+            else:
+                # Transform computed orientations to world frame
+                orientations_world = np.array([R_base_to_world @ orientations[i] for i in range(len(orientations))])
+                self.get_logger().info('Using computed surface-normal orientations')
+            
+            # Apply rotation if specified
+            rotation_angle_deg = self.get_parameter('orientation_rotation_angle_deg').value
+            rotation_axis = self.get_parameter('orientation_rotation_axis').value.lower()
+            
+            if rotation_angle_deg != 0:
+                rotation_angle_rad = np.radians(rotation_angle_deg)
+                
+                if rotation_axis == 'x':
+                    # Rotation around X-axis
+                    R_rotation = np.array([
+                        [1, 0, 0],
+                        [0, np.cos(rotation_angle_rad), -np.sin(rotation_angle_rad)],
+                        [0, np.sin(rotation_angle_rad), np.cos(rotation_angle_rad)]
+                    ])
+                elif rotation_axis == 'y':
+                    # Rotation around Y-axis
+                    R_rotation = np.array([
+                        [np.cos(rotation_angle_rad), 0, np.sin(rotation_angle_rad)],
+                        [0, 1, 0],
+                        [-np.sin(rotation_angle_rad), 0, np.cos(rotation_angle_rad)]
+                    ])
+                elif rotation_axis == 'z':
+                    # Rotation around Z-axis
+                    R_rotation = np.array([
+                        [np.cos(rotation_angle_rad), -np.sin(rotation_angle_rad), 0],
+                        [np.sin(rotation_angle_rad), np.cos(rotation_angle_rad), 0],
+                        [0, 0, 1]
+                    ])
+                else:
+                    self.get_logger().error(f'Invalid rotation_axis: {rotation_axis}. Use x, y, or z')
+                    R_rotation = np.eye(3)
+                
+                # Apply rotation to all orientations
+                orientations_world = np.array([R_rotation @ orientations_world[i] for i in range(len(orientations_world))])
+                self.get_logger().info(f'Applied {rotation_angle_deg}° rotation around {rotation_axis}-axis to all orientations')
+            
+            self.get_logger().info(f'Transformed to world frame: X=[{np.min(positions_world[:,0]):.4f}, {np.max(positions_world[:,0]):.4f}] m')
+            self.get_logger().info(f'                            Y=[{np.min(positions_world[:,1]):.4f}, {np.max(positions_world[:,1]):.4f}] m')
+            self.get_logger().info(f'                            Z=[{np.min(positions_world[:,2]):.4f}, {np.max(positions_world[:,2]):.4f}] m')
+            
             #Create PoseArray message with positions + quaternions
             trajectory_msg = PoseArray()
             trajectory_msg.header.stamp = self.get_clock().now().to_msg()
             trajectory_msg.header.frame_id = self.get_parameter('frame_id').value
             
-            for i in range(len(adjusted_positions)):
+            for i in range(len(positions_world)):
                 pose = Pose()
-                #Position in meters
-                pose.position.x = float(adjusted_positions[i][0])
-                pose.position.y = float(adjusted_positions[i][1])
-                pose.position.z = float(adjusted_positions[i][2])
+                #Position in meters (world frame)
+                pose.position.x = float(positions_world[i][0])
+                pose.position.y = float(positions_world[i][1])
+                pose.position.z = float(positions_world[i][2])
                 
-                #Convert rotation matrix to quaternion
+                #Convert rotation matrix to quaternion (world frame)
                 try:
-                    rot = R.from_matrix(orientations[i])
+                    rot = R.from_matrix(orientations_world[i])
                     quat = rot.as_quat()  # Returns [x, y, z, w]
                     pose.orientation.x = float(quat[0])
                     pose.orientation.y = float(quat[1])
@@ -411,10 +514,21 @@ if ROS2_AVAILABLE:
                 
                 trajectory_msg.poses.append(pose)
             
-            self.trajectory_pub.publish(trajectory_msg)
-            self.get_logger().info(f'Published {len(adjusted_positions)} waypoints with quaternions')
+            # Store for re-publishing
+            self.last_trajectory_msg = trajectory_msg
             
-            return adjusted_positions, orientations
+            self.trajectory_pub.publish(trajectory_msg)
+            self.get_logger().info(f'Published {len(positions_world)} waypoints with quaternions in world frame')
+            
+            return positions_world, orientations_world
+        
+        def republish_trajectory(self):
+            """Republish the last trajectory periodically for late-joining subscribers."""
+            if self.last_trajectory_msg is not None:
+                # Update timestamp
+                self.last_trajectory_msg.header.stamp = self.get_clock().now().to_msg()
+                self.trajectory_pub.publish(self.last_trajectory_msg)
+                self.get_logger().info(f'Republished path with {len(self.last_trajectory_msg.poses)} waypoints', throttle_duration_sec=10.0)
 
     def main(args=None):
         rclpy.init(args=args)

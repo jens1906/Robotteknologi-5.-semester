@@ -23,9 +23,9 @@ class CorrosionDetector(Node):
     def __init__(self):
         super().__init__('corrosion_detector')
         
-        # QoS profile for image topics (best effort for network transmission)
+        # QoS profile for image topics (reliable to match RealSense camera settings)
         image_qos = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.VOLATILE,
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=5
@@ -66,6 +66,8 @@ class CorrosionDetector(Node):
         depth_sub = message_filters.Subscriber(self, Image, '/camera/aligned_depth_to_color/image_raw', qos_profile=image_qos)
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
+        
+        self.get_logger().info('Waiting for camera topics: /camera/color/image_raw and /camera/aligned_depth_to_color/image_raw')
 
         self.corrosion_accepted = False  
         self.running_status = False 
