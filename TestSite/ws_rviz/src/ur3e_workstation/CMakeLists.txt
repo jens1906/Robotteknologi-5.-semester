@@ -33,6 +33,8 @@ install(PROGRAMS
   scripts/line_simulator.py
   scripts/line_visualizer.py
   scripts/follow_line_cartesian.py
+  scripts/point_visualizer.py
+  scripts/single_point_publisher.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

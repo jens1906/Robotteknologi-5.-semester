@@ -61,8 +61,8 @@ class LineVisualizer(Node):
         # Transformation from mount frame (incoming data) to base_link frame
         # Robot base_link is at [0, -0.218, 0] relative to mount with rotation rpy=[-90°, 0, 180°]
         # Adjust X and Z if needed to fine-tune the transformation
-        mount_to_base_translation = np.array([0.0, 0.0, 0.0])  # TODO: Adjust X and Z if needed
-        mount_to_base_rotation = Rot.from_euler('xyz', [0, 0, -180], degrees=True)
+        mount_to_base_translation = np.array([0.20, -0.218, 0.25])  # TODO: Adjust X and Z if needed
+        mount_to_base_rotation = Rot.from_euler('xyz', [90, 0, 0], degrees=True)
         
         # Clear previous markers
         marker_array = MarkerArray()

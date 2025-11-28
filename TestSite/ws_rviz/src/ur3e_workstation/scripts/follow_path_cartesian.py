@@ -8,6 +8,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Pose
 from std_msgs.msg import Float64MultiArray
+from visualization_msgs.msg import Marker, MarkerArray
 from moveit_msgs.srv import GetCartesianPath
 from moveit_msgs.action import ExecuteTrajectory
 from moveit_msgs.msg import RobotTrajectory
@@ -79,12 +80,98 @@ class CartesianPathFollower(Node):
             self.path_callback,
             10
         )
+
+        # Subscribe to RViz visualization topics to build poses from positions + orientations
+        self.line_path_sub = self.create_subscription(
+            Marker,
+            '/line_path',
+            self.line_path_callback,
+            10
+        )
+        self.line_viz_sub = self.create_subscription(
+            MarkerArray,
+            '/line_visualization',
+            self.line_viz_callback,
+            10
+        )
         
         self.waypoints = []
         self.path_received = False
         self.executing = False  # Flag to prevent path updates during execution
+        # Buffers for RViz-derived inputs
+        self._rviz_positions = []  # list of (x,y,z)
+        self._rviz_orientations = []  # list of (qx,qy,qz,qw)
         
         self.get_logger().info('Waiting for scanning path on /tool_orientation/xyz_rotation...')
+        self.get_logger().info('Also listening to /line_path (positions) and /line_visualization (orientations)')
+
+    def line_path_callback(self, marker: Marker):
+        """Capture positions from LINE_STRIP marker published on /line_path (in base_link frame)."""
+        if self.executing:
+            return
+        try:
+            pts = marker.points
+            self._rviz_positions = [(p.x, p.y, p.z) for p in pts]
+            self.get_logger().info(f'Received /line_path with {len(self._rviz_positions)} positions')
+            self._try_build_waypoints_from_rviz()
+        except Exception as e:
+            self.get_logger().warn(f'/line_path parse failed: {e}')
+
+    def line_viz_callback(self, arr: MarkerArray):
+        """Capture orientations from ARROW markers in /line_visualization (in base_link frame)."""
+        if self.executing:
+            return
+        try:
+            # Expect 3 arrows per point (x,y,z axes) plus spheres; use the first arrow in each ns group
+            # We'll gather unique ns entries by point index and take orientation from initial arrow id per point.
+            orient_by_ns = {}
+            for m in arr.markers:
+                if m.type == Marker.ARROW:
+                    # ns like 'point_i' per visualizer
+                    key = m.ns
+                    # prefer lowest id per ns
+                    if key not in orient_by_ns or m.id < orient_by_ns[key][0]:
+                        q = m.pose.orientation
+                        orient_by_ns[key] = (m.id, (q.x, q.y, q.z, q.w))
+            # Sort by ns order if possible; fallback to id ordering
+            items = list(orient_by_ns.items())
+            # Extract index from ns 'point_i' if present
+            def ns_index(ns):
+                try:
+                    if 'point_' in ns:
+                        return int(ns.split('point_')[-1])
+                except Exception:
+                    pass
+                return None
+            items.sort(key=lambda kv: (ns_index(kv[0]) if ns_index(kv[0]) is not None else 1e9, kv[1][0]))
+            self._rviz_orientations = [kv[1][1] for kv in items]
+            self.get_logger().info(f'Received /line_visualization with {len(self._rviz_orientations)} orientations')
+            self._try_build_waypoints_from_rviz()
+        except Exception as e:
+            self.get_logger().warn(f'/line_visualization parse failed: {e}')
+
+    def _try_build_waypoints_from_rviz(self):
+        """If we have both positions and orientations, build Pose waypoints and set as path."""
+        if not self._rviz_positions or not self._rviz_orientations:
+            return
+        n = min(len(self._rviz_positions), len(self._rviz_orientations))
+        if n < 1:
+            return
+        self.waypoints = []
+        for i in range(n):
+            x, y, z = self._rviz_positions[i]
+            qx, qy, qz, qw = self._rviz_orientations[i]
+            pose = Pose()
+            pose.position.x = float(x)
+            pose.position.y = float(y)
+            pose.position.z = float(z)
+            pose.orientation.x = float(qx)
+            pose.orientation.y = float(qy)
+            pose.orientation.z = float(qz)
+            pose.orientation.w = float(qw)
+            self.waypoints.append(pose)
+        self.path_received = True
+        self.get_logger().info(f'✓ Built {len(self.waypoints)} waypoints from RViz topics')
     
     def path_callback(self, msg):
         """Parse received path - but ignore updates during execution."""

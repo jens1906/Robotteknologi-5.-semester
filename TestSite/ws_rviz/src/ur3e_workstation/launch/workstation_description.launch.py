@@ -14,6 +14,7 @@ def launch_setup(context, *args, **kwargs):
     ur_type = LaunchConfiguration("ur_type")
     robot_ip = LaunchConfiguration("robot_ip")
     use_mock_hardware = LaunchConfiguration("use_mock_hardware")
+    base_at_world_origin = LaunchConfiguration("base_at_world_origin")
     
     # Get workstation URDF with ros2_control
     workstation_xacro = PathJoinSubstitution([
@@ -28,6 +29,7 @@ def launch_setup(context, *args, **kwargs):
         " ur_type:=", ur_type,
         " robot_ip:=", robot_ip,
         " use_mock_hardware:=", use_mock_hardware,
+        " base_at_world_origin:=", base_at_world_origin,
     ])
 
     robot_description = {"robot_description": robot_description_content}
@@ -68,6 +70,14 @@ def generate_launch_description():
             "use_mock_hardware",
             default_value="true",
             description="Start robot with mock hardware mirroring command to its states.",
+        )
+    )
+
+    declared_arguments.append(
+        DeclareLaunchArgument(
+            "base_at_world_origin",
+            default_value="false",
+            description="Place robot base at the world origin (true/false)",
         )
     )
 
