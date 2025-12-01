@@ -12,7 +12,13 @@ from scipy.ndimage import median_filter
 import os
 from datetime import datetime  
 
-c = (480 / 2, 640 / 2)
+# Camera intrinsics from /camera/color/camera_info
+# K matrix: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
+fx = 615.389  # Focal length X (pixels)
+fy = 615.737  # Focal length Y (pixels)
+cx = 324.183  # Principal point X (pixels)
+cy = 242.415  # Principal point Y (pixels)
+
 kernel = np.ones((5, 5), np.uint8)
 
 showImages = True
@@ -42,6 +48,29 @@ class CorrosionDetector(Node):
         if printlogger:
             self.get_logger().info('Hand-Eye Calibration Matrix loaded')
             self.get_logger().info(f'T_camera_to_ee:\n{self.T_camera_to_ee}')
+        
+        # Transform from world to base_link (from URDF: world→bordplade→mount→base_link)
+        T_world_to_base = np.array([
+            [-1.000, -0.000,  0.000,  0.200],
+            [-0.000,  0.000, -1.000,  0.218],
+            [-0.000, -1.000, -0.000,  -0.250],
+            [ 0.000,  0.000,  0.000,  1.000]
+        ])
+        
+        # Compute inverse: base_link to world (for transforming point clouds)
+        R = T_world_to_base[:3, :3]  # Rotation part
+        t = T_world_to_base[:3, 3]   # Translation part (in meters)
+        
+        # Inverse: R^T and -R^T @ t
+        R_inv = R.T
+        t_inv = -R_inv @ t
+        
+        self.T_base_to_world = np.eye(4)
+        self.T_base_to_world[:3, :3] = R_inv
+        self.T_base_to_world[:3, 3] = t_inv * 1000.0  # Convert translation to mm for consistency
+        
+        self.get_logger().info('Transform base_link → world (translation in mm):')
+        self.get_logger().info(f'  Translation: [{self.T_base_to_world[0,3]:.3f}, {self.T_base_to_world[1,3]:.3f}, {self.T_base_to_world[2,3]:.3f}] mm')
         
         self.toolsizes = [30, 25]  # Example tool sizes in mm
 
@@ -122,10 +151,18 @@ class CorrosionDetector(Node):
             t = transform_stamped.transform
             self.combined_transformation_of_ur = self.transform_to_homogeneous_matrix(t)
             
+            # Convert translation from metres to millimetres for consistency with camera points
+            self.combined_transformation_of_ur[0:3, 3] *= 1000.0
+            
+            # Print end-effector → base transformation matrix
             if printlogger:
-                self.get_logger().info(f'Transform: x={t.translation.x:.3f}, '
-                                     f'y={t.translation.y:.3f}, '
-                                     f'z={t.translation.z:.3f}')
+                self.get_logger().info('='*60)
+                self.get_logger().info('End-Effector → Base Transform Matrix (from /tf):')
+                self.get_logger().info(f'\n{self.combined_transformation_of_ur}')
+                trans = self.combined_transformation_of_ur[0:3, 3]
+                self.get_logger().info(f'Translation (m): [{trans[0]:.4f}, {trans[1]:.4f}, {trans[2]:.4f}]')
+                self.get_logger().info(f'Translation (mm): [{trans[0]:.1f}, {trans[1]:.1f}, {trans[2]:.1f}]')
+                self.get_logger().info('='*60)
             
             return True
             
@@ -394,6 +431,7 @@ class CorrosionDetector(Node):
         # Combine transformations: Camera -> End-effector -> Base
         if self.combined_transformation_of_ur is not None:
             # Combined transformation matrix
+
             T_total = self.combined_transformation_of_ur @ self.T_camera_to_ee
             
             # Apply combined transformation in one step: T_total @ points^T -> (4, N)
@@ -434,28 +472,52 @@ class CorrosionDetector(Node):
         
         # Transform ORIGINAL data (camera pixel + depth -> camera XYZ)
         depth_values_orig = depth[scatter_data_original[:, 1], scatter_data_original[:, 0]]
-        xyz_camera_original = np.column_stack(((scatter_data_original[:, 0] - c[0]) * depth_values_orig / (1.93/0.003), 
-                                                (scatter_data_original[:, 1] - c[1]) * depth_values_orig / (1.93/0.003), 
+        xyz_camera_original = np.column_stack(((scatter_data_original[:, 0] - cx) * depth_values_orig / fx, 
+                                                (scatter_data_original[:, 1] - cy) * depth_values_orig / fy, 
                                                 depth_values_orig))
         
         # Transform OFFSET data (camera pixel + depth -> camera XYZ)
         depth_values_offset = depth[scatter_data_offset[:, 1], scatter_data_offset[:, 0]]
-        xyz_camera_offset = np.column_stack(((scatter_data_offset[:, 0] - c[0]) * depth_values_offset / (1.93/0.003), 
-                                             (scatter_data_offset[:, 1] - c[1]) * depth_values_offset / (1.93/0.003), 
+        xyz_camera_offset = np.column_stack(((scatter_data_offset[:, 0] - cx) * depth_values_offset / fx, 
+                                             (scatter_data_offset[:, 1] - cy) * depth_values_offset / fy, 
                                              depth_values_offset))
         
-        # Apply hand-eye calibration to transform from camera frame to end-effector frame
-        xyz_ee_original = self.apply_hand_eye_transform(xyz_camera_original)
-        xyz_ee_offset = self.apply_hand_eye_transform(xyz_camera_offset)
+        # Apply hand-eye calibration to transform from camera frame to base_link frame
+        xyz_base_original = self.apply_hand_eye_transform(xyz_camera_original)
+        xyz_base_offset = self.apply_hand_eye_transform(xyz_camera_offset)
         
         if printlogger:
-            self.get_logger().info(f'Transformed {len(xyz_ee_original)} original points and {len(xyz_ee_offset)} offset points to end-effector frame')
+            self.get_logger().info(f'Transformed {len(xyz_base_original)} original points and {len(xyz_base_offset)} offset points to base_link frame')
         
-        return xyz_ee_original, xyz_ee_offset
+        # Transform from base_link to world frame (both points are in mm)
+        if len(xyz_base_original) > 0:
+            ones_orig = np.ones((xyz_base_original.shape[0], 1))
+            xyz_base_homogeneous_orig = np.hstack([xyz_base_original, ones_orig])
+            xyz_world_homogeneous_orig = (self.T_base_to_world @ xyz_base_homogeneous_orig.T).T
+            xyz_world_original = xyz_world_homogeneous_orig[:, :3]
+        else:
+            xyz_world_original = xyz_base_original
+        
+        if len(xyz_base_offset) > 0:
+            ones_offset = np.ones((xyz_base_offset.shape[0], 1))
+            xyz_base_homogeneous_offset = np.hstack([xyz_base_offset, ones_offset])
+            xyz_world_homogeneous_offset = (self.T_base_to_world @ xyz_base_homogeneous_offset.T).T
+            xyz_world_offset = xyz_world_homogeneous_offset[:, :3]
+        else:
+            xyz_world_offset = xyz_base_offset
+        
+        if printlogger:
+            self.get_logger().info(f'Transformed to world frame: {len(xyz_world_original)} corrosion points, {len(xyz_world_offset)} workspace points')
+            if len(xyz_world_original) > 0:
+                self.get_logger().info(f'  Corrosion X range: [{xyz_world_original[:,0].min():.1f}, {xyz_world_original[:,0].max():.1f}] mm')
+                self.get_logger().info(f'  Corrosion Y range: [{xyz_world_original[:,1].min():.1f}, {xyz_world_original[:,1].max():.1f}] mm')
+                self.get_logger().info(f'  Corrosion Z range: [{xyz_world_original[:,2].min():.1f}, {xyz_world_original[:,2].max():.1f}] mm')
+        
+        return xyz_world_original, xyz_world_offset
     
     def visualize_point_cloud(self, xyz_corrosion, xyz_workspace, color_image):
         """
-        Visualize the 3D point cloud in base frame coordinates.
+        Visualize the 3D point cloud in world frame coordinates.
         Shows both the corrosion area and workspace boundary.
         """
         try:
@@ -475,7 +537,7 @@ class CorrosionDetector(Node):
             ax1.set_xlabel('X (mm)')
             ax1.set_ylabel('Y (mm)')
             ax1.set_zlabel('Z (mm)')
-            ax1.set_title('3D Point Cloud (Base Frame)')
+            ax1.set_title('3D Point Cloud (World Frame)')
             ax1.legend()
             
             # Top view (XY plane)

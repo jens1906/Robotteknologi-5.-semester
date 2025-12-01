@@ -307,30 +307,6 @@ if ROS2_AVAILABLE:
             self.declare_parameter('orientation_rotation_angle_deg', 0)  # Rotation angle in degrees (0, 90, 180, 270)
             self.declare_parameter('frame_id', 'world')  # MoveIt planning frame
             
-            # Transform from world to base_link (from tf2_echo world base_link)
-            T_world_to_base = np.array([
-                [-1.000, -0.000,  0.000,  0.200],
-                [-0.000,  0.000, -1.000, -0.218],
-                [-0.000, -1.000, -0.000,  -0.650],
-                [ 0.000,  0.000,  0.000,  1.000]
-            ])
-            
-            # We need the INVERSE: base_link to world
-            # Calculate inverse of homogeneous transformation matrix
-            R = T_world_to_base[:3, :3]  # Rotation part
-            t = T_world_to_base[:3, 3]   # Translation part
-            
-            # Inverse: R^T and -R^T @ t
-            R_inv = R.T
-            t_inv = -R_inv @ t
-            
-            self.T_base_to_world = np.eye(4)
-            self.T_base_to_world[:3, :3] = R_inv
-            self.T_base_to_world[:3, 3] = t_inv
-            
-            self.get_logger().info('Transform base_link → world:')
-            self.get_logger().info(f'  Translation: [{t_inv[0]:.3f}, {t_inv[1]:.3f}, {t_inv[2]:.3f}]')
-            
             #Storage for received data
             self.path_xyz = None
             self.on_surface = None
@@ -393,12 +369,12 @@ if ROS2_AVAILABLE:
         def compute_and_publish_orientations(self, path_xyz, on_surface, dt=0.1, neighbor_range=3, off_surface_height=0.05):
             #Compute orientations and publish positions + rotation matrices
 
-            #INPUT: path_xyz is in MILLIMETERS (from camera/corrosion detection)
-            #OUTPUT: positions should be in METERS (for robot)
+            #INPUT: path_xyz is in MILLIMETERS and WORLD FRAME (from corrosion detection)
+            #OUTPUT: positions should be in METERS and WORLD FRAME (for robot)
             
-            self.get_logger().info(f'Input path_xyz range: X=[{np.min(path_xyz[:,0]):.1f}, {np.max(path_xyz[:,0]):.1f}] mm')
-            self.get_logger().info(f'                      Y=[{np.min(path_xyz[:,1]):.1f}, {np.max(path_xyz[:,1]):.1f}] mm')
-            self.get_logger().info(f'                      Z=[{np.min(path_xyz[:,2]):.1f}, {np.max(path_xyz[:,2]):.1f}] mm')
+            self.get_logger().info(f'Input path_xyz (world frame) range: X=[{np.min(path_xyz[:,0]):.1f}, {np.max(path_xyz[:,0]):.1f}] mm')
+            self.get_logger().info(f'                                    Y=[{np.min(path_xyz[:,1]):.1f}, {np.max(path_xyz[:,1]):.1f}] mm')
+            self.get_logger().info(f'                                    Z=[{np.min(path_xyz[:,2]):.1f}, {np.max(path_xyz[:,2]):.1f}] mm')
             
             #First compute base orientations for all points (input in mm)
             positions_mm, orientations = compute_orientations_from_xyz(path_xyz, dt, neighbor_range)
@@ -419,19 +395,14 @@ if ROS2_AVAILABLE:
                 f'(offset: {off_surface_height*1000:.1f} mm = {off_surface_height*100:.1f} cm)'
             )
             
-            self.get_logger().info(f'Output positions range: X=[{np.min(adjusted_positions[:,0]):.4f}, {np.max(adjusted_positions[:,0]):.4f}] m')
-            self.get_logger().info(f'                        Y=[{np.min(adjusted_positions[:,1]):.4f}, {np.max(adjusted_positions[:,1]):.4f}] m')
-            self.get_logger().info(f'                        Z=[{np.min(adjusted_positions[:,2]):.4f}, {np.max(adjusted_positions[:,2]):.4f}] m')
+            self.get_logger().info(f'Output positions (world frame) range: X=[{np.min(adjusted_positions[:,0]):.4f}, {np.max(adjusted_positions[:,0]):.4f}] m')
+            self.get_logger().info(f'                                      Y=[{np.min(adjusted_positions[:,1]):.4f}, {np.max(adjusted_positions[:,1]):.4f}] m')
+            self.get_logger().info(f'                                      Z=[{np.min(adjusted_positions[:,2]):.4f}, {np.max(adjusted_positions[:,2]):.4f}] m')
             
-            # Transform positions from base_link to world frame
-            ones = np.ones((len(adjusted_positions), 1))
-            positions_homogeneous = np.hstack([adjusted_positions, ones])  # Nx4
-            positions_world_homogeneous = (self.T_base_to_world @ positions_homogeneous.T).T  # Apply transform
-            positions_world = positions_world_homogeneous[:, :3]  # Extract XYZ
+            # Points are already in world frame from corrosion detection node
+            positions_world = adjusted_positions
             
-            # Transform orientations from base_link to world frame
-            R_base_to_world = self.T_base_to_world[:3, :3]  # Extract rotation matrix
-            
+            # Orientations are computed in the local surface frame, use identity or apply rotation
             # Option to use identity orientation (simpler, more reachable)
             use_identity = self.get_parameter('use_identity_orientation').value
             if use_identity:
@@ -440,8 +411,8 @@ if ROS2_AVAILABLE:
                 orientations_world = np.array([identity_orientation for _ in range(len(orientations))])
                 self.get_logger().info('Using identity orientation (tool pointing down) for all waypoints')
             else:
-                # Transform computed orientations to world frame
-                orientations_world = np.array([R_base_to_world @ orientations[i] for i in range(len(orientations))])
+                # Use computed surface-normal orientations (already in appropriate frame)
+                orientations_world = orientations
                 self.get_logger().info('Using computed surface-normal orientations')
             
             # Apply rotation if specified
@@ -479,10 +450,6 @@ if ROS2_AVAILABLE:
                 # Apply rotation to all orientations
                 orientations_world = np.array([R_rotation @ orientations_world[i] for i in range(len(orientations_world))])
                 self.get_logger().info(f'Applied {rotation_angle_deg}° rotation around {rotation_axis}-axis to all orientations')
-            
-            self.get_logger().info(f'Transformed to world frame: X=[{np.min(positions_world[:,0]):.4f}, {np.max(positions_world[:,0]):.4f}] m')
-            self.get_logger().info(f'                            Y=[{np.min(positions_world[:,1]):.4f}, {np.max(positions_world[:,1]):.4f}] m')
-            self.get_logger().info(f'                            Z=[{np.min(positions_world[:,2]):.4f}, {np.max(positions_world[:,2]):.4f}] m')
             
             #Create PoseArray message with positions + quaternions
             trajectory_msg = PoseArray()
