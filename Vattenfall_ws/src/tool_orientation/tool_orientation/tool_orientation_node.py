@@ -129,48 +129,75 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3, prev_normal
     return normal
 
 
-def orientation_matrix_from_path(velocity, normal):
-    #Compute orientation matrix at a point
-    #Args: velocity (3,) vector, normal (3,) vector
-    #Returns: R (3, 3) rotation matrix
-    
+def orientation_matrix_min_twist(velocity, normal, prev_ex=None):
+    #Compute orientation matrix using a rotation-minimizing frame
+    #Args: velocity (3,) vector, normal (3,) vector, prev_ex optional previous x-axis
+    #Returns: R (3,3) rotation matrix minimizing twist along path
+
     #Tool z-axis points into surface (opposite of normal)
     ez = normalize(-normal)
-    
-    #Tool feed direction (tangent to path)
+
+    #Determine feed direction projected onto plane perpendicular to ez
     vel_norm = np.linalg.norm(velocity)
     if vel_norm < 1e-10:
-        #Zero velocity (stationary point or duplicate)
-        #Use a default feed direction perpendicular to normal
-        if abs(ez[2]) < 0.99:  #Normal not vertical
-            e_gamma = np.array([1, 0, 0])  #Default to X direction
-        else:  #Normal is vertical
-            e_gamma = np.array([0, 1, 0])  #Default to Y direction
-        e_gamma = normalize(e_gamma - np.dot(e_gamma, ez) * ez)  #Make perpendicular to ez
+        fallback = np.array([1.0, 0.0, 0.0])
+        if abs(np.dot(fallback, ez)) > 0.95:
+            fallback = np.array([0.0, 1.0, 0.0])
+        e_gamma = fallback
     else:
         e_gamma = velocity / vel_norm
-    
-    #Tool y-axis perpendicular to tool axis and feed direction
-    ey_cross = np.cross(-ez, e_gamma)
-    ey_norm = np.linalg.norm(ey_cross)
-    
+    e_gamma = e_gamma - np.dot(e_gamma, ez) * ez
+    if np.linalg.norm(e_gamma) < 1e-10:
+        #Velocity parallel to ez; pick arbitrary tangent direction
+        e_gamma = np.array([1.0, 0.0, 0.0])
+        if abs(np.dot(e_gamma, ez)) > 0.95:
+            e_gamma = np.array([0.0, 1.0, 0.0])
+        e_gamma = e_gamma - np.dot(e_gamma, ez) * ez
+
+    #Temporary Y-axis from cross product between -ez (surface normal) and feed
+    ey_temp = np.cross(-ez, e_gamma)
+    ey_norm = np.linalg.norm(ey_temp)
     if ey_norm < 1e-10:
-        #e_gamma and ez are parallel/antiparallel
-        #Choose arbitrary perpendicular direction
-        if abs(ez[0]) < 0.99:
-            ey = normalize(np.cross(ez, np.array([1, 0, 0])))
-        else:
-            ey = normalize(np.cross(ez, np.array([0, 1, 0])))
+        helper = np.array([0.0, 0.0, 1.0])
+        if abs(np.dot(helper, ez)) > 0.95:
+            helper = np.array([0.0, 1.0, 0.0])
+        ey_temp = np.cross(-ez, helper)
+        ey_norm = np.linalg.norm(ey_temp)
+        if ey_norm < 1e-10:
+            ey_temp = np.array([0.0, 1.0, 0.0])
+    ey_temp = ey_temp / np.linalg.norm(ey_temp)
+
+    #Default x-axis from temporary frame
+    ex_default = np.cross(ey_temp, ez)
+    ex_default = normalize(ex_default)
+    ey_default = ey_temp
+
+    ex = ex_default
+    ey = ey_default
+
+    #Apply rotation-minimizing projection of previous x-axis if available
+    if prev_ex is not None:
+        proj = prev_ex - np.dot(prev_ex, ez) * ez
+        proj_norm = np.linalg.norm(proj)
+        if proj_norm > 1e-6:
+            ex_candidate = proj / proj_norm
+            ey_candidate = np.cross(-ez, ex_candidate)
+            ey_candidate_norm = np.linalg.norm(ey_candidate)
+            if ey_candidate_norm > 1e-6:
+                ex = ex_candidate
+                ey = ey_candidate / ey_candidate_norm
+
+    #Ensure orthonormality without altering ez direction
+    ex = normalize(ex)
+    ey = np.cross(-ez, ex)
+    ey_norm = np.linalg.norm(ey)
+    if ey_norm < 1e-10:
+        ey = ey_default
     else:
-        ey = ey_cross / ey_norm
-    
-    #Tool x-axis completes right-handed frame
-    ex = np.cross(ey, ez)
-    ex = normalize(ex)  #Ensure unit length
-    
-    #Construct rotation matrix (columns are basis vectors)
+        ey = ey / ey_norm
+    ex = normalize(np.cross(ey, ez))
+
     R = np.column_stack([ex, ey, ez])
-    
     return R
 
 def apply_off_surface_offset(positions, orientations, on_surface, offset_distance=0.05):
@@ -209,6 +236,7 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
     
     #Step 3: Process each point
     prev_normal = None
+    prev_ex = None
     for i in range(n_points):
         velocity = velocities[i]
         
@@ -216,7 +244,7 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
         normal = compute_normal_from_neighbors(path_xyz, i, neighbor_range, prev_normal)
         
         #Compute orientation matrix
-        R = orientation_matrix_from_path(velocity, normal)
+        R = orientation_matrix_min_twist(velocity, normal, prev_ex)
         
         #Enforce consistent surface-facing Z-axis
         if smooth_orientations and i > 0:
@@ -224,10 +252,11 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
             curr_z = R[:, 2]
             if np.dot(prev_z, curr_z) < 0:
                 normal = -normal
-                R = orientation_matrix_from_path(velocity, normal)
+                R = orientation_matrix_min_twist(velocity, normal, prev_ex)
         
         orientations[i] = R
         prev_normal = normal
+        prev_ex = R[:, 0]
     
     return path_xyz, orientations
 
