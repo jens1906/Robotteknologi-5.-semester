@@ -154,41 +154,41 @@ def orientation_matrix_from_path(velocity, normal):
     #Args: velocity (3,) vector, normal (3,) vector
     #Returns: R (3, 3) rotation matrix
     
-    #Tool z-axis points into surface (opposite of normal)
-    ez = normalize(-normal)
+    #For UR robots, Y-axis points along the tool (into surface)
+    #Z-axis points up/perpendicular to tool
+    #X-axis completes the right-handed frame
     
-    #Tool feed direction (tangent to path)
+    #Tool Y-axis points into surface (opposite of normal)
+    ey = normalize(-normal)
+    
+    #Tool feed direction (tangent to path) - this will be X-axis
     vel_norm = np.linalg.norm(velocity)
     if vel_norm < 1e-10:
         #Zero velocity (stationary point or duplicate)
         #Use a default feed direction perpendicular to normal
-        if abs(ez[2]) < 0.99:  #Normal not vertical
-            e_gamma = np.array([1, 0, 0])  #Default to X direction
+        if abs(ey[2]) < 0.99:  #Normal not vertical
+            feed_dir = np.array([1, 0, 0])  #Default to X direction
         else:  #Normal is vertical
-            e_gamma = np.array([0, 1, 0])  #Default to Y direction
-        e_gamma = normalize(e_gamma - np.dot(e_gamma, ez) * ez)  #Make perpendicular to ez
+            feed_dir = np.array([0, 1, 0])  #Default to Y direction
+        feed_dir = normalize(feed_dir - np.dot(feed_dir, ey) * ey)  #Make perpendicular to ey
     else:
-        e_gamma = velocity / vel_norm
+        #Project velocity onto plane perpendicular to tool axis
+        feed_dir = normalize(velocity - np.dot(velocity, ey) * ey)
+        if np.linalg.norm(feed_dir) < 1e-10:
+            #Velocity parallel to tool axis, choose arbitrary perpendicular
+            if abs(ey[0]) < 0.99:
+                feed_dir = normalize(np.cross(np.array([1, 0, 0]), ey))
+            else:
+                feed_dir = normalize(np.cross(np.array([0, 1, 0]), ey))
     
-    #Tool y-axis perpendicular to tool axis and feed direction
-    ey_cross = np.cross(-ez, e_gamma)
-    ey_norm = np.linalg.norm(ey_cross)
+    #Tool Z-axis perpendicular to both X and Y (completes right-handed frame)
+    ez = np.cross(feed_dir, ey)
+    ez = normalize(ez)
     
-    if ey_norm < 1e-10:
-        #e_gamma and ez are parallel/antiparallel
-        #Choose arbitrary perpendicular direction
-        if abs(ez[0]) < 0.99:
-            ey = normalize(np.cross(ez, np.array([1, 0, 0])))
-        else:
-            ey = normalize(np.cross(ez, np.array([0, 1, 0])))
-    else:
-        ey = ey_cross / ey_norm
+    #Tool X-axis is the feed direction
+    ex = feed_dir
     
-    #Tool x-axis completes right-handed frame
-    ex = np.cross(ey, ez)
-    ex = normalize(ex)  #Ensure unit length
-    
-    #Construct rotation matrix (columns are basis vectors)
+    #Construct rotation matrix (columns are basis vectors: X, Y, Z)
     R = np.column_stack([ex, ey, ez])
     
     return R
