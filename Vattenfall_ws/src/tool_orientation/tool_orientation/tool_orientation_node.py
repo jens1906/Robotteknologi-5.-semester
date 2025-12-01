@@ -146,34 +146,26 @@ def orientation_matrix_min_twist(velocity, normal, prev_ex=None):
         e_gamma = fallback
     else:
         e_gamma = velocity / vel_norm
-    e_gamma = e_gamma - np.dot(e_gamma, ez) * ez
-    if np.linalg.norm(e_gamma) < 1e-10:
+
+    e_gamma_proj = e_gamma - np.dot(e_gamma, ez) * ez
+    proj_norm = np.linalg.norm(e_gamma_proj)
+    if proj_norm < 1e-10:
         #Velocity parallel to ez; pick arbitrary tangent direction
-        e_gamma = np.array([1.0, 0.0, 0.0])
-        if abs(np.dot(e_gamma, ez)) > 0.95:
-            e_gamma = np.array([0.0, 1.0, 0.0])
-        e_gamma = e_gamma - np.dot(e_gamma, ez) * ez
+        fallback = np.array([1.0, 0.0, 0.0])
+        if abs(np.dot(fallback, ez)) > 0.95:
+            fallback = np.array([0.0, 1.0, 0.0])
+        e_gamma_proj = fallback - np.dot(fallback, ez) * ez
+        proj_norm = np.linalg.norm(e_gamma_proj)
+        if proj_norm < 1e-10:
+            helper = np.array([0.0, 0.0, 1.0])
+            e_gamma_proj = np.cross(ez, helper)
+            proj_norm = np.linalg.norm(e_gamma_proj)
+            if proj_norm < 1e-10:
+                e_gamma_proj = np.array([1.0, 0.0, 0.0])
 
-    #Temporary Y-axis from cross product between -ez (surface normal) and feed
-    ey_temp = np.cross(-ez, e_gamma)
-    ey_norm = np.linalg.norm(ey_temp)
-    if ey_norm < 1e-10:
-        helper = np.array([0.0, 0.0, 1.0])
-        if abs(np.dot(helper, ez)) > 0.95:
-            helper = np.array([0.0, 1.0, 0.0])
-        ey_temp = np.cross(-ez, helper)
-        ey_norm = np.linalg.norm(ey_temp)
-        if ey_norm < 1e-10:
-            ey_temp = np.array([0.0, 1.0, 0.0])
-    ey_temp = ey_temp / np.linalg.norm(ey_temp)
-
-    #Default x-axis from temporary frame
-    ex_default = np.cross(ey_temp, ez)
-    ex_default = normalize(ex_default)
-    ey_default = ey_temp
+    ex_default = e_gamma_proj / np.linalg.norm(e_gamma_proj)
 
     ex = ex_default
-    ey = ey_default
 
     #Apply rotation-minimizing projection of previous x-axis if available
     if prev_ex is not None:
@@ -181,21 +173,33 @@ def orientation_matrix_min_twist(velocity, normal, prev_ex=None):
         proj_norm = np.linalg.norm(proj)
         if proj_norm > 1e-6:
             ex_candidate = proj / proj_norm
-            ey_candidate = np.cross(-ez, ex_candidate)
-            ey_candidate_norm = np.linalg.norm(ey_candidate)
-            if ey_candidate_norm > 1e-6:
-                ex = ex_candidate
-                ey = ey_candidate / ey_candidate_norm
+            if np.dot(ex_candidate, ex_default) < 0:
+                ex_candidate = -ex_candidate
+            ex = ex_candidate
 
-    #Ensure orthonormality without altering ez direction
     ex = normalize(ex)
-    ey = np.cross(-ez, ex)
+
+    #Compute y-axis to keep right-handed frame
+    ey = np.cross(ez, ex)
     ey_norm = np.linalg.norm(ey)
     if ey_norm < 1e-10:
-        ey = ey_default
+        helper = np.array([0.0, 0.0, 1.0])
+        if abs(np.dot(helper, ez)) > 0.95:
+            helper = np.array([0.0, 1.0, 0.0])
+        ey = np.cross(ez, helper)
+        ey_norm = np.linalg.norm(ey)
+        if ey_norm < 1e-10:
+            ey = np.array([0.0, 1.0, 0.0])
+        else:
+            ey = ey / ey_norm
+        ex = normalize(np.cross(ey, ez))
     else:
         ey = ey / ey_norm
-    ex = normalize(np.cross(ey, ez))
+
+    #Final orthonormalization (keeps ez direction)
+    ex = normalize(ex)
+    ey = normalize(np.cross(ez, ex))
+    ez = normalize(ez)
 
     R = np.column_stack([ex, ey, ez])
     return R
