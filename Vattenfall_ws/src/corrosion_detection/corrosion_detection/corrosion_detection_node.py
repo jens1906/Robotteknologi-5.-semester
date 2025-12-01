@@ -21,6 +21,7 @@ cy = 242.415  # Principal point Y (pixels)
 
 kernel = np.ones((5, 5), np.uint8)
 
+saveImages = False
 showImages = True
 printlogger = False
 
@@ -53,7 +54,7 @@ class CorrosionDetector(Node):
         T_world_to_base = np.array([
             [-1.000, -0.000,  0.000,  0.200],
             [-0.000,  0.000, -1.000,  0.218],
-            [-0.000, -1.000, -0.000,  -0.250],
+            [-0.000, -1.000, -0.000,  -0.650],
             [ 0.000,  0.000,  0.000,  1.000]
         ])
         
@@ -351,8 +352,8 @@ class CorrosionDetector(Node):
             msg.data = self.toolsizes
             self.corrosion_tool_size.publish(msg)
 
-            # Save to file original image, depth, corrosion point cloud and workspace pointcloud for record keeping
-            self.save_data(color_image, depth_image, xyz_data, xyz_offset)
+            if saveImages:
+                self.save_data(color_image, depth_image, xyz_data, xyz_offset)
 
 
 

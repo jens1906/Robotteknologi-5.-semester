@@ -44,13 +44,6 @@ def generate_launch_description():
             executable='tool_orientation_node',
             name='tool_orientation',
             output='screen',
-            parameters=[{
-                'dt': 0.1,
-                'neighbor_range': 3,
-                'use_identity_orientation': True,
-                'orientation_rotation_axis': 'x',
-                'orientation_rotation_angle_deg': 0
-            }],
         ),
         #Node(
         #    package='user_interface',
