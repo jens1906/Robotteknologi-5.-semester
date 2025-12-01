@@ -158,37 +158,41 @@ def orientation_matrix_from_path(velocity, normal):
     #Z-axis points up/perpendicular to tool
     #X-axis completes the right-handed frame
     
-    #Tool Y-axis points into surface (opposite of normal)
+    #Tool Y-axis points into surface (opposite of normal) - this is the tool axis
     ey = normalize(-normal)
     
-    #Tool feed direction (tangent to path) - this will be X-axis
+    #Compute feed direction from velocity (tangent to path)
     vel_norm = np.linalg.norm(velocity)
     if vel_norm < 1e-10:
-        #Zero velocity (stationary point or duplicate)
-        #Use a default feed direction perpendicular to normal
-        if abs(ey[2]) < 0.99:  #Normal not vertical
-            feed_dir = np.array([1, 0, 0])  #Default to X direction
-        else:  #Normal is vertical
-            feed_dir = np.array([0, 1, 0])  #Default to Y direction
-        feed_dir = normalize(feed_dir - np.dot(feed_dir, ey) * ey)  #Make perpendicular to ey
+        #Zero velocity - use default direction perpendicular to tool axis
+        if abs(ey[2]) < 0.99:  #Tool axis not vertical
+            e_feed = np.array([1, 0, 0])  #Default to X direction
+        else:  #Tool axis is vertical
+            e_feed = np.array([1, 0, 0])  #Default to X direction
+        e_feed = normalize(e_feed - np.dot(e_feed, ey) * ey)  #Ensure perpendicular to ey
     else:
-        #Project velocity onto plane perpendicular to tool axis
-        feed_dir = normalize(velocity - np.dot(velocity, ey) * ey)
-        if np.linalg.norm(feed_dir) < 1e-10:
-            #Velocity parallel to tool axis, choose arbitrary perpendicular
-            if abs(ey[0]) < 0.99:
-                feed_dir = normalize(np.cross(np.array([1, 0, 0]), ey))
-            else:
-                feed_dir = normalize(np.cross(np.array([0, 1, 0]), ey))
+        e_feed = normalize(velocity)
     
-    #Tool Z-axis perpendicular to both X and Y (completes right-handed frame)
-    ez = np.cross(feed_dir, ey)
-    ez = normalize(ez)
+    #Tool Z-axis perpendicular to Y (tool axis) and feed direction
+    #Use cross product to get perpendicular direction: Z = Y × feed
+    ez = np.cross(ey, e_feed)
+    ez_norm = np.linalg.norm(ez)
     
-    #Tool X-axis is the feed direction
-    ex = feed_dir
+    if ez_norm < 1e-10:
+        #Feed direction parallel to tool axis - choose arbitrary perpendicular
+        if abs(ey[0]) < 0.99:
+            ez = normalize(np.cross(ey, np.array([1, 0, 0])))
+        else:
+            ez = normalize(np.cross(ey, np.array([0, 1, 0])))
+    else:
+        ez = ez / ez_norm
+    
+    #Tool X-axis completes right-handed frame: X = Y × Z
+    ex = np.cross(ey, ez)
+    ex = normalize(ex)
     
     #Construct rotation matrix (columns are basis vectors: X, Y, Z)
+    #Y-axis is the tool axis (into surface)
     R = np.column_stack([ex, ey, ez])
     
     return R
@@ -204,10 +208,10 @@ def apply_off_surface_offset(positions, orientations, on_surface, offset_distanc
     for i in range(len(positions)):
         if not on_surface[i]:
             #Get the surface normal from the orientation matrix
-            #The tool z-axis (3rd column) points INTO the surface (negative normal)
-            #So the surface normal (outward) is the negative of the z-axis
-            tool_z_axis = orientations[i][:, 2]  # Third column
-            surface_normal = -tool_z_axis  # Flip to get outward normal
+            #The tool Y-axis (2nd column) points INTO the surface (negative normal)
+            #So the surface normal (outward) is the negative of the Y-axis
+            tool_y_axis = orientations[i][:, 1]  # Second column (Y-axis = tool axis)
+            surface_normal = -tool_y_axis  # Flip to get outward normal
             
             #Move position along surface normal by offset_distance
             adjusted_positions[i] = positions[i] + surface_normal * offset_distance
@@ -293,7 +297,7 @@ if ROS2_AVAILABLE:
             self.declare_parameter('dt', 0.1)
             self.declare_parameter('neighbor_range', 3)
             self.declare_parameter('off_surface_height', 0.05)  # 5 cm in meters
-            self.declare_parameter('frame_id', 'ee_link')  # Coordinate frame for visualization
+            self.declare_parameter('frame_id', 'world_link')  # Coordinate frame for visualization
             
             #Storage for received data
             self.path_xyz = None
