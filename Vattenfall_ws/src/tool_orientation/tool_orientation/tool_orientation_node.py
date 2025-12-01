@@ -154,45 +154,41 @@ def orientation_matrix_from_path(velocity, normal):
     #Args: velocity (3,) vector, normal (3,) vector
     #Returns: R (3, 3) rotation matrix
     
-    #For UR robots, Y-axis points along the tool (into surface)
-    #Z-axis points up/perpendicular to tool
-    #X-axis completes the right-handed frame
+    #Tool z-axis points into surface (opposite of normal)
+    ez = normalize(-normal)
     
-    #Tool Y-axis points into surface (opposite of normal) - this is the tool axis
-    ey = normalize(-normal)
-    
-    #Compute feed direction from velocity (tangent to path)
+    #Tool feed direction (tangent to path)
     vel_norm = np.linalg.norm(velocity)
     if vel_norm < 1e-10:
-        #Zero velocity - use default direction perpendicular to tool axis
-        if abs(ey[2]) < 0.99:  #Tool axis not vertical
-            e_feed = np.array([1, 0, 0])  #Default to X direction
-        else:  #Tool axis is vertical
-            e_feed = np.array([1, 0, 0])  #Default to X direction
-        e_feed = normalize(e_feed - np.dot(e_feed, ey) * ey)  #Ensure perpendicular to ey
+        #Zero velocity (stationary point or duplicate)
+        #Use a default feed direction perpendicular to normal
+        if abs(ez[2]) < 0.99:  #Normal not vertical
+            e_gamma = np.array([1, 0, 0])  #Default to X direction
+        else:  #Normal is vertical
+            e_gamma = np.array([0, 1, 0])  #Default to Y direction
+        e_gamma = normalize(e_gamma - np.dot(e_gamma, ez) * ez)  #Make perpendicular to ez
     else:
-        e_feed = normalize(velocity)
+        e_gamma = velocity / vel_norm
     
-    #Tool Z-axis perpendicular to Y (tool axis) and feed direction
-    #Use cross product to get perpendicular direction: Z = Y × feed
-    ez = np.cross(ey, e_feed)
-    ez_norm = np.linalg.norm(ez)
+    #Tool y-axis perpendicular to tool axis and feed direction
+    ey_cross = np.cross(-ez, e_gamma)
+    ey_norm = np.linalg.norm(ey_cross)
     
-    if ez_norm < 1e-10:
-        #Feed direction parallel to tool axis - choose arbitrary perpendicular
-        if abs(ey[0]) < 0.99:
-            ez = normalize(np.cross(ey, np.array([1, 0, 0])))
+    if ey_norm < 1e-10:
+        #e_gamma and ez are parallel/antiparallel
+        #Choose arbitrary perpendicular direction
+        if abs(ez[0]) < 0.99:
+            ey = normalize(np.cross(ez, np.array([1, 0, 0])))
         else:
-            ez = normalize(np.cross(ey, np.array([0, 1, 0])))
+            ey = normalize(np.cross(ez, np.array([0, 1, 0])))
     else:
-        ez = ez / ez_norm
+        ey = ey_cross / ey_norm
     
-    #Tool X-axis completes right-handed frame: X = Y × Z
+    #Tool x-axis completes right-handed frame
     ex = np.cross(ey, ez)
-    ex = normalize(ex)
+    ex = normalize(ex)  #Ensure unit length
     
-    #Construct rotation matrix (columns are basis vectors: X, Y, Z)
-    #Y-axis is the tool axis (into surface)
+    #Construct rotation matrix (columns are basis vectors)
     R = np.column_stack([ex, ey, ez])
     
     return R
@@ -208,10 +204,10 @@ def apply_off_surface_offset(positions, orientations, on_surface, offset_distanc
     for i in range(len(positions)):
         if not on_surface[i]:
             #Get the surface normal from the orientation matrix
-            #The tool Y-axis (2nd column) points INTO the surface (negative normal)
-            #So the surface normal (outward) is the negative of the Y-axis
-            tool_y_axis = orientations[i][:, 1]  # Second column (Y-axis = tool axis)
-            surface_normal = -tool_y_axis  # Flip to get outward normal
+            #The tool z-axis (3rd column) points INTO the surface (negative normal)
+            #So the surface normal (outward) is the negative of the z-axis
+            tool_z_axis = orientations[i][:, 2]  # Third column
+            surface_normal = -tool_z_axis  # Flip to get outward normal
             
             #Move position along surface normal by offset_distance
             adjusted_positions[i] = positions[i] + surface_normal * offset_distance
