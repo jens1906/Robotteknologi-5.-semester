@@ -272,10 +272,10 @@ class PathPlanner(Node):
             self.get_logger().error('Tool size not set. Cannot generate lines.')
             return
 
-        # Extend the v range by tool_radius on both sides so the tool coverage reaches the edges
+        # Tool center must be inset by tool_radius to keep tool coverage within bounds
         tool_radius = self.tool_size / 2
-        v_min_offset = v_min - tool_radius
-        v_max_offset = v_max + tool_radius
+        v_min_offset = v_min + tool_radius
+        v_max_offset = v_max - tool_radius
 
         line_n = int(np.ceil((v_max_offset - v_min_offset) / self.line_spacing)) + 1
         points_per_line = int(np.ceil((u_max - u_min) / self.point_spacing)) + 1

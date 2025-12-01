@@ -44,7 +44,7 @@ def main(args=None):
     
     if planner.uv_path is not None:
         print(f"Generated planner.uv_path with {len(planner.uv_path)} points")
-        print(f"On-surface points: {np.sum(planner.continuous_on_surface)}")100
+        print(f"On-surface points: {np.sum(planner.continuous_on_surface)}")
         print(f"Off-surface points: {np.sum(~planner.continuous_on_surface)}")
         print(f"Ratio on-surface vs off-surface: {np.sum(planner.continuous_on_surface) / len(planner.uv_path):.2%}")
         
