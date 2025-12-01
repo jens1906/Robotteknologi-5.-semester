@@ -33,9 +33,9 @@ class UserInterfaceNode(Node):
         self.signal_emitter = signal_emitter
         self.ui_instance = ui_instance
         
-        # QoS profile for image topics (best effort for network transmission)
+        # QoS profile for image topics (reliable to match RealSense camera settings)
         image_qos = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.VOLATILE,
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1
@@ -63,35 +63,43 @@ class UserInterfaceNode(Node):
         self.get_logger().info('User Interface Node Initialized')
 
     def image_match(self, color_msg, depth_msg):
-        # RealSense wrapper publishes RGB8, convert to BGR8 for OpenCV/display
-        color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
-        color_image = cv.cvtColor(color_image, cv.COLOR_RGB2BGR)
-        depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
+        try:
+            # RealSense wrapper publishes RGB8, convert to BGR8 for OpenCV/display
+            color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
+            color_image = cv.cvtColor(color_image, cv.COLOR_RGB2BGR)
+            depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
+            
+            # Allocate corrosion_area_add and corrosion_area_remove only once on first image match
+            if self.ui_instance is None:
+                self.get_logger().warn('UI instance not ready yet, skipping frame')
+                return
+                
+            if self.ui_instance.corrosion_area_add is None:
+                h, w = color_image.shape[:2]
+                self.ui_instance.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
+                self.ui_instance.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
+                self.get_logger().info(f"Initialized corrosion_area_add and corrosion_area_remove with shape: {(h, w)} and {color_image.shape}")
         
-        # Allocate corrosion_area_add and corrosion_area_remove only once on first image match
-        if self.ui_instance.corrosion_area_add is None:
-            h, w = color_image.shape[:2]
-            self.ui_instance.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
-            self.ui_instance.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
-            self.get_logger().info(f"Initialized corrosion_area_add and corrosion_area_remove with shape: {(h, w)} and {color_image.shape}")
-        
-        # Show color or depth based on camera_type
-        if self.ui_instance.camerafeed[0] == 0 and self.ui_instance.camerafeed[1] == 0:
-            self.signal_emitter.data_signal.emit(f"Color: {depth_image.shape[1]}x{depth_image.shape[0]}")
-            self.signal_emitter.image_signal.emit(color_image)
-            self.signal_emitter.painting_color_signal.emit("ffffff")  # White for color view
-            if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
-        elif self.ui_instance.camerafeed[0] == 1 and self.ui_instance.camerafeed[1] == 1:
-            # Apply median filter to reduce noise in depth visualization
-            depth_filtered = cv.medianBlur(depth_image, 10)
-            self.signal_emitter.data_signal.emit(f"Depth: {depth_image.shape[1]}x{depth_image.shape[0]}")
-            self.signal_emitter.image_signal.emit(depth_filtered)
-            self.signal_emitter.painting_color_signal.emit("B3B3B3")  # Gray for depth view
-        elif self.ui_instance.camerafeed[0] == 0 and self.ui_instance.camerafeed[1] == 1 and not self.ui_instance.is_painting:            
-            self.signal_emitter.data_signal.emit(f"Thresholded: {self.last_Threshold_frame.shape[1]}x{self.last_Threshold_frame.shape[0]}")
-            self.signal_emitter.image_signal.emit(self.last_Threshold_frame)
-            self.signal_emitter.painting_color_signal.emit("ffffff")  # White for threshold view
-            if printlogger: self.ros_node.get_logger().info('Switching to Color Camera')
+            # Show color or depth based on camera_type
+            if self.ui_instance.camerafeed[0] == 0 and self.ui_instance.camerafeed[1] == 0:
+                self.signal_emitter.data_signal.emit(f"Color: {depth_image.shape[1]}x{depth_image.shape[0]}")
+                self.signal_emitter.image_signal.emit(color_image)
+                self.signal_emitter.painting_color_signal.emit("ffffff")  # White for color view
+                if printlogger: self.get_logger().info('Switching to Color Camera')
+            elif self.ui_instance.camerafeed[0] == 1 and self.ui_instance.camerafeed[1] == 1:
+                # Apply median filter to reduce noise in depth visualization
+                depth_filtered = cv.medianBlur(depth_image, 10)
+                self.signal_emitter.data_signal.emit(f"Depth: {depth_image.shape[1]}x{depth_image.shape[0]}")
+                self.signal_emitter.image_signal.emit(depth_filtered)
+                self.signal_emitter.painting_color_signal.emit("B3B3B3")  # Gray for depth view
+            elif self.ui_instance.camerafeed[0] == 0 and self.ui_instance.camerafeed[1] == 1 and not self.ui_instance.is_painting:
+                if self.last_Threshold_frame is not None:
+                    self.signal_emitter.data_signal.emit(f"Thresholded: {self.last_Threshold_frame.shape[1]}x{self.last_Threshold_frame.shape[0]}")
+                    self.signal_emitter.image_signal.emit(self.last_Threshold_frame)
+                    self.signal_emitter.painting_color_signal.emit("ffffff")  # White for threshold view
+                    if printlogger: self.get_logger().info('Switching to Color Camera')
+        except Exception as e:
+            self.get_logger().error(f'Error in image_match: {e}')
 
     def corrosion_thresholding_callback(self, msg):
         self.get_logger().info('=== Corrosion thresholding callback CALLED ===')

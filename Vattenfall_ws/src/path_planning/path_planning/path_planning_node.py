@@ -56,7 +56,7 @@ class PathPlanner(Node):
         if not test_active:
             super().__init__('path_planner_node') # Initialize ROS2 node
 
-            self.declare_parameter('point_spacing', 1)
+            self.declare_parameter('point_spacing', 10)
             self.declare_parameter('line_spacing', 25.0)
             self.declare_parameter('n_bezier', 50)
 
@@ -237,8 +237,8 @@ class PathPlanner(Node):
         """Update tool size and line spacing from corrosion detection (expects data[1] = tool size)."""
         if len(msg.data) > 1:
             self.tool_size = msg.data[1]
-            # Line spacing should be 2 * tool_radius for full coverage with overlap
-            self.line_spacing = 2 * self.tool_size
+            # Line spacing should equal tool diameter for perfect coverage without gaps
+            self.line_spacing = self.tool_size
             if not self.test_active:
                 self.get_logger().info(f'Tool size updated: {self.tool_size:.3f}')
                 self.get_logger().info(f'Line spacing updated: {self.line_spacing:.3f}')
@@ -248,12 +248,19 @@ class PathPlanner(Node):
 
 
     def adjust_lines(self):
-        """Mark which points are on/off surface"""
+        """Mark which points are on/off surface by checking if tool circle intersects with boundary"""
         polygon = Polygon(self.uv_boundary)
-        self.on_surface = [
-            np.array([polygon.contains(Point(u, v)) for u, v in zip(u_line, v_line)])
-            for u_line, v_line in zip(self.lines[0], self.lines[1])
-        ]
+        tool_radius = self.tool_size / 2
+        
+        self.on_surface = []
+        for u_line, v_line in zip(self.lines[0], self.lines[1]):
+            line_on_surface = []
+            for u, v in zip(u_line, v_line):
+                # Check if the tool circle (centered at u,v with radius tool_radius) intersects the boundary
+                tool_circle = Point(u, v).buffer(tool_radius)
+                is_on_surface = polygon.intersects(tool_circle)
+                line_on_surface.append(is_on_surface)
+            self.on_surface.append(np.array(line_on_surface))
 
 
     def generate_lines(self):
@@ -265,10 +272,10 @@ class PathPlanner(Node):
             self.get_logger().error('Tool size not set. Cannot generate lines.')
             return
 
-        # Apply tool_size/2 offset from borders
-        offset = self.tool_size / 2
-        v_min_offset = v_min + offset
-        v_max_offset = v_max - offset
+        # Extend the v range by tool_radius on both sides so the tool coverage reaches the edges
+        tool_radius = self.tool_size / 2
+        v_min_offset = v_min - tool_radius
+        v_max_offset = v_max + tool_radius
 
         line_n = int(np.ceil((v_max_offset - v_min_offset) / self.line_spacing)) + 1
         points_per_line = int(np.ceil((u_max - u_min) / self.point_spacing)) + 1

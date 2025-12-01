@@ -6,7 +6,7 @@ This computes ONE continuous trajectory through all waypoints without stopping.
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, PoseArray
 from std_msgs.msg import Float64MultiArray
 from visualization_msgs.msg import Marker, MarkerArray
 from moveit_msgs.srv import GetCartesianPath
@@ -75,8 +75,8 @@ class CartesianPathFollower(Node):
         
         # Subscribe to path topic
         self.path_sub = self.create_subscription(
-            Float64MultiArray,
-            '/tool_orientation/xyz_rotation',
+            PoseArray,
+            '/tool_orientation/path',
             self.path_callback,
             10
         )
@@ -102,7 +102,7 @@ class CartesianPathFollower(Node):
         self._rviz_positions = []  # list of (x,y,z)
         self._rviz_orientations = []  # list of (qx,qy,qz,qw)
         
-        self.get_logger().info('Waiting for scanning path on /tool_orientation/xyz_rotation...')
+        self.get_logger().info('Waiting for scanning path on /tool_orientation/path (PoseArray)...')
         self.get_logger().info('Also listening to /line_path (positions) and /line_visualization (orientations)')
 
     def line_path_callback(self, marker: Marker):
@@ -179,192 +179,33 @@ class CartesianPathFollower(Node):
             self.get_logger().debug('Ignoring path update during execution')
             return
             
-        self.get_logger().info(f'Received path with {len(msg.data)} elements')
+        self.get_logger().info(f'Received path with {len(msg.poses)} elements')
         
-        data = np.array(msg.data)
-        
-        # Check for quaternion format first: [x,y,z,qx,qy,qz,qw] = 7 values per point
-        if len(data) % 7 == 0:
-            self.get_logger().info('Detected quaternion format: [x,y,z,qx,qy,qz,qw]')
-            num_waypoints = len(data) // 7
-            self.get_logger().info(f'Parsing {num_waypoints} waypoints...')
-            
-            self.waypoints = []
-            for i in range(num_waypoints):
-                idx = i * 7
-                try:
-                    # Extract position and quaternion (already in correct frame)
-                    position = np.array(data[idx:idx+3])
-                    quat = np.array(data[idx+3:idx+7])  # [qx, qy, qz, qw]
-                    
-                    pose = Pose()
-                    pose.position.x = float(position[0])
-                    pose.position.y = float(position[1])
-                    pose.position.z = float(position[2])
-                    pose.orientation.x = float(quat[0])
-                    pose.orientation.y = float(quat[1])
-                    pose.orientation.z = float(quat[2])
-                    pose.orientation.w = float(quat[3])
-                    
-                    self.waypoints.append(pose)
-                    
-                    if i == 0 or i == num_waypoints - 1:
-                        self.get_logger().info(
-                            f'  Point {i}: pos=[{position[0]:.3f}, {position[1]:.3f}, {position[2]:.3f}]'
-                        )
-                        
-                except Exception as e:
-                    self.get_logger().error(f'Failed to parse waypoint {i}: {e}')
-                    return
-            
-            self.path_received = True
-            self.get_logger().info(f'✓ Successfully parsed {len(self.waypoints)} waypoints (quaternion format)')
-            return
-        
-        # Original rotation matrix format check
-        if len(data) % 12 != 0:
-            self.get_logger().error(f'Invalid path data length: {len(data)} (expected multiple of 7 or 12)')
-            return
-        num_waypoints = len(data) // 12
-        self.get_logger().info(f'Parsing {num_waypoints} waypoints (rotation matrix format)...')
-
-        # Heuristic auto-detection for format: "rotation-first" vs "position-first"
-        # rotation-first: [r11..r33, x,y,z] per waypoint
-        # position-first: [x,y,z, r11..r33] per waypoint
-        def probe_format(fmt):
-            # returns tuple (valid_pos_bounds, det)
-            try:
-                if fmt == 'rot_first':
-                    idx = 0
-                    rot = np.array(data[idx:idx+9]).reshape((3, 3))
-                    pos = np.array(data[idx+9:idx+12])
-                else:
-                    idx = 0
-                    pos = np.array(data[idx:idx+3])
-                    rot = np.array(data[idx+3:idx+12]).reshape((3, 3))
-
-                det = np.linalg.det(rot)
-                # position bounds heuristic (UR3e workspace approx)
-                pos_ok = (abs(pos[0]) < 1.0 and abs(pos[1]) < 1.0 and -0.5 < pos[2] < 1.2)
-                return pos_ok, float(det)
-            except Exception:
-                return False, 0.0
-
-        pos_ok_rot, det_rot = probe_format('rot_first')
-        pos_ok_pos, det_pos = probe_format('pos_first')
-
-        # Choose format: prefer one with position in bounds and det > 0
-        chosen = None
-        if pos_ok_pos and det_pos > 0.0 and (not pos_ok_rot or det_rot <= 0.0):
-            chosen = 'pos_first'
-        elif pos_ok_rot and det_rot > 0.0 and (not pos_ok_pos or det_pos <= 0.0):
-            chosen = 'rot_first'
-        else:
-            # If both look plausible, choose the one with det closer to +1
-            if abs(det_pos - 1.0) < abs(det_rot - 1.0):
-                chosen = 'pos_first'
-            else:
-                chosen = 'rot_first'
-
-        self.get_logger().info(f'Detected input format: {chosen} (det_pos={det_pos:.3f}, det_rot={det_rot:.3f})')
         self.waypoints = []
-        positions = []
-
-        # Parse into position/rotation arrays first
-        for i in range(num_waypoints):
-            idx = i * 12
-            try:
-                if chosen == 'rot_first':
-                    rot_matrix = np.array(data[idx:idx+9]).reshape((3, 3))
-                    position = np.array(data[idx+9:idx+12])
-                else:
-                    position = np.array(data[idx:idx+3])
-                    rot_matrix = np.array(data[idx+3:idx+12]).reshape((3, 3))
-
-                positions.append(position)
-            except Exception as e:
-                self.get_logger().warn(f'Parsing waypoint {i} failed: {e}')
-                positions.append(np.array([np.nan, np.nan, np.nan]))
-
-        # Compute Z-range and decide small safety offset (cap maximum auto-lift)
-        min_z = float('inf')
-        max_z = float('-inf')
-        for p in positions:
-            try:
-                min_z = min(min_z, float(p[2]))
-                max_z = max(max_z, float(p[2]))
-            except Exception:
-                continue
-
-        z_offset = 0.0
-        if min_z < 0.05:
-            desired_min = 0.15
-            z_offset = desired_min - min_z
-            # Cap accidental large offsets (indicates bad parsing)
-            if z_offset > 0.6:
-                self.get_logger().error(f'Computed Z offset {z_offset:.3f}m is unexpectedly large — aborting parse')
-                self.waypoints = []
-                self.path_received = True
-                return
-            self.get_logger().warn(f'Waypoints have unsafe Z range [{min_z:.3f}, {max_z:.3f}]')
-            self.get_logger().warn(f'Applying Z offset of {z_offset:.3f}m to make them reachable')
-        else:
-            self.get_logger().info(f'Waypoints Z range [{min_z:.3f}, {max_z:.3f}] looks good')
-
-        # Now construct Pose list with sanitized rotations
-        for i in range(num_waypoints):
-            idx = i * 12
-            try:
-                if chosen == 'rot_first':
-                    rot_matrix = np.array(data[idx:idx+9]).reshape((3, 3))
-                    position = np.array(data[idx+9:idx+12])
-                else:
-                    position = np.array(data[idx:idx+3])
-                    rot_matrix = np.array(data[idx+3:idx+12]).reshape((3, 3))
-
-                position = position.copy()
-                position[2] = position[2] + z_offset
-
-                # Sanitize rotation matrix using SVD / polar decomposition
-                try:
-                    U, S, Vt = np.linalg.svd(rot_matrix)
-                    rot_fixed = U @ Vt
-                    if np.linalg.det(rot_fixed) < 0:
-                        U[:, -1] *= -1
-                        rot_fixed = U @ Vt
-                except Exception:
-                    rot_fixed = rot_matrix
-
-                det_val = np.linalg.det(rot_fixed)
-                if det_val <= 0.0 or not np.isfinite(det_val):
-                    raise ValueError(f'Non-positive determinant after fix: {det_val}')
-
-                rotation = R.from_matrix(rot_fixed)
-                quat = rotation.as_quat()
-
-                pose = Pose()
-                pose.position.x = float(position[0])
-                pose.position.y = float(position[1])
-                pose.position.z = float(position[2])
-                pose.orientation.x = float(quat[0])
-                pose.orientation.y = float(quat[1])
-                pose.orientation.z = float(quat[2])
-                pose.orientation.w = float(quat[3])
-
-                self.waypoints.append(pose)
-                if i == 0:
-                    self.get_logger().info(f'First waypoint corrected: pos=[{pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f}]')
-                elif i == num_waypoints - 1:
-                    self.get_logger().info(f'Last waypoint corrected: pos=[{pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f}]')
-
-            except Exception as e:
-                self.get_logger().warn(f'Failed to convert waypoint {i}: {e}')
-                continue
-
-        self.get_logger().info(f'✓ Successfully parsed {len(self.waypoints)} waypoints')
-        if z_offset > 0:
-            self.get_logger().info(f'✓ Applied {z_offset:.3f}m Z-offset for safety')
+        for i, pose in enumerate(msg.poses):
+            self.waypoints.append(pose)
+            
+            if i == 0 or i == len(msg.poses) - 1:
+                self.get_logger().info(
+                    f'  Point {i}: pos=[{pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f}]'
+                )
+        
         self.path_received = True
+        self.get_logger().info(f'✓ Successfully parsed {len(self.waypoints)} waypoints (PoseArray format)')
+    
+    def _estimate_waypoint_spacing(self, waypoints):
+        """Estimate average spacing between waypoints in meters."""
+        if len(waypoints) < 2:
+            return 0.0
+        
+        total_distance = 0.0
+        for i in range(len(waypoints) - 1):
+            p1 = waypoints[i].position
+            p2 = waypoints[i + 1].position
+            dist = ((p2.x - p1.x)**2 + (p2.y - p1.y)**2 + (p2.z - p1.z)**2)**0.5
+            total_distance += dist
+        
+        return total_distance / (len(waypoints) - 1)
     
     def smooth_orientations(self, waypoints, max_angle_deg=20.0):
         """
@@ -611,7 +452,40 @@ class CartesianPathFollower(Node):
             # Use remaining waypoints (skip first since we're already there)
             cartesian_waypoints = corrected_waypoints[1:]
             
-            self.get_logger().info(f'Computing Cartesian path through {len(cartesian_waypoints)} waypoints...')
+            # Convert to position-only waypoints (remove orientation constraints)
+            position_only_waypoints = []
+            for wp in cartesian_waypoints:
+                pos_wp = Pose()
+                pos_wp.position = wp.position
+                # Identity orientation (no constraints)
+                pos_wp.orientation.w = 1.0
+                pos_wp.orientation.x = 0.0
+                pos_wp.orientation.y = 0.0
+                pos_wp.orientation.z = 0.0
+                position_only_waypoints.append(pos_wp)
+            
+            self.get_logger().info(f'Converted {len(cartesian_waypoints)} waypoints to position-only for max reachability')
+            self.get_logger().info('Validating waypoint reachability...')
+            UR3E_REACH = 0.55  # Maximum reach from base (meters)
+            out_of_reach = 0
+            for i, wp in enumerate(position_only_waypoints):
+                dist = (wp.position.x**2 + wp.position.y**2 + wp.position.z**2)**0.5
+                if dist > UR3E_REACH:
+                    out_of_reach += 1
+                    if i < 5 or i >= len(position_only_waypoints) - 5:  # Log first/last 5
+                        self.get_logger().warn(f'  Waypoint {i} OUT OF REACH: distance={dist:.3f}m (>0.55m)')
+            
+            if out_of_reach > 0:
+                self.get_logger().error(f'❌ {out_of_reach}/{len(position_only_waypoints)} waypoints OUT OF REACH!')
+                self.get_logger().error('   Possible reasons:')
+                self.get_logger().error('   1. Detected surface is too far from robot base')
+                self.get_logger().error('   2. Transform world↔base_link is wrong')
+                self.get_logger().error('   3. Robot position needs to be adjusted')
+                # Don't return - try anyway to see partial results
+            else:
+                self.get_logger().info(f'✓ All waypoints within UR3e reach (0.55m)')
+            
+            self.get_logger().info(f'Computing Cartesian path through {len(position_only_waypoints)} waypoints...')
             
             # Create GetCartesianPath request
             request = GetCartesianPath.Request()
@@ -626,11 +500,15 @@ class CartesianPathFollower(Node):
             # Set link name
             request.link_name = 'tool0'
             
-            # Set waypoints (remaining waypoints)
-            request.waypoints = cartesian_waypoints
+            # Set waypoints (position-only for maximum reachability)
+            request.waypoints = position_only_waypoints
             
             # Set max step (distance between interpolated points)
-            request.max_step = 0.005  # 5mm resolution for very smooth path
+            # MUCH LARGER step size - MoveIt needs room to interpolate
+            avg_spacing = self._estimate_waypoint_spacing(position_only_waypoints)
+            request.max_step = 0.05  # 5cm steps - very generous for Cartesian planning
+            
+            self.get_logger().info(f'  Using max_step={request.max_step:.4f}m (avg waypoint spacing: {avg_spacing:.4f}m)')
             
             # Jump threshold (0.0 = no jump check, allows more flexibility)
             request.jump_threshold = 0.0
@@ -683,13 +561,66 @@ class CartesianPathFollower(Node):
             self.get_logger().info(f'Cartesian path fraction achieved: {fraction*100:.1f}%')
             
             # Execute whatever portion was successfully computed
-            if fraction < 0.1:  # Less than 10% - complete failure
+            if fraction < 0.01:  # Less than 1% - almost complete failure
                 self.get_logger().error(f'✗ Could only compute {fraction*100:.1f}% of the path')
                 self.get_logger().error('Possible issues:')
                 self.get_logger().error('  - Waypoints cause IK failures (unreachable poses)')
                 self.get_logger().error('  - Orientation changes too large between waypoints')
                 self.get_logger().error('  - Path goes through singularities')
                 self.get_logger().error('  - Collision detected along path')
+                
+                # FALLBACK: Try position-only Cartesian path planning
+                self.get_logger().warn('='*60)
+                self.get_logger().warn('FALLBACK: Attempting position-only Cartesian path')
+                self.get_logger().warn('(Ignoring orientation constraints for maximum reachability)')
+                self.get_logger().warn('='*60)
+                
+                # Create position-only waypoints (keep positions, drop orientations)
+                position_only_waypoints = []
+                for i, wp in enumerate(cartesian_waypoints):
+                    pos_wp = Pose()
+                    pos_wp.position = wp.position
+                    # Use identity orientation (pointing down) for all waypoints
+                    pos_wp.orientation.x = 0.0
+                    pos_wp.orientation.y = 0.0
+                    pos_wp.orientation.z = 0.0
+                    pos_wp.orientation.w = 1.0
+                    position_only_waypoints.append(pos_wp)
+                
+                # Try Cartesian path with position-only
+                request_pos_only = GetCartesianPath.Request()
+                request_pos_only.header.frame_id = 'world'
+                request_pos_only.header.stamp = self.get_clock().now().to_msg()
+                request_pos_only.group_name = 'ur_manipulator'
+                request_pos_only.link_name = 'tool0'
+                request_pos_only.waypoints = position_only_waypoints
+                request_pos_only.max_step = 0.005
+                request_pos_only.jump_threshold = 0.0
+                request_pos_only.avoid_collisions = True
+                request_pos_only.path_constraints = Constraints()
+                request_pos_only.start_state.is_diff = True
+                
+                self.get_logger().info('Calling Cartesian path service with position-only waypoints...')
+                future_pos_only = self.cartesian_path_client.call_async(request_pos_only)
+                rclpy.spin_until_future_complete(self, future_pos_only, timeout_sec=15.0)
+                
+                if future_pos_only.done():
+                    response_pos_only = future_pos_only.result()
+                    fraction_pos_only = response_pos_only.fraction
+                    self.get_logger().info(f'✓ Position-only Cartesian path fraction: {fraction_pos_only*100:.1f}%')
+                    
+                    if fraction_pos_only > fraction:
+                        self.get_logger().info('✓ Position-only planning achieved better results! Using this path.')
+                        response = response_pos_only
+                        fraction = fraction_pos_only
+                    else:
+                        self.get_logger().warn('Position-only planning no better than original. Continuing with original.')
+                else:
+                    self.get_logger().warn('Position-only planning timed out.')
+            
+            # Check final fraction after possible fallback
+            if fraction < 0.1:  # Still less than 10% after fallback
+                self.get_logger().error(f'✗ Could only compute {fraction*100:.1f}% of the path (even with fallback)')
                 return False
             elif fraction < 0.95:  # Partial success
                 self.get_logger().warn(f'⚠ Computed {fraction*100:.1f}% of Cartesian path')
@@ -847,22 +778,14 @@ class CartesianPathFollower(Node):
         self.get_logger().info(f'Target: pos=[{first_waypoint.position.x:.3f}, '
                               f'{first_waypoint.position.y:.3f}, {first_waypoint.position.z:.3f}]')
         
-        # Check if the waypoint is within reasonable workspace bounds
+        # Check distance from origin (robot base) - UR3e reach is ~0.5m
         x, y, z = first_waypoint.position.x, first_waypoint.position.y, first_waypoint.position.z
-        
-        # UR3e approximate workspace limits
-        if abs(x) > 0.6 or abs(y) > 0.6 or z > 0.8 or z < 0.1:
-            self.get_logger().error(f'Waypoint [{x:.3f}, {y:.3f}, {z:.3f}] is outside UR3e workspace!')
-            self.get_logger().error('UR3e workspace: X,Y: ±0.6m, Z: 0.1-0.8m')
-            return False
-        
-        # Check distance from origin (robot base)
         distance = (x*x + y*y + z*z)**0.5
-        if distance > 0.85:  # UR3e reach is ~0.85m
-            self.get_logger().error(f'Waypoint distance {distance:.3f}m exceeds UR3e reach (~0.85m)!')
-            return False
         
-        self.get_logger().info(f'✓ Waypoint is within workspace bounds (distance: {distance:.3f}m)')
+        if distance > 0.5:  # UR3e reach limit
+            self.get_logger().warn(f'Waypoint distance {distance:.3f}m is at edge of UR3e reach (~0.5m)')
+        
+        self.get_logger().info(f'Attempting to reach waypoint (distance: {distance:.3f}m)')
         
         # Create action client for MoveGroup
         move_group_client = ActionClient(self, MoveGroup, '/move_action')
@@ -878,9 +801,9 @@ class CartesianPathFollower(Node):
         goal_msg.request.workspace_parameters.header.stamp = self.get_clock().now().to_msg()
         
         goal_msg.request.group_name = 'ur_manipulator'
-        goal_msg.request.num_planning_attempts = 30  # Even more attempts
-        goal_msg.request.allowed_planning_time = 20.0  # Much more time
-        goal_msg.request.max_velocity_scaling_factor = 0.2  # Slower for safety
+        goal_msg.request.num_planning_attempts = 30
+        goal_msg.request.allowed_planning_time = 20.0
+        goal_msg.request.max_velocity_scaling_factor = 0.2
         goal_msg.request.max_acceleration_scaling_factor = 0.2
         goal_msg.request.planner_id = "RRTConnectkConfigDefault"
         
@@ -1272,12 +1195,13 @@ def main():
     
     while not node.path_received:
         rclpy.spin_once(node, timeout_sec=0.1)
-        if (node.get_clock().now() - start_time).nanoseconds / 1e9 > timeout:
-            print("ERROR: No path received within timeout!")
-            print("Make sure import_line.sh is running.")
-            node.destroy_node()
-            rclpy.shutdown()
-            return
+        # Removed timeout check to allow waiting indefinitely for external path
+        # if (node.get_clock().now() - start_time).nanoseconds / 1e9 > timeout:
+        #     print("ERROR: No path received within timeout!")
+        #     print("Make sure import_line.sh is running.")
+        #     node.destroy_node()
+        #     rclpy.shutdown()
+        #     return
     
     print(f"✓ Path received with {len(node.waypoints)} waypoints\n")
     
