@@ -5,6 +5,7 @@ import numpy as np
 try:
     import rclpy
     from rclpy.node import Node
+    from rclpy.executors import MultiThreadedExecutor
     from std_msgs.msg import Float64MultiArray, ByteMultiArray
     from geometry_msgs.msg import PoseArray, Pose
     from scipy.spatial.transform import Rotation as R
@@ -416,16 +417,290 @@ if ROS2_AVAILABLE:
             
             return adjusted_positions, orientations
 
+    class ToolOrientationDebuggerNode(Node):
+        def __init__(self):
+            super().__init__('tool_orientation_debugger')
+
+            # Parameters mirror generator node for consistency
+            self.declare_parameter('dt', 0.1)
+            self.declare_parameter('neighbor_range', 3)
+            self.declare_parameter('off_surface_height', 0.05)
+            self.declare_parameter('frame_id', 'world_link')
+            self.declare_parameter('axis_tolerance_deg', 5.0)
+            self.declare_parameter('offset_tolerance_m', 0.001)
+            self.declare_parameter('transverse_tolerance_m', 0.001)
+
+            # Subscribers
+            self.path_sub = self.create_subscription(
+                Float64MultiArray,
+                '/parameterization/xyz_path',
+                self.path_callback,
+                10
+            )
+            self.on_surface_sub = self.create_subscription(
+                ByteMultiArray,
+                '/path/on_surface',
+                self.on_surface_callback,
+                10
+            )
+            self.pose_sub = self.create_subscription(
+                PoseArray,
+                '/tool_orientation/path',
+                self.pose_callback,
+                10
+            )
+
+            # Publisher for corrected poses
+            self.debug_pub = self.create_publisher(
+                PoseArray,
+                '/tool_orientation/debug_path',
+                10
+            )
+
+            self.path_xyz = None
+            self.on_surface = None
+            self.latest_pose_msg = None
+            self.last_processed_stamp = None
+
+            self.get_logger().info('Tool Orientation Debugger Node initialized')
+            self.get_logger().info('Listening on /tool_orientation/path for validation')
+
+        def path_callback(self, msg):
+            n_points = len(msg.data) // 3
+            if n_points == 0:
+                self.get_logger().warn('Debugger received empty xyz path')
+                return
+            self.path_xyz = np.array(msg.data, dtype=float).reshape(n_points, 3)
+            self.get_logger().info(f'Debugger stored {n_points} path points')
+            self.try_validate()
+
+        def on_surface_callback(self, msg):
+            self.on_surface = np.array(msg.data, dtype=bool)
+            if self.path_xyz is not None and len(self.on_surface) != len(self.path_xyz):
+                self.get_logger().warn(
+                    f'Debugger on_surface size mismatch (path: {len(self.path_xyz)}, flags: {len(self.on_surface)})'
+                )
+            self.try_validate()
+
+        def pose_callback(self, msg):
+            self.latest_pose_msg = msg
+            self.try_validate()
+
+        def try_validate(self):
+            if self.path_xyz is None or self.on_surface is None or self.latest_pose_msg is None:
+                return
+
+            if len(self.on_surface) != len(self.path_xyz):
+                self.get_logger().error('Cannot validate: on_surface array length does not match path length')
+                return
+
+            if len(self.latest_pose_msg.poses) != len(self.path_xyz):
+                self.get_logger().error(
+                    f'Cannot validate: PoseArray has {len(self.latest_pose_msg.poses)} poses, '
+                    f'but path has {len(self.path_xyz)} points'
+                )
+                return
+
+            current_stamp = (
+                self.latest_pose_msg.header.stamp.sec,
+                self.latest_pose_msg.header.stamp.nanosec
+            )
+            if current_stamp == self.last_processed_stamp:
+                return
+
+            try:
+                self.validate_and_publish(self.latest_pose_msg)
+                self.last_processed_stamp = current_stamp
+            except Exception as exc:
+                self.get_logger().error(f'Validation failure: {exc}')
+
+        def validate_and_publish(self, pose_msg):
+            dt = float(self.get_parameter('dt').value)
+            neighbor_range = int(self.get_parameter('neighbor_range').value)
+            off_surface_height = float(self.get_parameter('off_surface_height').value)
+            axis_tol_deg = float(self.get_parameter('axis_tolerance_deg').value)
+            offset_tol_m = float(self.get_parameter('offset_tolerance_m').value)
+            transverse_tol_m = float(self.get_parameter('transverse_tolerance_m').value)
+
+            n_points = len(pose_msg.poses)
+            base_positions_m = self.path_xyz / 1000.0
+            velocities = compute_velocity(self.path_xyz, dt)
+            expected_tangents = self._compute_tangents(velocities)
+            _, expected_orientations = compute_orientations_from_xyz(
+                self.path_xyz,
+                dt,
+                neighbor_range
+            )
+            expected_normals = -expected_orientations[:, 2]
+
+            corrected_positions = base_positions_m.copy()
+            corrected_positions[~self.on_surface, 2] += off_surface_height
+
+            actual_positions = np.zeros((n_points, 3), dtype=float)
+            actual_rotations = np.zeros((n_points, 3, 3), dtype=float)
+            for i, pose in enumerate(pose_msg.poses):
+                actual_positions[i] = np.array([
+                    pose.position.x,
+                    pose.position.y,
+                    pose.position.z
+                ], dtype=float)
+                try:
+                    actual_rotations[i] = R.from_quat([
+                        pose.orientation.x,
+                        pose.orientation.y,
+                        pose.orientation.z,
+                        pose.orientation.w
+                    ]).as_matrix()
+                except ValueError as exc:
+                    self.get_logger().warn(
+                        f'Pose {i}: invalid quaternion ({exc}); using identity for validation'
+                    )
+                    actual_rotations[i] = np.eye(3)
+
+            errors_found = False
+            axis_error_count = 0
+            offset_error_count = 0
+
+            for i in range(n_points):
+                normal = expected_normals[i]
+                position = actual_positions[i]
+
+                # Check Z-axis alignment
+                expected_z = expected_orientations[i][:, 2]
+                actual_z = actual_rotations[i][:, 2]
+                angle_z = self._axis_angle_deg(actual_z, expected_z)
+                if angle_z > axis_tol_deg:
+                    errors_found = True
+                    axis_error_count += 1
+                    self._log_axis_error(i, position, normal, 'Z', angle_z)
+
+                # Check X-axis alignment with path tangent
+                actual_x = actual_rotations[i][:, 0]
+                expected_tangent = expected_tangents[i]
+                angle_x = self._axis_angle_deg(actual_x, expected_tangent)
+                if angle_x > axis_tol_deg:
+                    errors_found = True
+                    axis_error_count += 1
+                    self._log_axis_error(i, position, normal, 'X', angle_x)
+
+                # Check offset along +Z
+                translation_delta = actual_positions[i] - base_positions_m[i]
+                xy_error = np.linalg.norm(translation_delta[:2])
+                if self.on_surface[i]:
+                    if abs(translation_delta[2]) > offset_tol_m or xy_error > transverse_tol_m:
+                        errors_found = True
+                        offset_error_count += 1
+                        self._log_offset_error(i, position, translation_delta, off_surface_height, on_surface=True)
+                else:
+                    z_error = abs(translation_delta[2] - off_surface_height)
+                    if z_error > offset_tol_m or xy_error > transverse_tol_m:
+                        errors_found = True
+                        offset_error_count += 1
+                        self._log_offset_error(i, position, translation_delta, off_surface_height, on_surface=False)
+
+            if errors_found:
+                self.get_logger().warn(
+                    f'Validation detected {axis_error_count} axis deviations and '
+                    f'{offset_error_count} offset deviations across {n_points} poses'
+                )
+            else:
+                self.get_logger().info(f'Validation passed for all {n_points} poses')
+
+            # Publish corrected PoseArray for visualization
+            debug_msg = PoseArray()
+            debug_msg.header.stamp = self.get_clock().now().to_msg()
+            debug_msg.header.frame_id = pose_msg.header.frame_id or self.get_parameter('frame_id').value
+
+            for i in range(n_points):
+                pose = Pose()
+                pose.position.x = float(corrected_positions[i, 0])
+                pose.position.y = float(corrected_positions[i, 1])
+                pose.position.z = float(corrected_positions[i, 2])
+
+                quat = R.from_matrix(expected_orientations[i]).as_quat()
+                pose.orientation.x = float(quat[0])
+                pose.orientation.y = float(quat[1])
+                pose.orientation.z = float(quat[2])
+                pose.orientation.w = float(quat[3])
+
+                debug_msg.poses.append(pose)
+
+            self.debug_pub.publish(debug_msg)
+            self.get_logger().info(
+                f'Published corrected PoseArray with {n_points} poses on /tool_orientation/debug_path'
+            )
+
+        def _axis_angle_deg(self, actual_vec, expected_vec, epsilon=1e-10):
+            actual = normalize(actual_vec)
+            expected = normalize(expected_vec)
+            dot_product = np.clip(np.dot(actual, expected), -1.0, 1.0)
+            return np.degrees(np.arccos(dot_product))
+
+        def _compute_tangents(self, velocities, epsilon=1e-12):
+            tangents = np.zeros_like(velocities)
+            fallback = np.array([1.0, 0.0, 0.0])
+            n_points = len(velocities)
+            for i in range(n_points):
+                speed = np.linalg.norm(velocities[i])
+                if speed > epsilon:
+                    tangents[i] = velocities[i] / speed
+                    fallback = tangents[i]
+                    continue
+
+                # Try next point for a non-zero tangent
+                next_idx = i + 1
+                selected = None
+                while next_idx < n_points:
+                    next_speed = np.linalg.norm(velocities[next_idx])
+                    if next_speed > epsilon:
+                        selected = velocities[next_idx] / next_speed
+                        break
+                    next_idx += 1
+
+                if selected is not None:
+                    tangents[i] = selected
+                    fallback = selected
+                else:
+                    tangents[i] = fallback
+
+            return tangents
+
+        def _log_axis_error(self, index, position, normal, axis_label, angle_deg):
+            self.get_logger().warn(
+                f'Pose {index}: position=({position[0]:.4f}, {position[1]:.4f}, {position[2]:.4f}) m, '
+                f'normal=({normal[0]:.3f}, {normal[1]:.3f}, {normal[2]:.3f}), '
+                f'axis {axis_label} deviates by {angle_deg:.2f} degrees'
+            )
+
+        def _log_offset_error(self, index, position, delta, off_surface_height, on_surface):
+            if on_surface:
+                descriptor = 'on-surface'
+                expected = 0.0
+            else:
+                descriptor = 'off-surface'
+                expected = off_surface_height
+            self.get_logger().warn(
+                f'Pose {index} ({descriptor}): position=({position[0]:.4f}, {position[1]:.4f}, {position[2]:.4f}) m, '
+                f'delta=({delta[0]:.4f}, {delta[1]:.4f}, {delta[2]:.4f}) m, '
+                f'expected +Z offset {expected:.4f} m'
+            )
+
     def main(args=None):
         rclpy.init(args=args)
-        node = ToolOrientationNode()
-        
+        tool_node = ToolOrientationNode()
+        debugger_node = ToolOrientationDebuggerNode()
+
+        executor = MultiThreadedExecutor()
+        executor.add_node(tool_node)
+        executor.add_node(debugger_node)
+
         try:
-            rclpy.spin(node)
+            executor.spin()
         except KeyboardInterrupt:
             pass
         finally:
-            node.destroy_node()
+            tool_node.destroy_node()
+            debugger_node.destroy_node()
             rclpy.shutdown()
 
     if __name__ == '__main__':
