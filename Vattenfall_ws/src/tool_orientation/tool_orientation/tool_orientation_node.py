@@ -6,6 +6,11 @@ try:
     import rclpy
     from rclpy.node import Node
     from rclpy.executors import MultiThreadedExecutor
+    from rclpy.qos import (
+        QoSProfile,
+        QoSReliabilityPolicy,
+        QoSDurabilityPolicy,
+    )
     from std_msgs.msg import Float64MultiArray, ByteMultiArray
     from geometry_msgs.msg import PoseArray, Pose
     from scipy.spatial.transform import Rotation as R
@@ -45,12 +50,17 @@ def compute_velocity(path_xyz, dt=0.1):
     
     return velocities
 
-def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
+def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3, prev_normal=None):
     #Estimate surface normal at a point using neighboring points
     #Fits a local plane and returns the normal to that plane
     #Args: path_xyz (N,3) array, index current point, neighbor_range neighbors on each side
     #Returns: normal (3,) unit vector
     n_points = len(path_xyz)
+
+    def fallback_normal():
+        if prev_normal is not None:
+            return prev_normal
+        return np.array([0, 0, 1])
     
     #Get neighbor indices
     start = max(0, index - neighbor_range)
@@ -60,24 +70,7 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
     local_points = path_xyz[start:end]
     
     if len(local_points) < 3:
-        #Not enough neighbors, estimate from velocity direction
-        #Normal is perpendicular to path tangent
-        if index > 0 and index < n_points - 1:
-            tangent = path_xyz[index + 1] - path_xyz[index - 1]
-        elif index == 0 and n_points > 1:
-            tangent = path_xyz[1] - path_xyz[0]
-        elif index == n_points - 1 and n_points > 1:
-            tangent = path_xyz[index] - path_xyz[index - 1]
-        else:
-            return np.array([0, 0, 1])  #Fallback for single point
-        
-        #Create perpendicular vector in XY plane if possible
-        tangent_norm = normalize(tangent)
-        if abs(tangent_norm[2]) < 0.99:  #Not vertical
-            normal = np.array([0, 0, 1])
-        else:  #Nearly vertical tangent
-            normal = np.array([1, 0, 0])
-        return normalize(normal)
+        return fallback_normal()
     
     #Center the points
     centroid = np.mean(local_points, axis=0)
@@ -86,20 +79,7 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
     #Check if points are too close together (degenerate case)
     max_distance = np.max(np.linalg.norm(centered, axis=1))
     if max_distance < 1e-10:
-        #Points are essentially identical, estimate from path direction
-        if index > 0:
-            tangent = normalize(path_xyz[index] - path_xyz[index - 1])
-        elif index < n_points - 1:
-            tangent = normalize(path_xyz[index + 1] - path_xyz[index])
-        else:
-            tangent = np.array([1, 0, 0])
-        
-        #Normal perpendicular to tangent, prefer upward direction
-        if abs(tangent[2]) < 0.99:
-            normal = np.array([0, 0, 1])
-        else:
-            normal = np.array([1, 0, 0])
-        return normalize(normal)
+        return fallback_normal()
     
     #Use SVD to find the normal (smallest singular value direction)
     try:
@@ -113,25 +93,17 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
             
             #Create a normal perpendicular to tangent
             #Try Z-up first, if tangent is too vertical, use X
-            if abs(tangent[2]) < 0.99:
-                normal = np.array([0, 0, 1]) - tangent[2] * tangent
-            else:
-                normal = np.array([1, 0, 0]) - tangent[0] * tangent
-            
-            normal = normalize(normal)
-            
-            #Ensure upward preference
-            if normal[2] < 0:
-                normal = -normal
-            
-            return normal
+            reference = prev_normal if prev_normal is not None else np.array([0, 0, 1])
+            helper = np.cross(tangent, np.cross(reference, tangent))
+            if np.linalg.norm(helper) < 1e-10:
+                helper = reference
+            return normalize(helper)
         
         normal = vh[-1, :]  #Last row is normal direction
         
     except np.linalg.LinAlgError:
         #SVD failed to converge, estimate from local geometry
         if index > 0 and index < n_points - 1:
-            #Use two vectors to compute cross product
             v1 = path_xyz[index] - path_xyz[index - 1]
             v2 = path_xyz[index + 1] - path_xyz[index]
             normal = np.cross(v1, v2)
@@ -139,15 +111,23 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
             if norm > 1e-10:
                 normal = normal / norm
             else:
-                normal = np.array([0, 0, 1])
+                normal = fallback_normal()
         else:
-            normal = np.array([0, 0, 1])
+            normal = fallback_normal()
     
-    #Ensure normal points "upward" (positive z component)
-    if normal[2] < 0:
-        normal = -normal
-    
-    return normalize(normal)
+    normal = normalize(normal)
+
+    if np.linalg.norm(normal) < 1e-10:
+        if prev_normal is not None:
+            return prev_normal
+        return np.array([0, 0, 1])
+
+    if prev_normal is not None:
+        alignment = np.dot(normal, prev_normal)
+        if alignment < 0:
+            normal = -normal
+
+    return normal
 
 
 def orientation_matrix_from_path(velocity, normal):
@@ -229,35 +209,26 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
     orientations = np.zeros((n_points, 3, 3))
     
     #Step 3: Process each point
+    prev_normal = None
     for i in range(n_points):
         velocity = velocities[i]
         
         #Estimate surface normal from neighboring points
-        normal = compute_normal_from_neighbors(path_xyz, i, neighbor_range)
+        normal = compute_normal_from_neighbors(path_xyz, i, neighbor_range, prev_normal)
         
         #Compute orientation matrix
         R = orientation_matrix_from_path(velocity, normal)
         
-        #Check for discontinuous orientation change
+        #Enforce consistent surface-facing Z-axis
         if smooth_orientations and i > 0:
-            #Compute angle difference between consecutive orientations
-            R_prev = orientations[i-1]
-            R_diff = R_prev.T @ R
-            trace_diff = np.trace(R_diff)
-            angle_diff = np.arccos(np.clip((trace_diff - 1) / 2, -1, 1))
-            
-            #If orientation changes by more than 90 degrees, likely a sign flip
-            if angle_diff > np.pi / 2:
-                #Check if flipping the normal reduces the discontinuity
-                R_flipped = orientation_matrix_from_path(velocity, -normal)
-                R_diff_flipped = R_prev.T @ R_flipped
-                trace_flipped = np.trace(R_diff_flipped)
-                angle_flipped = np.arccos(np.clip((trace_flipped - 1) / 2, -1, 1))
-                
-                if angle_flipped < angle_diff:
-                    R = R_flipped
+            prev_z = orientations[i-1][:, 2]
+            curr_z = R[:, 2]
+            if np.dot(prev_z, curr_z) < 0:
+                normal = -normal
+                R = orientation_matrix_from_path(velocity, normal)
         
         orientations[i] = R
+        prev_normal = normal
     
     return path_xyz, orientations
 
@@ -268,10 +239,15 @@ if ROS2_AVAILABLE:
             super().__init__('tool_orientation_node')
             
             #Publisher for trajectory with quaternions (unified format)
+            trajectory_qos = QoSProfile(
+                depth=1,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            )
             self.trajectory_pub = self.create_publisher(
                 PoseArray,
                 '/tool_orientation/path',
-                10
+                trajectory_qos
             )
             
             #Subscriber for input path points
@@ -450,11 +426,16 @@ if ROS2_AVAILABLE:
                 10
             )
 
-            # Publisher for corrected poses
+            # Publisher for corrected poses (latched so late subscribers receive last pose array)
+            debug_qos = QoSProfile(
+                depth=1,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            )
             self.debug_pub = self.create_publisher(
                 PoseArray,
                 '/tool_orientation/debug_path',
-                10
+                debug_qos
             )
 
             self.path_xyz = None
@@ -523,18 +504,24 @@ if ROS2_AVAILABLE:
             transverse_tol_m = float(self.get_parameter('transverse_tolerance_m').value)
 
             n_points = len(pose_msg.poses)
-            base_positions_m = self.path_xyz / 1000.0
             velocities = compute_velocity(self.path_xyz, dt)
             expected_tangents = self._compute_tangents(velocities)
-            _, expected_orientations = compute_orientations_from_xyz(
+            positions_mm, expected_orientations = compute_orientations_from_xyz(
                 self.path_xyz,
                 dt,
                 neighbor_range
             )
             expected_normals = -expected_orientations[:, 2]
 
-            corrected_positions = base_positions_m.copy()
-            corrected_positions[~self.on_surface, 2] += off_surface_height
+            off_surface_height_mm = off_surface_height * 1000.0
+            adjusted_positions_mm = apply_off_surface_offset(
+                positions_mm,
+                expected_orientations,
+                self.on_surface,
+                off_surface_height_mm
+            )
+            expected_positions_m = adjusted_positions_mm / 1000.0
+            corrected_positions = expected_positions_m.copy()
 
             actual_positions = np.zeros((n_points, 3), dtype=float)
             actual_rotations = np.zeros((n_points, 3, 3), dtype=float)
@@ -584,19 +571,22 @@ if ROS2_AVAILABLE:
                     self._log_axis_error(i, position, normal, 'X', angle_x)
 
                 # Check offset along +Z
-                translation_delta = actual_positions[i] - base_positions_m[i]
-                xy_error = np.linalg.norm(translation_delta[:2])
-                if self.on_surface[i]:
-                    if abs(translation_delta[2]) > offset_tol_m or xy_error > transverse_tol_m:
-                        errors_found = True
-                        offset_error_count += 1
-                        self._log_offset_error(i, position, translation_delta, off_surface_height, on_surface=True)
-                else:
-                    z_error = abs(translation_delta[2] - off_surface_height)
-                    if z_error > offset_tol_m or xy_error > transverse_tol_m:
-                        errors_found = True
-                        offset_error_count += 1
-                        self._log_offset_error(i, position, translation_delta, off_surface_height, on_surface=False)
+                translation_delta = actual_positions[i] - expected_positions_m[i]
+                longitudinal_error = np.dot(translation_delta, expected_normals[i])
+                transverse_vector = translation_delta - longitudinal_error * expected_normals[i]
+                transverse_error = np.linalg.norm(transverse_vector)
+
+                if abs(longitudinal_error) > offset_tol_m or transverse_error > transverse_tol_m:
+                    errors_found = True
+                    offset_error_count += 1
+                    self._log_offset_error(
+                        i,
+                        position,
+                        longitudinal_error,
+                        transverse_error,
+                        off_surface_height,
+                        on_surface=self.on_surface[i]
+                    )
 
             if errors_found:
                 self.get_logger().warn(
@@ -672,17 +662,13 @@ if ROS2_AVAILABLE:
                 f'axis {axis_label} deviates by {angle_deg:.2f} degrees'
             )
 
-        def _log_offset_error(self, index, position, delta, off_surface_height, on_surface):
-            if on_surface:
-                descriptor = 'on-surface'
-                expected = 0.0
-            else:
-                descriptor = 'off-surface'
-                expected = off_surface_height
+        def _log_offset_error(self, index, position, longitudinal_error, transverse_error, off_surface_height, on_surface):
+            descriptor = 'on-surface' if on_surface else 'off-surface'
+            expected = 0.0 if on_surface else off_surface_height
             self.get_logger().warn(
                 f'Pose {index} ({descriptor}): position=({position[0]:.4f}, {position[1]:.4f}, {position[2]:.4f}) m, '
-                f'delta=({delta[0]:.4f}, {delta[1]:.4f}, {delta[2]:.4f}) m, '
-                f'expected +Z offset {expected:.4f} m'
+                f'longitudinal error {longitudinal_error:.4f} m (expected offset {expected:.4f} m), '
+                f'transverse error {transverse_error:.4f} m'
             )
 
     def main(args=None):
