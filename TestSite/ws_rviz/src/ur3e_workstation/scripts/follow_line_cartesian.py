@@ -6,7 +6,7 @@ Subscribes to /tool_orientation/xyz_rotation with format: [x,y,z,qx,qy,qz,qw, ..
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, PoseArray
 from std_msgs.msg import Float64MultiArray
 from moveit_msgs.srv import GetCartesianPath
 from moveit_msgs.action import ExecuteTrajectory
@@ -65,8 +65,8 @@ class LinePathFollower(Node):
         
         # Subscribe to path topic
         self.path_sub = self.create_subscription(
-            Float64MultiArray,
-            '/tool_orientation/xyz_rotation',
+            PoseArray,
+            '/tool_orientation/path',
             self.path_callback,
             10
         )
@@ -76,64 +76,39 @@ class LinePathFollower(Node):
         self.path_received = False
         self.executing = False
         
-        self.get_logger().info('Waiting for line path on /tool_orientation/xyz_rotation...')
-        self.get_logger().info('Expected format: [x1,y1,z1,qx1,qy1,qz1,qw1, x2,y2,z2,qx2,qy2,qz2,qw2, ...]')
+        self.get_logger().info('Waiting for line path on /tool_orientation/path...')
+        self.get_logger().info('Expected format: PoseArray with poses in base_link frame')
     
     def joint_state_callback(self, msg):
         """Store current joint state."""
         self.current_joint_state = msg
     
     def path_callback(self, msg):
-        """Parse received path with quaternion format."""
+        """Parse received PoseArray path."""
         if self.executing:
             self.get_logger().debug('Ignoring path update during execution')
             return
             
-        self.get_logger().info(f'Received path with {len(msg.data)} elements')
+        num_waypoints = len(msg.poses)
+        self.get_logger().info(f'Received PoseArray with {num_waypoints} poses')
         
-        data = np.array(msg.data)
-        
-        # Expected format: [x,y,z,qx,qy,qz,qw] per point = 7 values
-        if len(data) % 7 != 0:
-            self.get_logger().error(f'Invalid path data length: {len(data)} (must be multiple of 7)')
+        if num_waypoints == 0:
+            self.get_logger().error('Received empty PoseArray')
             return
         
-        num_waypoints = len(data) // 7
-        self.get_logger().info(f'Parsing {num_waypoints} waypoints...')
+        # Use poses directly from PoseArray
+        self.waypoints = list(msg.poses)
         
-        self.waypoints = []
-        
-        for i in range(num_waypoints):
-            idx = i * 7
-            try:
-                # Extract position and quaternion (already in correct frame for robot)
-                position = np.array(data[idx:idx+3])
-                quat = np.array(data[idx+3:idx+7])  # [qx, qy, qz, qw]
-                
-                # Create pose directly - no transformation needed
-                pose = Pose()
-                pose.position.x = float(position[0])
-                pose.position.y = float(position[1])
-                pose.position.z = float(position[2])
-                pose.orientation.x = float(quat[0])
-                pose.orientation.y = float(quat[1])
-                pose.orientation.z = float(quat[2])
-                pose.orientation.w = float(quat[3])
-                
-                self.waypoints.append(pose)
-                
-                if i == 0 or i == num_waypoints - 1:
-                    self.get_logger().info(
-                        f'  Point {i}: pos=[{position[0]:.3f}, {position[1]:.3f}, {position[2]:.3f}]'
-                    )
-                    
-            except Exception as e:
-                self.get_logger().error(f'Failed to parse waypoint {i}: {e}')
-                return
-        print(self.waypoints)
+        # Log first and last poses for verification
+        for i in [0, num_waypoints - 1]:
+            pose = self.waypoints[i]
+            self.get_logger().info(
+                f'  Point {i}: pos=[{pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f}] '
+                f'quat=[{pose.orientation.x:.3f}, {pose.orientation.y:.3f}, {pose.orientation.z:.3f}, {pose.orientation.w:.3f}]'
+            )
         
         self.path_received = True
-        self.get_logger().info(f'✓ Successfully parsed {len(self.waypoints)} waypoints')
+        self.get_logger().info(f'✓ Successfully received {len(self.waypoints)} waypoints')
         self.get_logger().info('Ready to execute! Call: ros2 service call /execute_line_path std_srvs/srv/Trigger')
     
     def plan_cartesian_path(self):

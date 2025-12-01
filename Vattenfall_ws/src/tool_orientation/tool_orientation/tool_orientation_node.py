@@ -5,6 +5,11 @@ import numpy as np
 try:
     import rclpy
     from rclpy.node import Node
+    from rclpy.qos import (
+        QoSProfile,
+        QoSReliabilityPolicy,
+        QoSDurabilityPolicy,
+    )
     from std_msgs.msg import Float64MultiArray, ByteMultiArray
     from geometry_msgs.msg import PoseArray, Pose
     from scipy.spatial.transform import Rotation as R
@@ -44,12 +49,17 @@ def compute_velocity(path_xyz, dt=0.1):
     
     return velocities
 
-def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
+def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3, prev_normal=None):
     #Estimate surface normal at a point using neighboring points
     #Fits a local plane and returns the normal to that plane
     #Args: path_xyz (N,3) array, index current point, neighbor_range neighbors on each side
     #Returns: normal (3,) unit vector
     n_points = len(path_xyz)
+
+    def fallback_normal():
+        if prev_normal is not None:
+            return prev_normal
+        return np.array([0, 0, 1])
     
     #Get neighbor indices
     start = max(0, index - neighbor_range)
@@ -59,24 +69,7 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
     local_points = path_xyz[start:end]
     
     if len(local_points) < 3:
-        #Not enough neighbors, estimate from velocity direction
-        #Normal is perpendicular to path tangent
-        if index > 0 and index < n_points - 1:
-            tangent = path_xyz[index + 1] - path_xyz[index - 1]
-        elif index == 0 and n_points > 1:
-            tangent = path_xyz[1] - path_xyz[0]
-        elif index == n_points - 1 and n_points > 1:
-            tangent = path_xyz[index] - path_xyz[index - 1]
-        else:
-            return np.array([0, 0, 1])  #Fallback for single point
-        
-        #Create perpendicular vector in XY plane if possible
-        tangent_norm = normalize(tangent)
-        if abs(tangent_norm[2]) < 0.99:  #Not vertical
-            normal = np.array([0, 0, 1])
-        else:  #Nearly vertical tangent
-            normal = np.array([1, 0, 0])
-        return normalize(normal)
+        return fallback_normal()
     
     #Center the points
     centroid = np.mean(local_points, axis=0)
@@ -85,20 +78,7 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
     #Check if points are too close together (degenerate case)
     max_distance = np.max(np.linalg.norm(centered, axis=1))
     if max_distance < 1e-10:
-        #Points are essentially identical, estimate from path direction
-        if index > 0:
-            tangent = normalize(path_xyz[index] - path_xyz[index - 1])
-        elif index < n_points - 1:
-            tangent = normalize(path_xyz[index + 1] - path_xyz[index])
-        else:
-            tangent = np.array([1, 0, 0])
-        
-        #Normal perpendicular to tangent, prefer upward direction
-        if abs(tangent[2]) < 0.99:
-            normal = np.array([0, 0, 1])
-        else:
-            normal = np.array([1, 0, 0])
-        return normalize(normal)
+        return fallback_normal()
     
     #Use SVD to find the normal (smallest singular value direction)
     try:
@@ -112,25 +92,17 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
             
             #Create a normal perpendicular to tangent
             #Try Z-up first, if tangent is too vertical, use X
-            if abs(tangent[2]) < 0.99:
-                normal = np.array([0, 0, 1]) - tangent[2] * tangent
-            else:
-                normal = np.array([1, 0, 0]) - tangent[0] * tangent
-            
-            normal = normalize(normal)
-            
-            #Ensure upward preference
-            if normal[2] < 0:
-                normal = -normal
-            
-            return normal
+            reference = prev_normal if prev_normal is not None else np.array([0, 0, 1])
+            helper = np.cross(tangent, np.cross(reference, tangent))
+            if np.linalg.norm(helper) < 1e-10:
+                helper = reference
+            return normalize(helper)
         
         normal = vh[-1, :]  #Last row is normal direction
         
     except np.linalg.LinAlgError:
         #SVD failed to converge, estimate from local geometry
         if index > 0 and index < n_points - 1:
-            #Use two vectors to compute cross product
             v1 = path_xyz[index] - path_xyz[index - 1]
             v2 = path_xyz[index + 1] - path_xyz[index]
             normal = np.cross(v1, v2)
@@ -138,59 +110,98 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3):
             if norm > 1e-10:
                 normal = normal / norm
             else:
-                normal = np.array([0, 0, 1])
+                normal = fallback_normal()
         else:
-            normal = np.array([0, 0, 1])
+            normal = fallback_normal()
     
-    #Ensure normal points "upward" (positive z component)
-    if normal[2] < 0:
-        normal = -normal
-    
-    return normalize(normal)
+    normal = normalize(normal)
+
+    if np.linalg.norm(normal) < 1e-10:
+        if prev_normal is not None:
+            return prev_normal
+        return np.array([0, 0, 1])
+
+    if prev_normal is not None:
+        alignment = np.dot(normal, prev_normal)
+        if alignment < 0:
+            normal = -normal
+
+    return normal
 
 
-def orientation_matrix_from_path(velocity, normal):
-    #Compute orientation matrix at a point
-    #Args: velocity (3,) vector, normal (3,) vector
-    #Returns: R (3, 3) rotation matrix
-    
+def orientation_matrix_min_twist(velocity, normal, prev_ex=None):
+    #Compute orientation matrix using a rotation-minimizing frame
+    #Args: velocity (3,) vector, normal (3,) vector, prev_ex optional previous x-axis
+    #Returns: R (3,3) rotation matrix minimizing twist along path
+
     #Tool z-axis points into surface (opposite of normal)
     ez = normalize(-normal)
-    
-    #Tool feed direction (tangent to path)
+
+    #Determine feed direction projected onto plane perpendicular to ez
     vel_norm = np.linalg.norm(velocity)
     if vel_norm < 1e-10:
-        #Zero velocity (stationary point or duplicate)
-        #Use a default feed direction perpendicular to normal
-        if abs(ez[2]) < 0.99:  #Normal not vertical
-            e_gamma = np.array([1, 0, 0])  #Default to X direction
-        else:  #Normal is vertical
-            e_gamma = np.array([0, 1, 0])  #Default to Y direction
-        e_gamma = normalize(e_gamma - np.dot(e_gamma, ez) * ez)  #Make perpendicular to ez
+        fallback = np.array([1.0, 0.0, 0.0])
+        if abs(np.dot(fallback, ez)) > 0.95:
+            fallback = np.array([0.0, 1.0, 0.0])
+        e_gamma = fallback
     else:
         e_gamma = velocity / vel_norm
-    
-    #Tool y-axis perpendicular to tool axis and feed direction
-    ey_cross = np.cross(-ez, e_gamma)
-    ey_norm = np.linalg.norm(ey_cross)
-    
+
+    e_gamma_proj = e_gamma - np.dot(e_gamma, ez) * ez
+    proj_norm = np.linalg.norm(e_gamma_proj)
+    if proj_norm < 1e-10:
+        #Velocity parallel to ez; pick arbitrary tangent direction
+        fallback = np.array([1.0, 0.0, 0.0])
+        if abs(np.dot(fallback, ez)) > 0.95:
+            fallback = np.array([0.0, 1.0, 0.0])
+        e_gamma_proj = fallback - np.dot(fallback, ez) * ez
+        proj_norm = np.linalg.norm(e_gamma_proj)
+        if proj_norm < 1e-10:
+            helper = np.array([0.0, 0.0, 1.0])
+            e_gamma_proj = np.cross(ez, helper)
+            proj_norm = np.linalg.norm(e_gamma_proj)
+            if proj_norm < 1e-10:
+                e_gamma_proj = np.array([1.0, 0.0, 0.0])
+
+    ex_default = e_gamma_proj / np.linalg.norm(e_gamma_proj)
+
+    ex = ex_default
+
+    #Apply rotation-minimizing projection of previous x-axis if available
+    if prev_ex is not None:
+        proj = prev_ex - np.dot(prev_ex, ez) * ez
+        proj_norm = np.linalg.norm(proj)
+        if proj_norm > 1e-6:
+            ex_candidate = proj / proj_norm
+            if np.dot(ex_candidate, ex_default) < 0:
+                ex_candidate = -ex_candidate
+            ex = ex_candidate
+
+    ex = normalize(ex)
+
+    #Compute y-axis to keep right-handed frame
+    ey = np.cross(ez, ex)
+    ey_norm = np.linalg.norm(ey)
     if ey_norm < 1e-10:
-        #e_gamma and ez are parallel/antiparallel
-        #Choose arbitrary perpendicular direction
-        if abs(ez[0]) < 0.99:
-            ey = normalize(np.cross(ez, np.array([1, 0, 0])))
+        helper = np.array([0.0, 0.0, 1.0])
+        if abs(np.dot(helper, ez)) > 0.95:
+            helper = np.array([0.0, 1.0, 0.0])
+        ey = np.cross(ez, helper)
+        ey_norm = np.linalg.norm(ey)
+        if ey_norm < 1e-10:
+            ey = np.array([0.0, 1.0, 0.0])
         else:
-            ey = normalize(np.cross(ez, np.array([0, 1, 0])))
+            ey = ey / ey_norm
+        ex = normalize(np.cross(ey, ez))
     else:
-        ey = ey_cross / ey_norm
-    
-    #Tool x-axis completes right-handed frame
-    ex = np.cross(ey, ez)
-    ex = normalize(ex)  #Ensure unit length
-    
-    #Construct rotation matrix (columns are basis vectors)
+        ey = ey / ey_norm
+
+    #Final orthonormalization (keeps ez direction)
+    ex = normalize(ex)
+    ey = normalize(np.cross(ez, ex))
+    ez = normalize(ez)
+
     R = np.column_stack([ex, ey, ez])
-    
     return R
 
 def apply_off_surface_offset(positions, orientations, on_surface, offset_distance=0.05):
@@ -228,35 +239,28 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
     orientations = np.zeros((n_points, 3, 3))
     
     #Step 3: Process each point
+    prev_normal = None
+    prev_ex = None
     for i in range(n_points):
         velocity = velocities[i]
         
         #Estimate surface normal from neighboring points
-        normal = compute_normal_from_neighbors(path_xyz, i, neighbor_range)
+        normal = compute_normal_from_neighbors(path_xyz, i, neighbor_range, prev_normal)
         
         #Compute orientation matrix
-        R = orientation_matrix_from_path(velocity, normal)
+        R = orientation_matrix_min_twist(velocity, normal, prev_ex)
         
-        #Check for discontinuous orientation change
+        #Enforce consistent surface-facing Z-axis
         if smooth_orientations and i > 0:
-            #Compute angle difference between consecutive orientations
-            R_prev = orientations[i-1]
-            R_diff = R_prev.T @ R
-            trace_diff = np.trace(R_diff)
-            angle_diff = np.arccos(np.clip((trace_diff - 1) / 2, -1, 1))
-            
-            #If orientation changes by more than 90 degrees, likely a sign flip
-            if angle_diff > np.pi / 2:
-                #Check if flipping the normal reduces the discontinuity
-                R_flipped = orientation_matrix_from_path(velocity, -normal)
-                R_diff_flipped = R_prev.T @ R_flipped
-                trace_flipped = np.trace(R_diff_flipped)
-                angle_flipped = np.arccos(np.clip((trace_flipped - 1) / 2, -1, 1))
-                
-                if angle_flipped < angle_diff:
-                    R = R_flipped
+            prev_z = orientations[i-1][:, 2]
+            curr_z = R[:, 2]
+            if np.dot(prev_z, curr_z) < 0:
+                normal = -normal
+                R = orientation_matrix_min_twist(velocity, normal, prev_ex)
         
         orientations[i] = R
+        prev_normal = normal
+        prev_ex = R[:, 0]
     
     return path_xyz, orientations
 
@@ -267,10 +271,15 @@ if ROS2_AVAILABLE:
             super().__init__('tool_orientation_node')
             
             #Publisher for trajectory with quaternions (unified format)
+            trajectory_qos = QoSProfile(
+                depth=1,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            )
             self.trajectory_pub = self.create_publisher(
                 PoseArray,
                 '/tool_orientation/path',
-                10
+                trajectory_qos
             )
             
             #Subscriber for input path points
@@ -293,7 +302,7 @@ if ROS2_AVAILABLE:
             self.declare_parameter('dt', 0.1)
             self.declare_parameter('neighbor_range', 3)
             self.declare_parameter('off_surface_height', 0.05)  # 5 cm in meters
-            self.declare_parameter('frame_id', 'world_link')  # Coordinate frame for visualization
+            self.declare_parameter('frame_id', 'world')  # Coordinate frame for visualization
             
             #Storage for received data
             self.path_xyz = None
@@ -416,16 +425,17 @@ if ROS2_AVAILABLE:
             
             return adjusted_positions, orientations
 
+
     def main(args=None):
         rclpy.init(args=args)
-        node = ToolOrientationNode()
-        
+        tool_node = ToolOrientationNode()
+
         try:
-            rclpy.spin(node)
+            rclpy.spin(tool_node)
         except KeyboardInterrupt:
             pass
         finally:
-            node.destroy_node()
+            tool_node.destroy_node()
             rclpy.shutdown()
 
     if __name__ == '__main__':

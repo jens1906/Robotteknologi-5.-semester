@@ -21,13 +21,15 @@ class TestImagePublisher(Node):
     def __init__(self):
         super().__init__('test_image_publisher')
         
-        # Declare parameters
-        self.declare_parameter('test_image_path', 'src/realsense_publisher/image/realsense_capture_20251118_115022_color.png')
-        self.declare_parameter('test_depth_path', 'src/realsense_publisher/image/realsense_capture_20251118_115022_depth.npy')
+        # Declare parameters - use absolute paths
+        home = os.path.expanduser('~')
+        base_path = f'{home}/Documents/GitHub/Robotteknologi-5.-semester/Vattenfall_ws/src/corrosion_detection/Saved_data/capture_20251128_132546'
+        self.declare_parameter('test_image_path', f'{base_path}/color.png')
+        self.declare_parameter('test_depth_path', f'{base_path}/depth.npy')
         
-        # QoS profile matching realsense wrapper
+        # QoS profile matching corrosion_detection subscriber (RELIABLE)
         image_qos = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.VOLATILE,
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1
@@ -41,18 +43,33 @@ class TestImagePublisher(Node):
         test_image_path = self.get_parameter('test_image_path').get_parameter_value().string_value
         test_depth_path = self.get_parameter('test_depth_path').get_parameter_value().string_value
         
+        # Load test image with error checking
         if os.path.exists(test_image_path):
             self.test_image = cv.imread(test_image_path)
-            # Convert BGR to RGB for publishing (wrapper publishes RGB8)
-            self.test_image = cv.cvtColor(self.test_image, cv.COLOR_BGR2RGB)
+            if self.test_image is None:
+                self.get_logger().error(f'❌ cv.imread() FAILED: {test_image_path} exists but cannot be read! Check file format/corruption')
+                self.test_image = np.zeros((480, 640, 3), dtype=np.uint8)
+            else:
+                # Convert BGR to RGB for publishing (wrapper publishes RGB8)
+                self.test_image = cv.cvtColor(self.test_image, cv.COLOR_BGR2RGB)
+                self.get_logger().info(f'✓ Loaded color image: {test_image_path}')
+                self.get_logger().info(f'  Shape: {self.test_image.shape}, Type: {self.test_image.dtype}')
         else:
-            self.get_logger().warn(f'Test image not found: {test_image_path}, using blank image')
+            self.get_logger().error(f'❌ TEST IMAGE NOT FOUND: {test_image_path}')
             self.test_image = np.zeros((480, 640, 3), dtype=np.uint8)
         
+        # Load test depth with error checking
         if os.path.exists(test_depth_path):
-            self.test_depth = np.load(test_depth_path)
+            try:
+                self.test_depth = np.load(test_depth_path)
+                self.get_logger().info(f'✓ Loaded depth image: {test_depth_path}')
+                self.get_logger().info(f'  Shape: {self.test_depth.shape}, Type: {self.test_depth.dtype}')
+                self.get_logger().info(f'  Depth range: [{self.test_depth.min()}, {self.test_depth.max()}] mm')
+            except Exception as e:
+                self.get_logger().error(f'❌ np.load() FAILED: {test_depth_path} - Error: {e}')
+                self.test_depth = np.zeros((480, 640), dtype=np.uint16)
         else:
-            self.get_logger().warn(f'Test depth not found: {test_depth_path}, using blank depth')
+            self.get_logger().error(f'❌ TEST DEPTH NOT FOUND: {test_depth_path}')
             self.test_depth = np.zeros((480, 640), dtype=np.uint16)
             
         
