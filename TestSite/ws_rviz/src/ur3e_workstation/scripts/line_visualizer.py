@@ -6,7 +6,7 @@ Subscribes to /tool_orientation/xyz_rotation and publishes visualization markers
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray
+from geometry_msgs.msg import PoseArray
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, Quaternion
 import numpy as np
@@ -18,8 +18,8 @@ class LineVisualizer(Node):
         
         # Subscriber to the line topic
         self.subscription = self.create_subscription(
-            Float64MultiArray,
-            '/tool_orientation/xyz_rotation',
+            PoseArray,
+            '/tool_orientation/path',
             self.line_callback,
             10
         )
@@ -38,52 +38,36 @@ class LineVisualizer(Node):
         )
         
         self.get_logger().info('Line Visualizer started')
-        self.get_logger().info('Subscribing to: /tool_orientation/xyz_rotation')
+        self.get_logger().info('Subscribing to: /tool_orientation/path')
         self.get_logger().info('Publishing to: /line_visualization (MarkerArray)')
         self.get_logger().info('Publishing to: /line_path (LINE_STRIP)')
     
     def line_callback(self, msg):
-        """Process incoming line data and create visualization markers"""
+        """Process incoming PoseArray and create visualization markers"""
         
-        import numpy as np
-        from scipy.spatial.transform import Rotation as Rot
+        num_points = len(msg.poses)
+        self.get_logger().info(f'Received {num_points} poses from frame: {msg.header.frame_id}', throttle_duration_sec=2.0)
         
-        # Parse the data: [x1,y1,z1,qx1,qy1,qz1,qw1, x2,y2,z2,qx2,qy2,qz2,qw2, ...]
-        data = msg.data
-        
-        if len(data) % 7 != 0:
-            self.get_logger().error(f'Invalid data length: {len(data)} (must be multiple of 7)')
+        if num_points == 0:
+            self.get_logger().warn('Received empty PoseArray')
             return
         
-        num_points = len(data) // 7
-        self.get_logger().info(f'Received {num_points} points', throttle_duration_sec=2.0)
-        
-        # Transformation from mount frame (incoming data) to base_link frame
-        # Robot base_link is at [0, -0.218, 0] relative to mount with rotation rpy=[-90°, 0, 180°]
-        # Adjust X and Z if needed to fine-tune the transformation
-        mount_to_base_translation = np.array([0.20, -0.218, 0.25])  # TODO: Adjust X and Z if needed
-        mount_to_base_rotation = Rot.from_euler('xyz', [90, 0, 0], degrees=True)
+        # Use frame from message header
+        frame_id = msg.header.frame_id if msg.header.frame_id else 'base_link'
         
         # Clear previous markers
         marker_array = MarkerArray()
         
         # Create coordinate frame markers for each point
-        for i in range(num_points):
-            idx = i * 7
-            # Position in mount frame
-            pos_mount = np.array([data[idx], data[idx+1], data[idx+2]])
-            # Orientation in mount frame
-            quat_mount = np.array([data[idx+3], data[idx+4], data[idx+5], data[idx+6]])
-            
-            # Transform position from mount to base_link
-            pos_base = mount_to_base_rotation.apply(pos_mount) + mount_to_base_translation
-            x, y, z = pos_base[0], pos_base[1], pos_base[2]
-            
-            # Transform orientation from mount to base_link
-            rot_mount = Rot.from_quat(quat_mount)
-            rot_base = mount_to_base_rotation * rot_mount
-            quat_base = rot_base.as_quat()
-            qx, qy, qz, qw = quat_base[0], quat_base[1], quat_base[2], quat_base[3]
+        for i, pose in enumerate(msg.poses):
+            # Extract position and orientation directly from pose
+            x = pose.position.x
+            y = pose.position.y
+            z = pose.position.z
+            qx = pose.orientation.x
+            qy = pose.orientation.y
+            qz = pose.orientation.z
+            qw = pose.orientation.w
             
             # Create axes markers (X, Y, Z)
             for axis_idx, (axis_name, color) in enumerate([
@@ -92,7 +76,7 @@ class LineVisualizer(Node):
                 ('z', [0.0, 0.0, 1.0])   # Blue
             ]):
                 marker = Marker()
-                marker.header.frame_id = 'base_link'
+                marker.header.frame_id = frame_id
                 marker.header.stamp = self.get_clock().now().to_msg()
                 marker.ns = f'point_{i}'
                 marker.id = i * 3 + axis_idx
@@ -153,7 +137,7 @@ class LineVisualizer(Node):
             
             # Add sphere at each point
             sphere = Marker()
-            sphere.header.frame_id = 'base_link'
+            sphere.header.frame_id = frame_id
             sphere.header.stamp = self.get_clock().now().to_msg()
             sphere.ns = f'sphere_{i}'
             sphere.id = num_points * 3 + i
@@ -177,7 +161,7 @@ class LineVisualizer(Node):
         
         # Create LINE_STRIP marker connecting all points
         line_marker = Marker()
-        line_marker.header.frame_id = 'base_link'
+        line_marker.header.frame_id = frame_id
         line_marker.header.stamp = self.get_clock().now().to_msg()
         line_marker.ns = 'line_path'
         line_marker.id = 0
@@ -189,18 +173,12 @@ class LineVisualizer(Node):
         line_marker.color.b = 1.0
         line_marker.color.a = 1.0
         
-        # Add all transformed points to the line
-        for i in range(num_points):
-            idx = i * 7
-            # Position in mount frame
-            pos_mount = np.array([data[idx], data[idx+1], data[idx+2]])
-            # Transform position from mount to base_link
-            pos_base = mount_to_base_rotation.apply(pos_mount) + mount_to_base_translation
-            
+        # Add all points to the line
+        for pose in msg.poses:
             point = Point()
-            point.x = float(pos_base[0])
-            point.y = float(pos_base[1])
-            point.z = float(pos_base[2])
+            point.x = pose.position.x
+            point.y = pose.position.y
+            point.z = pose.position.z
             line_marker.points.append(point)
         
         # Publish line
