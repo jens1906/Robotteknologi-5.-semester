@@ -235,7 +235,7 @@ class CartesianPathFollower(Node):
             request.link_name = 'tool0'
             request.waypoints = remaining_waypoints
             request.max_step = 0.05  # 5cm interpolation
-            request.jump_threshold = 0.0  # Disable jump check
+            request.jump_threshold = 1.5  # Prevent large joint jumps (approx 85 degrees)
             request.avoid_collisions = False
             
             future = self.cartesian_path_client.call_async(request)
