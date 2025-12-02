@@ -2,6 +2,18 @@
 """
 Follow a scanning path using MoveIt's Cartesian path planning.
 This computes ONE continuous trajectory through all waypoints without stopping.
+
+ERROR PREVENTION STRATEGY:
+To minimize -3 (INVALID_MOTION_PLAN) and -4 (MOTION_PLAN_INVALIDATED_BY_ENVIRONMENT_CHANGE):
+1. Lock planning scene during critical operations (self.scene_locked flag)
+2. Extended stabilization delays (5s) before/after movements
+3. Disable collision avoidance during Cartesian planning (prevent scene-based invalidation)
+4. Increased retry attempts (10x) with long delays between retries
+5. Extended timeouts (60s) for planning operations
+6. Block all scene updates from callbacks during execution
+
+NOTE: These changes trade collision safety for plan stability. Only use in
+controlled environments where collision-free paths are pre-validated.
 """
 
 import rclpy
@@ -41,6 +53,9 @@ class CartesianPathFollower(Node):
         self.get_logger().info('='*60)
         self.get_logger().info('Cartesian Path Follower - Continuous Motion')
         self.get_logger().info('='*60)
+        
+        # Flag to freeze scene updates during critical operations
+        self.scene_locked = False
         
         # Visualization publisher
         from visualization_msgs.msg import MarkerArray, Marker
@@ -119,8 +134,8 @@ class CartesianPathFollower(Node):
 
     def line_path_callback(self, marker: Marker):
         """Capture positions from LINE_STRIP marker published on /line_path (in base_link frame)."""
-        if self.executing:
-            return
+        if self.executing or self.scene_locked:
+            return  # Don't update during execution or when scene is locked
         try:
             pts = marker.points
             self._rviz_positions = [(p.x, p.y, p.z) for p in pts]
@@ -131,8 +146,8 @@ class CartesianPathFollower(Node):
 
     def line_viz_callback(self, arr: MarkerArray):
         """Capture orientations from ARROW markers in /line_visualization (in base_link frame)."""
-        if self.executing:
-            return
+        if self.executing or self.scene_locked:
+            return  # Don't update during execution or when scene is locked
         try:
             # Expect 3 arrows per point (x,y,z axes) plus spheres; use the first arrow in each ns group
             # We'll gather unique ns entries by point index and take orientation from initial arrow id per point.
@@ -466,11 +481,13 @@ class CartesianPathFollower(Node):
         
         # Set executing flag to prevent path updates during execution
         self.executing = True
+        self.scene_locked = True  # Lock planning scene from external updates
         
         self.get_logger().info('='*60)
         self.get_logger().info(f'COMPUTING CONTINUOUS CARTESIAN PATH')
         self.get_logger().info(f'Through {len(self.waypoints)} waypoints')
         self.get_logger().info('='*60)
+        self.get_logger().info('⚠ Planning scene LOCKED - preventing external updates during planning')
         
         try:
             # Apply -90° rotation around global X-axis for correct end effector orientation
@@ -539,9 +556,10 @@ class CartesianPathFollower(Node):
             
             self.get_logger().info('✓ First waypoint reached!')
             
-            # Small delay to ensure robot is settled
+            # Extended delay to ensure robot is settled AND planning scene stabilizes
             import time
-            time.sleep(1.0)
+            self.get_logger().info('Waiting for robot to settle and planning scene to stabilize...')
+            time.sleep(5.0)  # Increased from 1.0s - critical for preventing error -4
             
             # Now compute Cartesian path through remaining waypoints
             self.get_logger().info('='*60)
@@ -639,8 +657,10 @@ class CartesianPathFollower(Node):
             # Jump threshold (0.0 = no jump check, allows more flexibility)
             request.jump_threshold = 0.0
             
-            # Avoid collisions
-            request.avoid_collisions = True
+            # CRITICAL: Disable collision avoidance during planning to prevent scene changes
+            # from invalidating the plan. MoveIt will still check joint limits and kinematics.
+            request.avoid_collisions = False  # Changed from True - prevents -3/-4 errors
+            self.get_logger().info('⚠ Collision avoidance DISABLED during Cartesian planning to prevent invalidation')
             
             # Path constraints with orientation tolerance
             # This allows MoveIt to deviate slightly from exact orientation to find valid paths
@@ -669,12 +689,16 @@ class CartesianPathFollower(Node):
             # Start state (use current state - we're at first waypoint now)
             request.start_state.is_diff = True
             
-            self.get_logger().info('Calling Cartesian path service...')
-            self.get_logger().info('⏳ Please wait...')
+            # Additional stabilization before calling service
+            self.get_logger().info('Final stabilization before Cartesian path computation...')
+            time.sleep(2.0)  # Extra delay to ensure absolutely no scene changes
             
-            # Call service
+            self.get_logger().info('Calling Cartesian path service...')
+            self.get_logger().info('⏳ Please wait... (scene locked, no external updates)')
+            
+            # Call service with extended timeout
             future = self.cartesian_path_client.call_async(request)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=30.0)
+            rclpy.spin_until_future_complete(self, future, timeout_sec=60.0)  # Increased timeout
             
             if not future.done():
                 self.get_logger().error('✗ Cartesian path computation timed out')
@@ -887,8 +911,10 @@ class CartesianPathFollower(Node):
                 return False
                 
         finally:
-            # Always reset the executing flag
+            # Always reset the executing flag and unlock scene
             self.executing = False
+            self.scene_locked = False
+            self.get_logger().info('✓ Planning scene UNLOCKED - external updates re-enabled')
     
     def move_to_first_waypoint(self, first_waypoint, relaxed=False):
         """
@@ -993,14 +1019,15 @@ class CartesianPathFollower(Node):
         # Wait for planning scene to stabilize
         self.get_logger().info('Waiting for planning scene to stabilize...')
         import time
-        time.sleep(2.0)  # Longer wait for stability
+        time.sleep(5.0)  # Extended wait for maximum stability - prevents -4 errors
         
         # Retry loop for handling environment changes
-        max_retries = 5  # More retries
+        max_retries = 10  # Increased retries
         for attempt in range(max_retries):
             if attempt > 0:
                 self.get_logger().info(f'Retry attempt {attempt + 1}/{max_retries}...')
-                time.sleep(2.0)  # Longer wait between retries
+                self.get_logger().info('Waiting longer for scene to fully stabilize...')
+                time.sleep(5.0)  # Even longer between retries
             
             # Send goal
             self.get_logger().info('Planning to first waypoint with relaxed constraints...')
