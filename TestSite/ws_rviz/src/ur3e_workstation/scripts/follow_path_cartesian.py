@@ -59,6 +59,18 @@ class CartesianPathFollower(Node):
         
         self.get_logger().info('✓ Cartesian path service ready')
         
+        # Create service client for IK validation
+        from moveit_msgs.srv import GetPositionIK
+        self.ik_client = self.create_client(
+            GetPositionIK,
+            '/compute_ik'
+        )
+        
+        if self.ik_client.wait_for_service(timeout_sec=5.0):
+            self.get_logger().info('✓ IK service ready for waypoint validation')
+        else:
+            self.get_logger().warn('⚠ IK service not available - skipping validation')
+        
         # Create action client for trajectory execution
         self.execute_trajectory_client = ActionClient(
             self,
@@ -206,6 +218,93 @@ class CartesianPathFollower(Node):
             total_distance += dist
         
         return total_distance / (len(waypoints) - 1)
+    
+    def validate_waypoints(self, waypoints, verbose=True):
+        """
+        Validate each waypoint by checking IK feasibility.
+        Returns list of (index, is_valid, error_message) tuples.
+        """
+        if not hasattr(self, 'ik_client') or self.ik_client is None:
+            self.get_logger().warn('IK client not available - skipping validation')
+            return [(i, True, 'Validation skipped') for i in range(len(waypoints))]
+        
+        from moveit_msgs.srv import GetPositionIK
+        from moveit_msgs.msg import MoveItErrorCodes
+        
+        results = []
+        failed_indices = []
+        
+        if verbose:
+            self.get_logger().info(f'Validating {len(waypoints)} waypoints via IK...')
+        
+        for i, waypoint in enumerate(waypoints):
+            # Create IK request
+            ik_request = GetPositionIK.Request()
+            ik_request.ik_request.group_name = 'ur_manipulator'
+            ik_request.ik_request.robot_state.is_diff = True
+            ik_request.ik_request.avoid_collisions = True
+            ik_request.ik_request.timeout.sec = 0
+            ik_request.ik_request.timeout.nanosec = 100000000  # 0.1 seconds
+            
+            # Set pose stamped
+            from geometry_msgs.msg import PoseStamped
+            pose_stamped = PoseStamped()
+            pose_stamped.header.frame_id = 'world'
+            pose_stamped.header.stamp = self.get_clock().now().to_msg()
+            pose_stamped.pose = waypoint
+            ik_request.ik_request.pose_stamped = pose_stamped
+            
+            # Call IK service
+            try:
+                future = self.ik_client.call_async(ik_request)
+                rclpy.spin_until_future_complete(self, future, timeout_sec=0.5)
+                
+                if future.done():
+                    response = future.result()
+                    
+                    if response.error_code.val == MoveItErrorCodes.SUCCESS:
+                        results.append((i, True, 'Valid'))
+                        if verbose and i % 10 == 0:  # Log every 10th waypoint
+                            self.get_logger().info(f'  Waypoint {i}: ✓ Valid')
+                    else:
+                        error_name = self._decode_moveit_error(response.error_code.val)
+                        results.append((i, False, error_name))
+                        failed_indices.append(i)
+                        if verbose:
+                            self.get_logger().warn(f'  Waypoint {i}: ✗ {error_name}')
+                else:
+                    results.append((i, False, 'IK timeout'))
+                    failed_indices.append(i)
+                    
+            except Exception as e:
+                results.append((i, False, f'Exception: {str(e)}'))
+                failed_indices.append(i)
+        
+        # Summary
+        valid_count = sum(1 for _, is_valid, _ in results if is_valid)
+        if verbose:
+            self.get_logger().info(f'Validation complete: {valid_count}/{len(waypoints)} waypoints valid')
+            if failed_indices:
+                self.get_logger().warn(f'Failed waypoint indices: {failed_indices[:20]}...' if len(failed_indices) > 20 else f'Failed waypoint indices: {failed_indices}')
+        
+        return results
+    
+    def _decode_moveit_error(self, error_code):
+        """Decode MoveIt error codes to human-readable strings."""
+        error_meanings = {
+            1: 'SUCCESS',
+            -1: 'FAILURE',
+            -31: 'NO_IK_SOLUTION',
+            -11: 'START_STATE_IN_COLLISION',
+            -13: 'GOAL_IN_COLLISION',
+            -14: 'GOAL_VIOLATES_PATH_CONSTRAINTS',
+            -15: 'GOAL_CONSTRAINTS_VIOLATED',
+            -20: 'INVALID_ROBOT_STATE',
+            -21: 'INVALID_LINK_NAME',
+            -23: 'FRAME_TRANSFORM_FAILURE',
+        }
+        return error_meanings.get(error_code, f'ERROR_{error_code}')
+
     
     def smooth_orientations(self, waypoints, max_angle_deg=20.0):
         """
@@ -465,6 +564,33 @@ class CartesianPathFollower(Node):
                 position_only_waypoints.append(pos_wp)
             
             self.get_logger().info(f'Converted {len(cartesian_waypoints)} waypoints to position-only for max reachability')
+            
+            # Validate waypoints before planning
+            self.get_logger().info('='*60)
+            self.get_logger().info('PRE-VALIDATION: Checking waypoint feasibility')
+            self.get_logger().info('='*60)
+            validation_results = self.validate_waypoints(position_only_waypoints, verbose=True)
+            
+            # Filter out invalid waypoints
+            valid_waypoints = []
+            invalid_indices = []
+            for i, (idx, is_valid, error_msg) in enumerate(validation_results):
+                if is_valid:
+                    valid_waypoints.append(position_only_waypoints[i])
+                else:
+                    invalid_indices.append(i)
+            
+            if len(invalid_indices) > 0:
+                self.get_logger().warn(f'⚠ Removing {len(invalid_indices)} invalid waypoints before Cartesian planning')
+                self.get_logger().warn(f'  Invalid indices: {invalid_indices[:10]}{"..." if len(invalid_indices) > 10 else ""}')
+                position_only_waypoints = valid_waypoints
+                
+                if len(position_only_waypoints) == 0:
+                    self.get_logger().error('❌ No valid waypoints remaining after validation!')
+                    return False
+            else:
+                self.get_logger().info('✓ All waypoints passed IK validation')
+            
             self.get_logger().info('Validating waypoint reachability...')
             UR3E_REACH = 0.55  # Maximum reach from base (meters)
             out_of_reach = 0
