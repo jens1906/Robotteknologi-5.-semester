@@ -236,7 +236,7 @@ class CartesianPathFollower(Node):
             request.waypoints = remaining_waypoints
             request.max_step = 0.05  # 5cm interpolation
             request.jump_threshold = 1.5  # Prevent large joint jumps (approx 85 degrees)
-            request.avoid_collisions = False
+            request.avoid_collisions = True
             
             future = self.cartesian_path_client.call_async(request)
             rclpy.spin_until_future_complete(self, future)
@@ -340,8 +340,8 @@ class CartesianPathFollower(Node):
         goal = MoveGroup.Goal()
         goal.request.group_name = 'ur_manipulator'
         goal.request.num_planning_attempts = 10
-        goal.request.allowed_planning_time = 5.0
-        goal.request.max_velocity_scaling_factor = 0.1
+        goal.request.allowed_planning_time = 1.0
+        goal.request.max_velocity_scaling_factor = 0.2
         goal.request.max_acceleration_scaling_factor = 0.1
         goal.request.planner_id = "RRTConnectkConfigDefault"
         
@@ -371,7 +371,7 @@ class CartesianPathFollower(Node):
         oc.absolute_z_axis_tolerance = 0.1
         oc.weight = 1.0
         c.orientation_constraints.append(oc)
-        
+
         goal.request.goal_constraints.append(c)
         
         future = self.move_group_client.send_goal_async(goal)

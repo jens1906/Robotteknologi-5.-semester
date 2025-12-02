@@ -79,6 +79,12 @@ class CollisionMatrixPublisher(Node):
                     (other_link, link) in disabled_pairs or
                     link == other_link
                 )
+                
+                # Explicitly log the status for the camera and test plate
+                if (link == 'testpladekurve' and other_link == 'rsd435') or \
+                   (link == 'rsd435' and other_link == 'testpladekurve'):
+                     self.get_logger().info(f'Collision check for {link} <-> {other_link}: {"DISABLED" if should_disable else "ENABLED"}')
+
                 entry.enabled.append(should_disable)
             acm.entry_values.append(entry)
         
