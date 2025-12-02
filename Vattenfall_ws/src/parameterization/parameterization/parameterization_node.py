@@ -48,11 +48,13 @@ class ParameterizationNode(Node):
         self.declare_parameter('quality_sample_size', 1000)
         self.declare_parameter('status_publish_rate', 1.0)
         self.declare_parameter('metric_neighbors', 20)
+        self.declare_parameter('xyz_match_threshold', 1.0)  # Max distance (mm) for XYZ point matching
         
         # Get parameters
         self.quality_sample_size = self.get_parameter('quality_sample_size').value
         status_rate = self.get_parameter('status_publish_rate').value
         self.metric_neighbors = self.get_parameter('metric_neighbors').value
+        self.xyz_match_threshold = self.get_parameter('xyz_match_threshold').value
         
         # Initialize arc-length-based parameterization
         self.surf = Parameterization()
@@ -310,16 +312,12 @@ class ParameterizationNode(Node):
         corrosion_v_min = float(np.min(corrosion_uv[:, 1]))
         corrosion_v_max = float(np.max(corrosion_uv[:, 1]))
         
-        # Clamp corrosion bounds to workspace bounds to ensure interpolation validity
-        # Add small margin to avoid edge issues
-        margin_u = (workspace_bounds['u_max'] - workspace_bounds['u_min']) * 0.01
-        margin_v = (workspace_bounds['v_max'] - workspace_bounds['v_min']) * 0.01
-        
+        # Store corrosion UV bounds
         self.corrosion_uv_bounds = {
-            'u_min': max(corrosion_u_min, workspace_bounds['u_min'] + margin_u),
-            'u_max': min(corrosion_u_max, workspace_bounds['u_max'] - margin_u),
-            'v_min': max(corrosion_v_min, workspace_bounds['v_min'] + margin_v),
-            'v_max': min(corrosion_v_max, workspace_bounds['v_max'] - margin_v)
+            'u_min': corrosion_u_min,
+            'u_max': corrosion_u_max,
+            'v_min': corrosion_v_min,
+            'v_max': corrosion_v_max
         }
         
         # Log if bounds were clamped
@@ -349,12 +347,13 @@ class ParameterizationNode(Node):
     
     def _map_xyz_to_uv(self, xyz_points):
         """
-        Map XYZ points to UV coordinates using the workspace parameterization.
+        Map XYZ points to UV coordinates by identifying them in the workspace parameterization.
         
-        This finds the nearest point in the parameterized workspace and returns its UV coordinates.
+        Since corrosion points are a subset of the workspace points, this finds their indices
+        in the workspace point cloud and retrieves their corresponding UV coordinates directly.
         
         Args:
-            xyz_points: Nx3 array of XYZ coordinates
+            xyz_points: Nx3 array of XYZ coordinates (must be subset of workspace points)
             
         Returns:
             Nx2 array of UV coordinates
@@ -362,21 +361,29 @@ class ParameterizationNode(Node):
         if not self.surf.is_ready:
             raise ValueError("Parameterization not ready")
         
-        # Transform points to local frame (same as workspace)
-        centered_points = xyz_points - self.surf.centroid
-        points_local = centered_points @ self.surf.principal_axes.T
-        
-        # Build KD-tree from workspace points in local frame if not already built
+        # Build KD-tree from original workspace points if not already built
         if self.surf.kdtree_xyz is None:
-            self.surf.kdtree_xyz = cKDTree(self.surf.points_local)
+            # Use original global coordinates for matching
+            self.surf.kdtree_xyz = cKDTree(self.surf.points)
         
-        # Find nearest neighbors in workspace
-        distances, indices = self.surf.kdtree_xyz.query(points_local, k=1)
+        # Find nearest neighbors in workspace using global coordinates
+        # Since corrosion points are from the same point cloud, distance should be ~0
+        distances, indices = self.surf.kdtree_xyz.query(xyz_points, k=1)
         
-        # Get UV coordinates of nearest workspace points
+        # Verify that points are actually from the workspace
+        max_distance = np.max(distances)
+        mean_distance = np.mean(distances)
+        
+        if max_distance > self.xyz_match_threshold:
+            self.get_logger().warn(f'Some corrosion points may not be in workspace: max distance = {max_distance:.4f} mm')
+            self.get_logger().warn(f'  Consider increasing xyz_match_threshold parameter (current: {self.xyz_match_threshold} mm)')
+            self.get_logger().warn(f'  Or verify that corrosion and workspace data come from the same point cloud')
+        
+        # Get UV coordinates of the matched workspace points
         uv_coords = self.surf.uv_params[indices]
         
-        self.get_logger().info(f'Mapped {len(xyz_points)} XYZ points to UV (mean distance: {np.mean(distances):.4f})')
+        self.get_logger().info(f'Mapped {len(xyz_points)} corrosion points to UV coordinates')
+        self.get_logger().info(f'  Match quality: mean distance = {mean_distance:.6f} mm, max distance = {max_distance:.6f} mm')
         
         return uv_coords
     
