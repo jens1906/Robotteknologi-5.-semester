@@ -25,6 +25,23 @@ def normalize(v, epsilon=1e-12):
         return np.zeros_like(v)
     return v / norm
 
+def normalize_or_none(v, epsilon=1e-12):
+    norm = np.linalg.norm(v)
+    if norm < epsilon:
+        return None
+    return v / norm
+
+def quaternion_axis(quat_xyzw, axis_index=1):
+    #Return axis vector from quaternion (default Y axis)
+    try:
+        rot = R.from_quat(quat_xyzw)
+        matrix = rot.as_matrix()
+        axis_vec = matrix[:, axis_index]
+        return normalize(axis_vec)
+    except Exception:
+        fallback = np.array([0.0, 1.0, 0.0]) if axis_index == 1 else np.array([0.0, 0.0, 1.0])
+        return fallback
+
 def compute_velocity(path_xyz, dt=0.1):
     #Compute velocity at each point using numerical differentiation
     #Args: path_xyz (N, 3) array, dt time step
@@ -129,80 +146,62 @@ def compute_normal_from_neighbors(path_xyz, index, neighbor_range=3, prev_normal
     return normal
 
 
-def orientation_matrix_min_twist(velocity, normal, prev_ex=None):
-    #Compute orientation matrix using a rotation-minimizing frame
-    #Args: velocity (3,) vector, normal (3,) vector, prev_ex optional previous x-axis
-    #Returns: R (3,3) rotation matrix minimizing twist along path
+def orientation_matrix_locked_roll(velocity, normal, prev_ey=None, lock_roll=False):
+    #Compute orientation matrix where X follows the path and roll about X can be locked
+    #Args: velocity (3,), normal (3,), prev_ey optional previous y-axis, lock_roll flag
+    #Returns: (R, ey) rotation matrix and resulting y-axis for reuse
 
-    #Tool z-axis points into surface (opposite of normal)
-    ez = normalize(-normal)
-
-    #Determine feed direction projected onto plane perpendicular to ez
+    #Tool X-axis follows velocity (feed direction)
     vel_norm = np.linalg.norm(velocity)
     if vel_norm < 1e-10:
-        fallback = np.array([1.0, 0.0, 0.0])
-        if abs(np.dot(fallback, ez)) > 0.95:
-            fallback = np.array([0.0, 1.0, 0.0])
-        e_gamma = fallback
+        ex = np.array([1.0, 0.0, 0.0])
     else:
-        e_gamma = velocity / vel_norm
+        ex = velocity / vel_norm
 
-    e_gamma_proj = e_gamma - np.dot(e_gamma, ez) * ez
-    proj_norm = np.linalg.norm(e_gamma_proj)
-    if proj_norm < 1e-10:
-        #Velocity parallel to ez; pick arbitrary tangent direction
-        fallback = np.array([1.0, 0.0, 0.0])
-        if abs(np.dot(fallback, ez)) > 0.95:
-            fallback = np.array([0.0, 1.0, 0.0])
-        e_gamma_proj = fallback - np.dot(fallback, ez) * ez
-        proj_norm = np.linalg.norm(e_gamma_proj)
-        if proj_norm < 1e-10:
-            helper = np.array([0.0, 0.0, 1.0])
-            e_gamma_proj = np.cross(ez, helper)
-            proj_norm = np.linalg.norm(e_gamma_proj)
-            if proj_norm < 1e-10:
-                e_gamma_proj = np.array([1.0, 0.0, 0.0])
-
-    ex_default = e_gamma_proj / np.linalg.norm(e_gamma_proj)
-
-    ex = ex_default
-
-    #Apply rotation-minimizing projection of previous x-axis if available
-    if prev_ex is not None:
-        proj = prev_ex - np.dot(prev_ex, ez) * ez
-        proj_norm = np.linalg.norm(proj)
-        if proj_norm > 1e-6:
-            ex_candidate = proj / proj_norm
-            if np.dot(ex_candidate, ex_default) < 0:
-                ex_candidate = -ex_candidate
-            ex = ex_candidate
-
-    ex = normalize(ex)
-
-    #Compute y-axis to keep right-handed frame
-    ey = np.cross(ez, ex)
-    ey_norm = np.linalg.norm(ey)
-    if ey_norm < 1e-10:
+    #Tool Z-axis still points into the surface (opposite normal)
+    ez_target = normalize(-normal)
+    ez_proj = ez_target - np.dot(ez_target, ex) * ex
+    ez_norm = np.linalg.norm(ez_proj)
+    if ez_norm < 1e-10:
+        #Normal nearly parallel to X, pick helper axis
         helper = np.array([0.0, 0.0, 1.0])
-        if abs(np.dot(helper, ez)) > 0.95:
+        if abs(np.dot(helper, ex)) > 0.95:
             helper = np.array([0.0, 1.0, 0.0])
-        ey = np.cross(ez, helper)
-        ey_norm = np.linalg.norm(ey)
-        if ey_norm < 1e-10:
-            ey = np.array([0.0, 1.0, 0.0])
-        else:
-            ey = ey / ey_norm
-        ex = normalize(np.cross(ey, ez))
-    else:
-        ey = ey / ey_norm
+        ez_proj = helper - np.dot(helper, ex) * ex
+        ez_norm = np.linalg.norm(ez_proj)
+        if ez_norm < 1e-10:
+            ez_proj = np.array([0.0, 0.0, 1.0])
+    ez = ez_proj / np.linalg.norm(ez_proj)
 
-    #Final orthonormalization (keeps ez direction)
+    #Baseline Y-axis from Z and X (ensures right-handed frame)
+    ey_base = np.cross(ez, ex)
+    ey_norm = np.linalg.norm(ey_base)
+    if ey_norm < 1e-10:
+        helper = np.array([0.0, 1.0, 0.0])
+        ey_base = helper - np.dot(helper, ex) * ex
+        ey_norm = np.linalg.norm(ey_base)
+        if ey_norm < 1e-10:
+            ey_base = np.array([0.0, 1.0, 0.0])
+    ey_base = ey_base / np.linalg.norm(ey_base)
+
+    ey = ey_base
+
+    if lock_roll and prev_ey is not None:
+        ey_proj = prev_ey - np.dot(prev_ey, ex) * ex
+        proj_norm = np.linalg.norm(ey_proj)
+        if proj_norm > 1e-6:
+            ey_candidate = ey_proj / proj_norm
+            if np.dot(ey_candidate, ey_base) < 0:
+                ey_candidate = -ey_candidate
+            ey = ey_candidate
+
+    #Final orthonormalization to guarantee right-handed frame
     ex = normalize(ex)
-    ey = normalize(np.cross(ez, ex))
-    ez = normalize(ez)
+    ey = normalize(ey - np.dot(ey, ex) * ex)
+    ez = normalize(np.cross(ex, ey))
 
     R = np.column_stack([ex, ey, ez])
-    return R
+    return R, ey
 
 def apply_off_surface_offset(positions, orientations, on_surface, offset_distance=0.05):
     #Apply offset to positions where robot should be off surface
@@ -225,7 +224,7 @@ def apply_off_surface_offset(positions, orientations, on_surface, offset_distanc
     
     return adjusted_positions
 
-def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_orientations=True):
+def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_orientations=True, lock_roll=False, initial_roll_ey=None):
     #Main function: compute tool orientations from cartesian XYZ points
     #Args: path_xyz (N,3) array of [x,y,z] in sequence, dt time step, neighbor_range for normal estimation
     #      smooth_orientations if True, check for discontinuous jumps and smooth them
@@ -240,7 +239,7 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
     
     #Step 3: Process each point
     prev_normal = None
-    prev_ex = None
+    prev_ey = normalize_or_none(initial_roll_ey) if initial_roll_ey is not None else None
     for i in range(n_points):
         velocity = velocities[i]
         
@@ -248,7 +247,7 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
         normal = compute_normal_from_neighbors(path_xyz, i, neighbor_range, prev_normal)
         
         #Compute orientation matrix
-        R = orientation_matrix_min_twist(velocity, normal, prev_ex)
+        R, ey_vector = orientation_matrix_locked_roll(velocity, normal, prev_ey, lock_roll)
         
         #Enforce consistent surface-facing Z-axis
         if smooth_orientations and i > 0:
@@ -256,11 +255,11 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
             curr_z = R[:, 2]
             if np.dot(prev_z, curr_z) < 0:
                 normal = -normal
-                R = orientation_matrix_min_twist(velocity, normal, prev_ex)
+                R, ey_vector = orientation_matrix_locked_roll(velocity, normal, prev_ey, lock_roll)
         
         orientations[i] = R
         prev_normal = normal
-        prev_ex = R[:, 0]
+        prev_ey = ey_vector
     
     return path_xyz, orientations
 
@@ -303,6 +302,8 @@ if ROS2_AVAILABLE:
             self.declare_parameter('neighbor_range', 3)
             self.declare_parameter('off_surface_height', 0.05)  # 5 cm in meters
             self.declare_parameter('frame_id', 'world')  # Coordinate frame for visualization
+            self.declare_parameter('lock_roll', True)
+            self.declare_parameter('initial_roll_quaternion', [-0.707, 0.0, 0.0, 0.707])
             
             #Storage for received data
             self.path_xyz = None
@@ -357,6 +358,16 @@ if ROS2_AVAILABLE:
             #Mark data as processed
             self.data_processed = True
         
+        def get_initial_roll_axis(self):
+            quat_value = self.get_parameter('initial_roll_quaternion').value
+            try:
+                if len(quat_value) != 4:
+                    raise ValueError('Quaternion must have 4 components')
+                quat = [float(q) for q in quat_value]
+            except Exception:
+                quat = [-0.707, 0.0, 0.0, 0.707]
+            return quaternion_axis(quat, axis_index=1)
+
         def compute_and_publish_orientations(self, path_xyz, on_surface, dt=0.1, neighbor_range=3, off_surface_height=0.05):
             #Compute orientations and publish positions + rotation matrices
 
@@ -368,7 +379,15 @@ if ROS2_AVAILABLE:
             self.get_logger().info(f'                      Z=[{np.min(path_xyz[:,2]):.1f}, {np.max(path_xyz[:,2]):.1f}] mm')
             
             #First compute base orientations for all points (input in mm)
-            positions_mm, orientations = compute_orientations_from_xyz(path_xyz, dt, neighbor_range)
+            lock_roll = self.get_parameter('lock_roll').value
+            positions_mm, orientations = compute_orientations_from_xyz(
+                path_xyz,
+                dt,
+                neighbor_range,
+                smooth_orientations=True,
+                lock_roll=lock_roll,
+                initial_roll_ey=self.get_initial_roll_axis() if lock_roll else None,
+            )
             
             # Convert off_surface_height from meters to millimeters for consistent units
             off_surface_height_mm = off_surface_height * 1000.0  # m to mm
