@@ -27,8 +27,6 @@ Services Used:
 
 Parameters (declared defaults in node):
 - point_spacing (float): Spacing between points along scan lines (V direction) in UV units (default: 5).
-- line_spacing (float): Spacing between parallel scan lines (U direction) in UV units (default: 25.0).
-    Note: line_spacing will be updated to 2 * tool_size when a tool size message is received.
 - n_bezier (int): Number of points in Bézier curves connecting lines (default: 50).
 
 Notes:
@@ -39,14 +37,13 @@ Notes:
 class PathPlanner(Node):
     """ Path Planner"""
     
-    def __init__(self, point_spacing=None, line_spacing=None, n_bezier=None, 
+    def __init__(self, point_spacing=None, n_bezier=None, 
                  uv_bounds=None, uv_boundary=None, tool_size=None, test_active=False):
         """
         Initialize PathPlanner.
         
         Args:
             point_spacing: Spacing between points along lines (V direction) in mm
-            line_spacing: Spacing between lines (U direction) in mm
             n_bezier: Number of n points to make the Bézier curves
             tool_size: Tool size in mm
             test_active: If True, do not initialize ROS (for testing)
@@ -57,17 +54,14 @@ class PathPlanner(Node):
             super().__init__('path_planner_node') # Initialize ROS2 node
 
             self.declare_parameter('point_spacing', 10)
-            self.declare_parameter('line_spacing', 25.0)
             self.declare_parameter('n_bezier', 50)
 
             # Load parameters from ROS if not provided
             self.point_spacing = point_spacing if point_spacing is not None else self.get_parameter('point_spacing').value
-            self.line_spacing = line_spacing if line_spacing is not None else self.get_parameter('line_spacing').value
             self.n_bezier = n_bezier if n_bezier is not None else self.get_parameter('n_bezier').value
         else:
             # Test mode - use provided values or defaults
             self.point_spacing = point_spacing if point_spacing is not None else 1
-            self.line_spacing = line_spacing if line_spacing is not None else 25.0
             self.n_bezier = n_bezier if n_bezier is not None else 50
         
         self.tau = np.linspace(0, 1, self.n_bezier)
@@ -127,13 +121,11 @@ class PathPlanner(Node):
             # Debug info
             self.get_logger().info('Path Planner node initialized')
             self.get_logger().info(f'  Point spacing (V direction): {self.point_spacing}')
-            self.get_logger().info(f'  Line spacing (U direction): {self.line_spacing}')
             self.get_logger().info(f'  Bezier points: {self.n_bezier}')
         else:
             # Test mode - Info
             print('Path Planner initialized (test_active mode)')
             print(f'  Point spacing (V direction): {self.point_spacing}')
-            print(f'  Line spacing (U direction): {self.line_spacing}')
             print(f'  Bezier points: {self.n_bezier}')
 
 
@@ -234,17 +226,13 @@ class PathPlanner(Node):
     
 
     def tool_size_callback(self, msg):
-        """Update tool size and line spacing from corrosion detection (expects data[1] = tool size)."""
+        """Update tool size from corrosion detection (expects data[1] = tool size)."""
         if len(msg.data) > 1:
             self.tool_size = msg.data[1]
-            # Line spacing should equal tool diameter for perfect coverage without gaps
-            self.line_spacing = self.tool_size
             if not self.test_active:
                 self.get_logger().info(f'Tool size updated: {self.tool_size:.3f}')
-                self.get_logger().info(f'Line spacing updated: {self.line_spacing:.3f}')
             else:
                 print(f'Tool size updated: {self.tool_size:.3f}')
-                print(f'Line spacing updated: {self.line_spacing:.3f}')
 
 
     def adjust_lines(self):
@@ -277,7 +265,7 @@ class PathPlanner(Node):
         v_min_offset = v_min + tool_radius
         v_max_offset = v_max - tool_radius
 
-        line_n = int(np.ceil((v_max_offset - v_min_offset) / self.line_spacing)) + 1
+        line_n = int(np.ceil((v_max_offset - v_min_offset) / self.tool_size)) + 1
         points_per_line = int(np.ceil((u_max - u_min) / self.point_spacing)) + 1
 
         v_lines_pos = np.linspace(v_max_offset, v_min_offset, line_n)
