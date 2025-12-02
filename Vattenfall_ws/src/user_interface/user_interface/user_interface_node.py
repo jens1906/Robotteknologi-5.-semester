@@ -9,6 +9,11 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDur
 from pathlib import Path
 from std_msgs.msg import Bool
 from sensor_msgs.msg import Image
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from builtin_interfaces.msg import Duration
+from moveit_msgs.action import MoveGroup
+from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
+from rclpy.action import ActionClient
 from PyQt6.QtGui import QImage, QPixmap, QFont
 from user_interface.GUI import Ui_MainWindow
 from PyQt6.QtCore import pyqtSignal, QObject, Qt
@@ -49,6 +54,15 @@ class UserInterfaceNode(Node):
         self.ui_corrosion_area_remove_pub = self.create_publisher(Image, '/ui/corrosion_area_remove_pub', image_qos)
         self.ui_connected_pub = self.create_publisher(Bool, '/ui/connected_pub', 10)
         self.ui_connected_pub_state = False
+        self.joint_trajectory_pub = self.create_publisher(JointTrajectory, '/scaled_joint_trajectory_controller/joint_trajectory', 10)
+        
+        # MoveIt action client for collision-aware motion
+        self.move_group_client = ActionClient(
+            self,
+            MoveGroup,
+            '/move_action'
+        )
+        self.move_group_ready = False
 
         self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
@@ -246,10 +260,76 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info('Emergency Stop pressed')
 
     def home_position(self):
-        msg = Bool()
-        msg.data = True
-        self.ros_node.ui_home_position_pub.publish(msg)
-        if printlogger: self.ros_node.get_logger().info('Home Position pressed')
+        import math
+        
+        # Check if MoveIt action server is available
+        if not self.ros_node.move_group_client.wait_for_server(timeout_sec=1.0):
+            self.ros_node.get_logger().error('MoveIt /move_action not available! Cannot home safely.')
+            QMessageBox.warning(self, 'Homing Failed', 
+                'MoveIt is not available. Cannot perform collision-checked homing.\n'
+                'Make sure MoveIt is running (launch_ur_moveit.sh).')
+            return
+        
+        # Home position: 90, -90, 90, -90, -90, 0 degrees
+        home_angles = [math.radians(90), math.radians(-90), math.radians(90),
+                       math.radians(-90), math.radians(-90), math.radians(0)]
+        
+        joint_names = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
+                       'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
+        
+        # Create MoveGroup goal with joint constraints (minimal config like working scripts)
+        goal_msg = MoveGroup.Goal()
+        goal_msg.request.group_name = 'ur_manipulator'
+        goal_msg.request.num_planning_attempts = 20
+        goal_msg.request.allowed_planning_time = 10.0
+        goal_msg.request.max_velocity_scaling_factor = 0.2
+        goal_msg.request.max_acceleration_scaling_factor = 0.2
+        goal_msg.request.planner_id = "RRTConnectkConfigDefault"
+        
+        # Create joint constraints for home position
+        goal_constraints = Constraints()
+        for name, angle in zip(joint_names, home_angles):
+            jc = JointConstraint()
+            jc.joint_name = name
+            jc.position = angle
+            jc.tolerance_above = 0.01  # ~0.6 degrees tolerance
+            jc.tolerance_below = 0.01
+            jc.weight = 1.0
+            goal_constraints.joint_constraints.append(jc)
+        
+        goal_msg.request.goal_constraints.append(goal_constraints)
+        
+        self.ros_node.get_logger().info('Sending home position goal to MoveIt (collision-aware)...')
+        
+        # Send goal asynchronously
+        def goal_response_callback(future):
+            goal_handle = future.result()
+            if not goal_handle.accepted:
+                self.ros_node.get_logger().error('Home position goal was rejected by MoveIt')
+                return
+            
+            self.ros_node.get_logger().info('Home position goal accepted, planning and executing...')
+            result_future = goal_handle.get_result_async()
+            result_future.add_done_callback(result_callback)
+        
+        def result_callback(future):
+            result = future.result().result
+            if result.error_code.val == MoveItErrorCodes.SUCCESS:
+                self.ros_node.get_logger().info('✓ Robot successfully moved to home position!')
+            else:
+                error_meanings = {
+                    -1: 'FAILURE',
+                    -2: 'PLANNING_FAILED', 
+                    -26: 'FRAME_TRANSFORM_FAILURE',
+                    -31: 'NO_IK_SOLUTION',
+                    -13: 'GOAL_IN_COLLISION',
+                    -12: 'INVALID_MOTION_PLAN'
+                }
+                error_name = error_meanings.get(result.error_code.val, f'ERROR_{result.error_code.val}')
+                self.ros_node.get_logger().error(f'Homing failed: {error_name}')
+        
+        send_goal_future = self.ros_node.move_group_client.send_goal_async(goal_msg)
+        send_goal_future.add_done_callback(goal_response_callback)
     
     def run_robot(self):
         reply = QMessageBox.question(

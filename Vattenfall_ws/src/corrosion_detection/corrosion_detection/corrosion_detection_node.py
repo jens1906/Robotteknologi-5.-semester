@@ -54,7 +54,7 @@ class CorrosionDetector(Node):
         T_world_to_base = np.array([
             [-1.000, -0.000,  0.000,  0.200],
             [-0.000,  0.000, -1.000,  0.218],
-            [-0.000, -1.000, -0.000,  -0.250],
+            [-0.000, -1.000, -0.000,  -0.230],
             [ 0.000,  0.000,  0.000,  1.000]
         ])
         
@@ -115,6 +115,7 @@ class CorrosionDetector(Node):
         self.source_frame = 'tool0'  # End-effector frame
         self.ui_corrosion_add = np.zeros((480, 640), np.uint8)
         self.ui_corrosion_remove = np.zeros((480, 640), np.uint8)
+        self.depthstack_for_mean = []
 
         # Create save directory if it doesn't exist
         # Use home directory to ensure consistent location regardless of install/source space
@@ -307,6 +308,11 @@ class CorrosionDetector(Node):
         color_image = cv.cvtColor(np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3), cv.COLOR_RGB2BGR)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
 
+        # Maintain rolling buffer of last 5 depth images for mean calculation
+        self.depthstack_for_mean.append(depth_image.copy())
+        if len(self.depthstack_for_mean) > 10:
+            self.depthstack_for_mean.pop(0)
+
         # Check if UI masks changed
         ui_changed = self.arrays_differ(self.last_added_area, self.ui_corrosion_add) or \
                     self.arrays_differ(self.last_removed_area, self.ui_corrosion_remove)
@@ -333,7 +339,9 @@ class CorrosionDetector(Node):
 
         elif self.corrosion_accepted and self.running_status == False:
             self.running_status = True
-            xyz_data, xyz_offset = self.combine_and_transform(self.edge_to_scatter_plot(color_image), depth_image)
+            # Compute per-pixel mean depth from stack
+            mean_depth = np.mean(np.stack(self.depthstack_for_mean, axis=0), axis=0).astype(np.uint16)
+            xyz_data, xyz_offset = self.combine_and_transform(self.edge_to_scatter_plot(color_image), mean_depth)
             
             # Visualize the 3D point cloud before publishing
             if showImages:
