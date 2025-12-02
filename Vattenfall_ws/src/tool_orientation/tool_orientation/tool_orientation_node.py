@@ -18,6 +18,8 @@ except ImportError:
     ROS2_AVAILABLE = False
     print("ROS2 packages not available. Running in standalone mode.")
 
+NORMAL_FLIP_THRESHOLD_RAD = np.deg2rad(60.0)
+
 def normalize(v, epsilon=1e-12):
     #Normalize vector to unit length
     norm = np.linalg.norm(v)
@@ -224,7 +226,7 @@ def apply_off_surface_offset(positions, orientations, on_surface, offset_distanc
     
     return adjusted_positions
 
-def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_orientations=True, lock_roll=False, initial_roll_ey=None):
+def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=6, smooth_orientations=True, lock_roll=False, initial_roll_ey=None):
     #Main function: compute tool orientations from cartesian XYZ points
     #Args: path_xyz (N,3) array of [x,y,z] in sequence, dt time step, neighbor_range for normal estimation
     #      smooth_orientations if True, check for discontinuous jumps and smooth them
@@ -245,6 +247,12 @@ def compute_orientations_from_xyz(path_xyz, dt=0.1, neighbor_range=3, smooth_ori
         
         #Estimate surface normal from neighboring points
         normal = compute_normal_from_neighbors(path_xyz, i, neighbor_range, prev_normal)
+
+        if prev_normal is not None:
+            dot = float(np.clip(np.dot(normal, prev_normal), -1.0, 1.0))
+            angle = np.arccos(dot)
+            if angle > NORMAL_FLIP_THRESHOLD_RAD:
+                normal = prev_normal
         
         #Compute orientation matrix
         R, ey_vector = orientation_matrix_locked_roll(velocity, normal, prev_ey, lock_roll)
@@ -299,11 +307,11 @@ if ROS2_AVAILABLE:
             
             #Parameters
             self.declare_parameter('dt', 0.1)
-            self.declare_parameter('neighbor_range', 3)
+            self.declare_parameter('neighbor_range', 6)
             self.declare_parameter('off_surface_height', 0.05)  # 5 cm in meters
             self.declare_parameter('frame_id', 'world')  # Coordinate frame for visualization
             self.declare_parameter('lock_roll', True)
-            self.declare_parameter('initial_roll_quaternion', [-0.707, 0.0, 0.0, 0.707])
+            self.declare_parameter('initial_roll_quaternion', [0.707, 0.0, 0.0, -0.707])
             
             #Storage for received data
             self.path_xyz = None
