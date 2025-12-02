@@ -175,7 +175,7 @@ class Parameterization:
         u_at_yref = np.zeros(n_grid_u)
         for i in range(1, n_grid_u):
             # Integrate from x_grid[i-1] to x_grid[i]
-            x_segment = np.linspace(x_grid[i-1], x_grid[i], 20)
+            x_segment = np.linspace(x_grid[i-1], x_grid[i], 20) #_ sub segments
             # Compute integrand: √(1 + (∂z/∂x)²)
             integrand = []
             for xi in x_segment:
@@ -217,7 +217,7 @@ class Parameterization:
             xi = x_grid[i]
             for j in range(1, n_grid_v):
                 # Integrate from y_grid[j-1] to y_grid[j]
-                y_segment = np.linspace(y_grid[j-1], y_grid[j], 20)
+                y_segment = np.linspace(y_grid[j-1], y_grid[j], 20) #_ sub segments
                 # Compute integrand: √(1 + (∂z/∂y)²)
                 integrand = []
                 for yi in y_segment:
