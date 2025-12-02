@@ -109,7 +109,7 @@
       <geometry>
         <mesh filename="package://ur3e_workstation/urdf/TestpladeKurve_v3.stl" scale="0.001 0.001 0.001"/>
       </geometry>
-      <origin xyz="0.200 0 0" rpy="1.5708 0 0"/>
+      <origin xyz="0.200 2.94 -0.4" rpy="1.5708 0 0"/>
     </collision>
   </link>
   <joint name="bordplade_to_testpladekurve" type="fixed">

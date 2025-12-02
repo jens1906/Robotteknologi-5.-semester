@@ -54,7 +54,7 @@ class CorrosionDetector(Node):
         T_world_to_base = np.array([
             [-1.000, -0.000,  0.000,  0.200],
             [-0.000,  0.000, -1.000,  0.218],
-            [-0.000, -1.000, -0.000,  -0.650],
+            [-0.000, -1.000, -0.000,  -0.250],
             [ 0.000,  0.000,  0.000,  1.000]
         ])
         
@@ -404,7 +404,7 @@ class CorrosionDetector(Node):
         
         # Apply offset by dilating the filled mask to create workspace boundary
         # Workspace scale factor: 3.0 = 3x bigger workspace area around corrosion
-        workspace_scale = 1.0
+        workspace_scale = 3
         offset_kernel_size = int(max(self.toolsizes) / 0.8 * workspace_scale) * 2 + 1  # Scaled kernel size
         offset_kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (offset_kernel_size, offset_kernel_size))
         filled_mask_offset = cv.dilate(filled_mask, offset_kernel, iterations=1)
