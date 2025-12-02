@@ -312,16 +312,12 @@ class ParameterizationNode(Node):
         corrosion_v_min = float(np.min(corrosion_uv[:, 1]))
         corrosion_v_max = float(np.max(corrosion_uv[:, 1]))
         
-        # Clamp corrosion bounds to workspace bounds to ensure interpolation validity
-        # Add small margin to avoid edge issues
-        margin_u = (workspace_bounds['u_max'] - workspace_bounds['u_min']) * 0.01
-        margin_v = (workspace_bounds['v_max'] - workspace_bounds['v_min']) * 0.01
-        
+        # Store corrosion UV bounds
         self.corrosion_uv_bounds = {
-            'u_min': max(corrosion_u_min, workspace_bounds['u_min'] + margin_u),
-            'u_max': min(corrosion_u_max, workspace_bounds['u_max'] - margin_u),
-            'v_min': max(corrosion_v_min, workspace_bounds['v_min'] + margin_v),
-            'v_max': min(corrosion_v_max, workspace_bounds['v_max'] - margin_v)
+            'u_min': corrosion_u_min,
+            'u_max': corrosion_u_max,
+            'v_min': corrosion_v_min,
+            'v_max': corrosion_v_max
         }
         
         # Log if bounds were clamped

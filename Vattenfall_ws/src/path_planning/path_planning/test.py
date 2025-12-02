@@ -2,19 +2,25 @@ from path_planning.path_planning_node import PathPlanner
 import numpy as np
 import matplotlib.pyplot as plt
 
+
+
 def main(args=None):
     """Test mode without ROS"""
     
     # Define test parameters
-    tool_size = 20
+    tool_size = 10
 
-    # create a random star-shaped (non-self-intersecting) polygon
-    rng = np.random.default_rng()
-    points = 10
-    center = np.array([100.0, 80.0])
-    angles = np.sort(rng.random(points) * 2 * np.pi)
-    radii = rng.uniform(20.0, 90.0, size=points)
-    uv_boundary = center + np.column_stack([radii * np.cos(angles), radii * np.sin(angles)])
+    # Irregular shape with 10 random boundary points
+    uv_boundary = np.array([
+        [20, 20],
+        [30, 60],
+        [50, 120],
+        [100, 140],
+        [170, 130],
+        [180, 70],
+        [190, 20],
+        [100, 50]
+    ])
 
     uv_bounds = {
         'u_min': min(uv_boundary[:, 0]),
@@ -29,7 +35,6 @@ def main(args=None):
     # Create planner in test mode
     planner = PathPlanner(
         point_spacing=point_spacing,
-        line_spacing=tool_size,
         n_bezier=n_bezier,
         uv_bounds=uv_bounds,
         uv_boundary=uv_boundary,
@@ -97,11 +102,11 @@ def main(args=None):
         for i in range(len(planner.uv_path)):
             if planner.continuous_on_surface[i]:
                 circle = plt.Circle((planner.uv_path[i, 0], planner.uv_path[i, 1]), 
-                                  tool_size/2, 
-                                  color='orange',
-                                  fill=False, 
-                                  alpha=0.3,
-                                  linewidth=1)
+                                tool_size/2, 
+                                color='orange',
+                                fill=False, 
+                                alpha=0.3,
+                                linewidth=1)
                 ax2.add_patch(circle)
                 
         # Add a legend entry for tool size
