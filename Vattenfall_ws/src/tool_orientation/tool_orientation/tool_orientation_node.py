@@ -12,7 +12,7 @@ try:
     )
     from std_msgs.msg import Float64MultiArray, ByteMultiArray
     from geometry_msgs.msg import PoseArray, Pose
-    from scipy.spatial.transform import Rotation as R
+    from scipy.spatial.transform import Rotation as R, Slerp
     ROS2_AVAILABLE = True
 except ImportError:
     ROS2_AVAILABLE = False
@@ -26,6 +26,49 @@ def normalize(v, epsilon=1e-12):
     if norm < epsilon:
         return np.zeros_like(v)
     return v / norm
+
+def quaternion_angular_distance(q1, q2):
+    #Return smallest angular distance between unit quaternions (radians)
+    q1 = normalize(q1)
+    q2 = normalize(q2)
+    dot = np.clip(np.dot(q1, q2), -1.0, 1.0)
+    return 2.0 * np.arccos(abs(dot))
+
+def smooth_orientation_sequence(orientation_matrices, smoothing_alpha=0.35, max_step_rad=None):
+    #Apply exponential smoothing to reduce sudden orientation jumps between samples
+    if smoothing_alpha <= 0 or len(orientation_matrices) < 2:
+        return orientation_matrices
+
+    smoothed = orientation_matrices.copy()
+    prev_rot = R.from_matrix(smoothed[0])
+    prev_quat = prev_rot.as_quat()
+
+    for i in range(1, len(smoothed)):
+        target_rot = R.from_matrix(smoothed[i])
+        target_quat = target_rot.as_quat()
+        angle = quaternion_angular_distance(prev_quat, target_quat)
+
+        if angle < 1e-6:
+            prev_rot = target_rot
+            prev_quat = target_quat
+            continue
+
+        blend = smoothing_alpha
+        if max_step_rad is not None and max_step_rad > 0:
+            blend = min(blend, max_step_rad / angle)
+            if blend <= 0:
+                blend = smoothing_alpha
+
+        blend = max(0.0, min(1.0, blend))
+        rotations = R.from_quat([prev_quat, target_quat])
+        slerp = Slerp([0.0, 1.0], rotations)
+        interpolated = slerp([blend])[0]
+
+        smoothed[i] = interpolated.as_matrix()
+        prev_rot = interpolated
+        prev_quat = interpolated.as_quat()
+
+    return smoothed
 
 def normalize_or_none(v, epsilon=1e-12):
     norm = np.linalg.norm(v)
@@ -312,6 +355,8 @@ if ROS2_AVAILABLE:
             self.declare_parameter('frame_id', 'world')  # Coordinate frame for visualization
             self.declare_parameter('lock_roll', True)
             self.declare_parameter('initial_roll_quaternion', [0.707, 0.0, 0.0, -0.707])
+            self.declare_parameter('orientation_smoothing_alpha', 0.35)
+            self.declare_parameter('max_orientation_step_deg', 25.0)
             
             #Storage for received data
             self.path_xyz = None
@@ -396,6 +441,20 @@ if ROS2_AVAILABLE:
                 lock_roll=lock_roll,
                 initial_roll_ey=self.get_initial_roll_axis() if lock_roll else None,
             )
+
+            smoothing_alpha = float(self.get_parameter('orientation_smoothing_alpha').value)
+            max_step_deg = float(self.get_parameter('max_orientation_step_deg').value)
+            max_step_rad = np.deg2rad(max_step_deg) if max_step_deg > 0 else None
+            if smoothing_alpha > 0:
+                orientations = smooth_orientation_sequence(
+                    orientations,
+                    smoothing_alpha=smoothing_alpha,
+                    max_step_rad=max_step_rad,
+                )
+                self.get_logger().info(
+                    f'Applied orientation smoothing (alpha={smoothing_alpha:.2f}, '
+                    f'max_step={max_step_deg:.1f} deg)'
+                )
             
             # Convert off_surface_height from meters to millimeters for consistent units
             off_surface_height_mm = off_surface_height * 1000.0  # m to mm
