@@ -160,11 +160,13 @@ class UserInterfaceNode(Node):
                 self.signal_emitter.painting_color_signal.emit("ffffff")  # White for color view
                 if printlogger: self.get_logger().info('Switching to Color Camera')
             elif self.ui_instance.camerafeed[0] == 1 and self.ui_instance.camerafeed[1] == 1:
-                # Apply median filter to reduce noise in depth visualization
-                depth_filtered = cv.medianBlur(depth_image, 10)
+                depth_filtered = cv.medianBlur(depth_image, 5)
+                depth_normalized = cv.normalize(depth_filtered, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_8U)
+                depth_colormap = cv.applyColorMap(depth_normalized, cv.COLORMAP_JET)
                 self.signal_emitter.data_signal.emit(f"Depth: {depth_image.shape[1]}x{depth_image.shape[0]}")
-                self.signal_emitter.image_signal.emit(depth_filtered)
+                self.signal_emitter.image_signal.emit(depth_colormap)
                 self.signal_emitter.painting_color_signal.emit("B3B3B3")  # Gray for depth view
+                if printlogger: self.get_logger().info('Showing Depth Camera')
             elif self.ui_instance.camerafeed[0] == 0 and self.ui_instance.camerafeed[1] == 1 and not self.ui_instance.is_painting:
                 if self.last_Threshold_frame is not None:
                     self.signal_emitter.data_signal.emit(f"Thresholded: {self.last_Threshold_frame.shape[1]}x{self.last_Threshold_frame.shape[0]}")
@@ -324,11 +326,14 @@ class UserInterface(QMainWindow):
     def update_painting_button_colors(self, color):
         """Update painting button colors - called from Qt thread via signal"""
         self.ui.Reset.setStyleSheet(f"background-color: #{color};")
-        self.ui.Eraser.setStyleSheet(f"background-color: #{color};")
         self.ui.Undo.setStyleSheet(f"background-color: #{color};")
         self.ui.Small_Pen.setStyleSheet(f"background-color: #{color};")
         self.ui.Medium_Pen.setStyleSheet(f"background-color: #{color};")
         self.ui.Large_Pen.setStyleSheet(f"background-color: #{color};")
+        # Preserve Eraser active state - only update if not in erase mode
+        if self.pen_size_and_type[1] == 1:  # Not in erase mode
+            self.ui.Eraser.setStyleSheet(f"background-color: #{color};")
+        # else: keep the active (gray) color
 
     def emergency_stop(self):
         msg = Bool()
@@ -466,44 +471,47 @@ class UserInterface(QMainWindow):
         if printlogger: self.ros_node.get_logger().info(f'Toggling camera feed {index} to {self.camerafeed[index]}')
 
     def reset_vision(self):
-        self.ros_node.get_logger().info('Resetting vision areas')
-        if self.corrosion_area_add is not None:
-            h, w = self.corrosion_area_add.shape
-            self.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
-            self.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
-            self.undo_add_stack.clear() 
-            self.undo_remove_stack.clear()
-            self.ros_node.ui_corrosion_area_remove_pub.publish(self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8'))
-            self.ros_node.ui_corrosion_area_add_pub.publish(self.numpy_to_image_msg(self.corrosion_area_add, 'mono8'))
-        else:
-            self.ros_node.get_logger().info('Corrosion areas not initialized yet, skipping reset')
+        if not self.camerafeed[0] == 1:
+            self.ros_node.get_logger().info('Resetting vision areas')
+            if self.corrosion_area_add is not None:
+                h, w = self.corrosion_area_add.shape
+                self.corrosion_area_add = np.zeros((h, w), dtype=np.uint8)
+                self.corrosion_area_remove = np.zeros((h, w), dtype=np.uint8)
+                self.undo_add_stack.clear() 
+                self.undo_remove_stack.clear()
+                self.ros_node.ui_corrosion_area_remove_pub.publish(self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8'))
+                self.ros_node.ui_corrosion_area_add_pub.publish(self.numpy_to_image_msg(self.corrosion_area_add, 'mono8'))
+            else:
+                self.ros_node.get_logger().info('Corrosion areas not initialized yet, skipping reset')
 
-        if printlogger: self.ros_node.get_logger().info('Resetting Vision')
+            if printlogger: self.ros_node.get_logger().info('Resetting Vision')
 
     def undo_action(self):
-        if len(self.undo_add_stack) > 0:
-            self.corrosion_area_add = self.undo_add_stack.pop()
-            self.corrosion_area_remove = self.undo_remove_stack.pop()
-            
-            # Publish updated masks
-            add_msg = self.numpy_to_image_msg(self.corrosion_area_add, 'mono8')
-            remove_msg = self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8')
-            self.ros_node.ui_corrosion_area_add_pub.publish(add_msg)
-            self.ros_node.ui_corrosion_area_remove_pub.publish(remove_msg)
-            
-            if printlogger:
-                self.ros_node.get_logger().info(f'Undo applied (stack size: {len(self.undo_add_stack)})')
-        else:
-            self.ros_node.get_logger().info('Nothing to undo')
+        if not self.camerafeed[0] == 1:
+            if len(self.undo_add_stack) > 0:
+                self.corrosion_area_add = self.undo_add_stack.pop()
+                self.corrosion_area_remove = self.undo_remove_stack.pop()
+                
+                # Publish updated masks
+                add_msg = self.numpy_to_image_msg(self.corrosion_area_add, 'mono8')
+                remove_msg = self.numpy_to_image_msg(self.corrosion_area_remove, 'mono8')
+                self.ros_node.ui_corrosion_area_add_pub.publish(add_msg)
+                self.ros_node.ui_corrosion_area_remove_pub.publish(remove_msg)
+                
+                if printlogger:
+                    self.ros_node.get_logger().info(f'Undo applied (stack size: {len(self.undo_add_stack)})')
+            else:
+                self.ros_node.get_logger().info('Nothing to undo')
 
     def erase_area(self):
-        self.pen_size_and_type[1] = 1 - self.pen_size_and_type[1]
-        if self.pen_size_and_type[1] == 0:
-            self.ui.Eraser.setStyleSheet("background-color: #999999;")
-        else:
-            self.ui.Eraser.setStyleSheet("background-color: #ffffff;")
+        if not self.camerafeed[0] == 1:
+            self.pen_size_and_type[1] = 1 - self.pen_size_and_type[1]
+            if self.pen_size_and_type[1] == 0:
+                self.ui.Eraser.setStyleSheet("background-color: #999999;")
+            else:
+                self.ui.Eraser.setStyleSheet("background-color: #ffffff;")
 
-        if printlogger: self.ros_node.get_logger().info(f'Erase area requested{"" if self.pen_size_and_type[1] == 0 else " (Eraser Mode)"}')
+            if printlogger: self.ros_node.get_logger().info(f'Erase area requested{"" if self.pen_size_and_type[1] == 0 else " (Eraser Mode)"}')
 
     def set_custom_pen(self, size):
         self.pen_size_and_type[0] = size
