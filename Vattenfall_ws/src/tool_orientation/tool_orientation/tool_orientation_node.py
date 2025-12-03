@@ -515,83 +515,39 @@ if ROS2_AVAILABLE:
             return adjusted_positions, orientations
         
         def save_posearray_to_file(self, pose_array_msg):
-            """Save PoseArray to a file that can be replayed with ros2 topic pub"""
-            import json
+            """Save PoseArray to a YAML file that can be replayed with ros2 topic pub."""
             from pathlib import Path
-            
+
             # Create output directory if it doesn't exist
             output_dir = Path.home() / 'Documents' / 'GitHub' / 'Robotteknologi-5.-semester' / 'saved_paths'
             output_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Create filename with timestamp
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            json_file = output_dir / f'posearray_{timestamp}.json'
             yaml_file = output_dir / f'posearray_{timestamp}.yaml'
-            cmd_file = output_dir / f'replay_command_{timestamp}.sh'
-            
-            # Save as JSON (easy to read/edit)
-            pose_data = {
-                'header': {
-                    'frame_id': pose_array_msg.header.frame_id,
-                },
-                'poses': []
-            }
-            
-            for pose in pose_array_msg.poses:
-                pose_data['poses'].append({
-                    'position': {
-                        'x': pose.position.x,
-                        'y': pose.position.y,
-                        'z': pose.position.z
-                    },
-                    'orientation': {
-                        'x': pose.orientation.x,
-                        'y': pose.orientation.y,
-                        'z': pose.orientation.z,
-                        'w': pose.orientation.w
-                    }
-                })
-            
-            with open(json_file, 'w') as f:
-                json.dump(pose_data, f, indent=2)
-            
+
             # Save as YAML (ROS2 CLI friendly format)
             with open(yaml_file, 'w') as f:
-                f.write(f"header:\n")
+                f.write("header:\n")
                 f.write(f"  frame_id: '{pose_array_msg.header.frame_id}'\n")
-                f.write(f"poses:\n")
+                f.write("poses:\n")
                 for pose in pose_array_msg.poses:
-                    f.write(f"  - position:\n")
+                    f.write("  - position:\n")
                     f.write(f"      x: {pose.position.x}\n")
                     f.write(f"      y: {pose.position.y}\n")
                     f.write(f"      z: {pose.position.z}\n")
-                    f.write(f"    orientation:\n")
+                    f.write("    orientation:\n")
                     f.write(f"      x: {pose.orientation.x}\n")
                     f.write(f"      y: {pose.orientation.y}\n")
                     f.write(f"      z: {pose.orientation.z}\n")
                     f.write(f"      w: {pose.orientation.w}\n")
-            
-            # Create a replay command script
-            with open(cmd_file, 'w') as f:
-                f.write("#!/bin/bash\n")
-                f.write("# Replay saved PoseArray to /tool_orientation/path topic\n\n")
-                f.write(f"ros2 topic pub --once /tool_orientation/path geometry_msgs/msg/PoseArray \\\n")
-                f.write(f"  \"$(cat {yaml_file})\"\n")
-            
-            # Make command file executable
-            import os
-            os.chmod(cmd_file, 0o755)
-            
-            self.get_logger().info(f'✓ Saved PoseArray to:')
-            self.get_logger().info(f'  JSON: {json_file}')
+
+            self.get_logger().info('✓ Saved PoseArray to:')
             self.get_logger().info(f'  YAML: {yaml_file}')
-            self.get_logger().info(f'  Replay script: {cmd_file}')
-            self.get_logger().info(f'')
-            self.get_logger().info(f'To replay this path, run:')
-            self.get_logger().info(f'  {cmd_file}')
-            self.get_logger().info(f'Or manually:')
-            self.get_logger().info(f'  ros2 topic pub --once /tool_orientation/path geometry_msgs/msg/PoseArray "$(cat {yaml_file})"')
+            self.get_logger().info('')
+            self.get_logger().info('To replay this path, run:')
+            self.get_logger().info(f"  ros2 topic pub --once /tool_orientation/path geometry_msgs/msg/PoseArray \"$(cat {yaml_file})\"")
 
 
     def main(args=None):
