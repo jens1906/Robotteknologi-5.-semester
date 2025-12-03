@@ -10,6 +10,7 @@ from pathlib import Path
 from std_msgs.msg import Bool
 from sensor_msgs.msg import Image
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from rcl_interfaces.msg import Log
 from builtin_interfaces.msg import Duration
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
@@ -17,7 +18,7 @@ from rclpy.action import ActionClient
 from PyQt6.QtGui import QImage, QPixmap, QFont
 from user_interface.GUI import Ui_MainWindow
 from PyQt6.QtCore import pyqtSignal, QObject, Qt
-from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QMessageBox
+from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QMessageBox, QTextEdit
 from user_interface.joystick import Joystick
 import signal
 
@@ -30,13 +31,17 @@ printlogger = False
 class RosSignalEmitter(QObject):
     data_signal = pyqtSignal(str)           
     image_signal = pyqtSignal(object)
-    painting_color_signal = pyqtSignal(str)  # Signal to change painting button colors       
+    painting_color_signal = pyqtSignal(str)  # Signal to change painting button colors
+    log_signal = pyqtSignal(str)  # Signal for ROS log messages to display in GUI       
 
 class UserInterfaceNode(Node):
     def __init__(self, signal_emitter, ui_instance=None):
         super().__init__('user_interface')
         self.signal_emitter = signal_emitter
         self.ui_instance = ui_instance
+        
+        # Wrap logger methods to also emit to GUI log_signal
+        self._wrap_logger_for_gui()
         
         # QoS profile for image topics (reliable to match RealSense camera settings)
         image_qos = QoSProfile(
@@ -73,8 +78,62 @@ class UserInterfaceNode(Node):
         
         self.last_Threshold_frame = None
 
+        # Subscribe to /rosout to capture logs from ALL running nodes
+        self.rosout_sub = self.create_subscription(
+            Log,
+            '/rosout',
+            self.rosout_callback,
+            10
+        )
+
         # Initialize UI components here (e.g., publishers/subscribers for UI commands)
         self.get_logger().info('User Interface Node Initialized')
+
+    def rosout_callback(self, msg):
+        """Handle log messages from /rosout (all nodes)."""
+        level_map = {10: 'DEBUG', 20: 'INFO', 30: 'WARN', 40: 'ERROR', 50: 'FATAL'}
+        level = level_map.get(msg.level, 'UNKNOWN')
+        node_name = msg.name
+        text = msg.msg
+        try:
+            self.signal_emitter.log_signal.emit(f"[{level}] [{node_name}] {text}")
+        except Exception:
+            pass
+
+    def _wrap_logger_for_gui(self):
+        """Wrap logger methods to also emit messages to GUI log_signal."""
+        try:
+            orig_logger = super().get_logger()
+            orig_info = orig_logger.info
+            orig_warn = orig_logger.warn
+            orig_error = orig_logger.error
+
+            def _info(msg, *a, **k):
+                orig_info(msg, *a, **k)
+                try:
+                    self.signal_emitter.log_signal.emit(f"[INFO] {msg}")
+                except Exception:
+                    pass
+
+            def _warn(msg, *a, **k):
+                orig_warn(msg, *a, **k)
+                try:
+                    self.signal_emitter.log_signal.emit(f"[WARN] {msg}")
+                except Exception:
+                    pass
+
+            def _error(msg, *a, **k):
+                orig_error(msg, *a, **k)
+                try:
+                    self.signal_emitter.log_signal.emit(f"[ERROR] {msg}")
+                except Exception:
+                    pass
+
+            orig_logger.info = _info
+            orig_logger.warn = _warn
+            orig_logger.error = _error
+        except Exception:
+            pass
 
     def image_match(self, color_msg, depth_msg):
         try:
@@ -184,6 +243,16 @@ class UserInterface(QMainWindow):
         self.signal_emitter.data_signal.connect(self.ui.videoLabel.setText)
         self.signal_emitter.image_signal.connect(self.update_video_frame)
         self.signal_emitter.painting_color_signal.connect(self.update_painting_button_colors)
+
+        # Replace sysinfoLabel with a scrollable QTextEdit for ROS logs
+        # Remove the label and add QTextEdit in the same layout slot
+        self.ui.sysinfoLabel.hide()
+        self.log_widget = QTextEdit()
+        self.log_widget.setReadOnly(True)
+        self.log_widget.setMaximumHeight(80)  # Keep it small to not affect other UI
+        self.ui.horizontalLayout_5.addWidget(self.log_widget)
+        self.signal_emitter.log_signal.connect(self.append_log)
+
         self.ros_node = UserInterfaceNode(self.signal_emitter, self)  # Pass self for state access
     
         self.ui.videoLabel.clicked.connect(self.on_image_clicked)
@@ -242,6 +311,15 @@ class UserInterface(QMainWindow):
         tabbar.setTabsClosable(False)
         tab_width = self.ui.tabWidget.width() // 3
         self.ui.tabWidget.setStyleSheet(f"QTabBar::tab {{width: {tab_width}px; min-width: {tab_width // self.ui.tabWidget.count()}px;}}")
+
+    def append_log(self, text: str):
+        """Append a log line to the GUI log widget with timestamp."""
+        try:
+            from datetime import datetime
+            ts = datetime.now().strftime('%H:%M:%S')
+            self.log_widget.append(f"[{ts}] {text}")
+        except Exception:
+            pass
 
     def update_painting_button_colors(self, color):
         """Update painting button colors - called from Qt thread via signal"""
