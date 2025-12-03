@@ -12,6 +12,14 @@ from scipy.ndimage import median_filter
 import os
 from datetime import datetime  
 
+
+### INCREASE RESOLUTION OF RGB AND DEPTH AND DECREASE FPS IN REALSENSE VIEWER FOR BETTER RESULTS ###
+### MAKE IT SO THE CORROSION CLOUD CAN BE PLOTTED IN RVIZ ###
+
+
+
+
+
 # Camera intrinsics from /camera/color/camera_info
 # K matrix: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
 fx = 615.389  # Focal length X (pixels)
@@ -51,10 +59,11 @@ class CorrosionDetector(Node):
             self.get_logger().info(f'T_camera_to_ee:\n{self.T_camera_to_ee}')
         
         # Transform from world to base_link (from URDF: world→bordplade→mount→base_link)
+        # Original xyz is 0.200, 0.218, -0.250 in metres and is from URDF
         T_world_to_base = np.array([
             [-1.000, -0.000,  0.000,  0.200],
             [-0.000,  0.000, -1.000,  0.218],
-            [-0.000, -1.000, -0.000,  -0.230],
+            [-0.000, -1.000, -0.000,  -0.350],
             [ 0.000,  0.000,  0.000,  1.000]
         ])
         
