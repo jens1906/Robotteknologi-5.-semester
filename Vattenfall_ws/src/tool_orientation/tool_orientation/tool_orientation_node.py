@@ -248,7 +248,7 @@ def orientation_matrix_locked_roll(velocity, normal, prev_ey=None, lock_roll=Fal
     R = np.column_stack([ex, ey, ez])
     return R, ey
 
-def apply_off_surface_offset(positions, orientations, on_surface, offset_distance=0.05):
+def apply_off_surface_offset(positions, orientations, on_surface, offset_distance=0.20):
     #Apply offset to positions where robot should be off surface
     #Args: positions (N,3) array, orientations (N,3,3) array of rotation matrices
     #      on_surface (N,) boolean array, offset_distance in meters (default 5 cm)
