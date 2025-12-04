@@ -262,15 +262,15 @@ def test_parameterization(ply_file_path):
     print(f"   Interpolation ready")
     
     # Evaluate quality
-    # print("\n7. Evaluating quality metrics...")
-    # sample_size = min(1000, len(points))
-    # metrics = surf.evaluate_quality(sample_size=sample_size)
-    # print(f"   Quality evaluation complete")
-    # print(f"   Sample size: {metrics['sample_size']}/{metrics['total_points']} points")
-    # print(f"   Mean error: {metrics['mean_error']:.6f}")
-    # print(f"   Max error: {metrics['max_error']:.6f}")
-    # print(f"   RMSE: {metrics['rmse']:.6f}")
-    # print(f"   Std deviation: {metrics['std_error']:.6f}")
+    print("\n7. Evaluating quality metrics...")
+    sample_size = min(1000, len(points))
+    metrics = surf.evaluate_quality(sample_size=sample_size)
+    print(f"   Quality evaluation complete")
+    print(f"   Sample size: {metrics['sample_size']}/{metrics['total_points']} points")
+    print(f"   Mean error: {metrics['mean_error']:.6f}")
+    print(f"   Max error: {metrics['max_error']:.6f}")
+    print(f"   RMSE: {metrics['rmse']:.6f}")
+    print(f"   Std deviation: {metrics['std_error']:.6f}")
     
     # Test interpolation
     print("\n6. Testing interpolation...")
@@ -309,13 +309,8 @@ def test_parameterization(ply_file_path):
     print("\nSummary:")
     print(f"  • Point cloud: {len(points)} points")
     print(f"  • UV parameterization: {uv.shape}")
-    # print(f"  • Metric tensor: {metric.shape}")
-    # print(f"  • Quality RMSE: {metrics['rmse']:.6f}")
-    # if 'mean_isotropy_error' in metrics:
-    #     print(f"  • Isotropy error: {metrics['mean_isotropy_error']:.6f}")
     print(f"  • Interpolation: Working")
     print(f"  • Frame transformations: Working")
-    # print(f"  • Path generation: Working")
     print("\n" + "=" * 70)
     
     return True
