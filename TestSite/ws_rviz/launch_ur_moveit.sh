@@ -54,11 +54,9 @@ echo "Using description launchfile: $DESCRIPTION_LAUNCHFILE"
 # We pass the description_launchfile argument so ur_control launches OUR description instead of the default.
 # Note: ur_control might not pass 'base_at_world_origin' to the included launch file, so it relies on the default (false).
 ros2 launch ur_robot_driver ur_control.launch.py \
-    ur_type:=$UR_TYPE \
+    ur_type:=ur3e \
     robot_ip:=192.168.0.106 \
-    use_mock_hardware:=$USE_MOCK_HARDWARE \
-    launch_rviz:=true \
-    description_launchfile:="$DESCRIPTION_LAUNCHFILE" \
+    use_mock_hardware:=false \
     &
 _pids+=($!)
 sleep 1
