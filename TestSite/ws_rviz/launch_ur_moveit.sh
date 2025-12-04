@@ -44,24 +44,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Find the workstation description launch file
-WORKSTATION_PKG_SHARE=$(ros2 pkg prefix --share ur3e_workstation)
-DESCRIPTION_LAUNCHFILE="${WORKSTATION_PKG_SHARE}/launch/workstation_description.launch.py"
-
-echo "Using description launchfile: $DESCRIPTION_LAUNCHFILE"
-
-# Launch ur_control with our custom description
-# We pass the description_launchfile argument so ur_control launches OUR description instead of the default.
-# Note: ur_control might not pass 'base_at_world_origin' to the included launch file, so it relies on the default (false).
-ros2 launch ur_robot_driver ur_control.launch.py \
-    ur_type:=$UR_TYPE \
-    robot_ip:=192.168.56.106 \
-    use_mock_hardware:=$USE_MOCK_HARDWARE \
-    launch_rviz:=true \
-    description_launchfile:="$DESCRIPTION_LAUNCHFILE" \
-    &
+# 1) Start workstation description publisher so /robot_description exists
+#    This includes your test-setup geometry via ur3e_workstation/urdf/workstation.xacro
+echo "Starting workstation description publisher (background)..."
+ros2 launch ur3e_workstation workstation_description.launch.py \
+	ur_type:=$UR_TYPE \
+	use_mock_hardware:=$USE_MOCK_HARDWARE \
+	base_at_world_origin:=$([ "$BASE_AT_WORLD_ORIGIN" = "1" ] && echo true || echo false) \
+	>/tmp/workstation_description.log 2>&1 &
 _pids+=($!)
-sleep 1
 
 # 2) Optionally enforce world->base identity TF (use only if your URDF lacks this)
 if [[ "$SET_WORLD_BASE_IDENTITY" == "1" ]]; then
@@ -88,15 +79,10 @@ echo "/robot_description received."
 		>/tmp/publish_collision_matrix.log 2>&1 & echo $! >/tmp/publish_collision_matrix.pid
 ) &
 
-# 5) Launch the custom MoveIt launcher with RViz (loads workstation description)
-echo "Starting custom MoveIt launcher (foreground)..."
+# 5) Launch the stable, standard MoveIt launcher with RViz
+echo "Starting standard MoveIt launcher (foreground)..."
 set +e
-ros2 launch ./custom_ur_moveit.launch.py \
-    ur_type:=$UR_TYPE \
-    launch_rviz:=true \
-    robot_ip:=192.168.56.106 \
-    use_mock_hardware:=$USE_MOCK_HARDWARE \
-    base_at_world_origin:=$BASE_AT_WORLD_ORIGIN
+ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=$UR_TYPE launch_rviz:=true
 ret=$?
 set -e
 

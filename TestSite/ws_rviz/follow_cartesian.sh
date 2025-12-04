@@ -24,10 +24,10 @@ echo "Result:"
 echo "  ✓ NO stopping between waypoints"
 echo "  ✓ Smooth continuous motion"
 echo "  ✓ Precise end-effector path following"
-echo "  ✓ Continuous execution on new paths"
+echo "  ✓ Room to reorient if needed (within tolerance)"
 echo ""
 
 ros2 run ur3e_workstation follow_path_cartesian.py
 
 echo ""
-echo "Cartesian path follower stopped."
+echo "Cartesian path execution complete!"
