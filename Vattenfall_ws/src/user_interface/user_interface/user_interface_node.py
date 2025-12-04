@@ -8,13 +8,17 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 from pathlib import Path
 from std_msgs.msg import Bool
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, JointState
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from control_msgs.action import FollowJointTrajectory
 from rcl_interfaces.msg import Log
 from builtin_interfaces.msg import Duration
 from moveit_msgs.action import MoveGroup
-from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
+from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes, PositionIKRequest, RobotState
+from moveit_msgs.srv import GetPositionIK
+from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion
 from rclpy.action import ActionClient
+from tf2_ros import Buffer, TransformListener
 from PyQt6.QtGui import QImage, QPixmap, QFont
 from user_interface.GUI import Ui_MainWindow
 from PyQt6.QtCore import pyqtSignal, QObject, Qt
@@ -68,6 +72,33 @@ class UserInterfaceNode(Node):
             '/move_action'
         )
         self.move_group_ready = False
+
+        # Z-axis jogging setup - uses TF + IK for proper Cartesian motion
+        self.z_jog_active = False
+        self.z_jog_direction = 0.0  # 0=stopped, +1=up, -1=down
+        self.z_jog_increment = 0.01  # 10mm per step in base Z direction
+        self.z_jog_pending_ik = False  # Track if IK call is in progress
+        self.current_joint_states = None
+        
+        # TF buffer for getting current tool pose
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        
+        # Subscribe to joint states
+        self.joint_state_sub = self.create_subscription(
+            JointState,
+            '/joint_states',
+            self.joint_state_callback,
+            10
+        )
+        
+        # IK service client
+        self.ik_client = self.create_client(GetPositionIK, '/compute_ik')
+        
+        # Timer for continuous jogging at 5Hz
+        self.z_jog_timer = self.create_timer(0.2, self.z_jog_step)
+        
+        self.get_logger().info('Z-axis jogging ready (Cartesian IK method)')
 
         self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
@@ -176,6 +207,99 @@ class UserInterfaceNode(Node):
         except Exception as e:
             self.get_logger().error(f'Error in image_match: {e}')
 
+    def joint_state_callback(self, msg):
+        """Store latest joint states"""
+        self.current_joint_states = msg
+
+    def z_jog_ik_response(self, future):
+        """Handle IK service response"""
+        self.z_jog_pending_ik = False
+        try:
+            response = future.result()
+            if response.error_code.val == MoveItErrorCodes.SUCCESS:
+                # Send joint trajectory with IK solution
+                msg = JointTrajectory()
+                msg.joint_names = list(response.solution.joint_state.name[:6])
+                
+                point = JointTrajectoryPoint()
+                point.positions = list(response.solution.joint_state.position[:6])
+                point.velocities = [0.0] * 6
+                point.accelerations = [0.0] * 6
+                point.time_from_start = Duration(sec=0, nanosec=180000000)  # 180ms
+                
+                msg.points = [point]
+                self.joint_trajectory_pub.publish(msg)
+            else:
+                self.get_logger().warn(f'IK failed with error code: {response.error_code.val}')
+        except Exception as e:
+            self.get_logger().error(f'IK response error: {e}')
+
+    def z_jog_step(self):
+        """Send incremental Cartesian Z movement via IK + joint trajectory"""
+        if self.z_jog_direction == 0.0:
+            if self.z_jog_active:
+                self.z_jog_active = False
+                self.get_logger().info('Z-jogging stopped')
+            return
+        
+        if self.current_joint_states is None:
+            self.get_logger().warn('No joint states yet')
+            return
+            
+        if self.z_jog_pending_ik:
+            return  # Skip if previous IK call still pending
+        
+        if not self.z_jog_active:
+            self.z_jog_active = True
+            self.get_logger().info(f'Z-jogging active: {"UP" if self.z_jog_direction > 0 else "DOWN"}')
+        
+        try:
+            # Get current tool pose from TF
+            transform = self.tf_buffer.lookup_transform(
+                'base_link',
+                'tool0',
+                rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=0.1)
+            )
+            
+            # Create target pose with Z offset in base_link frame
+            target_pose = PoseStamped()
+            target_pose.header.frame_id = 'base_link'
+            target_pose.header.stamp = self.get_clock().now().to_msg()
+            
+            # Copy current position and add Z offset
+            target_pose.pose.position.x = transform.transform.translation.x
+            target_pose.pose.position.y = transform.transform.translation.y
+            target_pose.pose.position.z = transform.transform.translation.z + (self.z_jog_increment * self.z_jog_direction)
+            
+            # Keep orientation constant
+            target_pose.pose.orientation.x = transform.transform.rotation.x
+            target_pose.pose.orientation.y = transform.transform.rotation.y
+            target_pose.pose.orientation.z = transform.transform.rotation.z
+            target_pose.pose.orientation.w = transform.transform.rotation.w
+            
+            # Call IK service
+            if not self.ik_client.service_is_ready():
+                self.get_logger().warn('IK service not ready', throttle_duration_sec=1.0)
+                return
+                
+            ik_request = GetPositionIK.Request()
+            ik_request.ik_request.group_name = 'ur_manipulator'
+            ik_request.ik_request.pose_stamped = target_pose
+            ik_request.ik_request.avoid_collisions = False
+            ik_request.ik_request.timeout = Duration(sec=0, nanosec=50000000)
+            
+            # Set current joint state as seed
+            ik_request.ik_request.robot_state.joint_state = self.current_joint_states
+            
+            # Call IK asynchronously
+            self.z_jog_pending_ik = True
+            future = self.ik_client.call_async(ik_request)
+            future.add_done_callback(self.z_jog_ik_response)
+            
+        except Exception as e:
+            self.get_logger().error(f'Z-jog error: {e}')
+
     def corrosion_thresholding_callback(self, msg):
         if self.ui_connected_pub_state ==False:
             self.ui_connected_pub_state = True
@@ -231,6 +355,13 @@ class UserInterface(QMainWindow):
         self.ui.Terminate.clicked.connect(self.terminate)
         self.ui.Home_Position.clicked.connect(self.home_position)
         self.ui.Emergency_Stop.clicked.connect(self.emergency_stop)
+        
+        # Z-axis jogging buttons - use pressed/released for continuous motion
+        self.ui.pushButton_Z_up.pressed.connect(self.z_up_pressed)
+        self.ui.pushButton_Z_up.released.connect(self.z_released)
+        self.ui.pushButton_Z_down.pressed.connect(self.z_down_pressed)
+        self.ui.pushButton_Z_down.released.connect(self.z_released)
+        
         self.ui.videoLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ui.Vision_State.clicked.connect(lambda: self.feed_toggle(1)) # Turn on and off threshold view on tab 1
         self.ui.Small_Pen.clicked.connect(lambda: self.set_custom_pen(0))
@@ -335,6 +466,21 @@ class UserInterface(QMainWindow):
         if self.pen_size_and_type[1] == 1:  # Not in erase mode
             self.ui.Eraser.setStyleSheet(f"background-color: #{color};")
         # else: keep the active (gray) color
+
+    def z_up_pressed(self):
+        """Start continuous Z+ motion when button is pressed"""
+        self.ros_node.z_jog_direction = 1.0
+        self.ros_node.get_logger().info('⬆ Z+ jogging started')
+    
+    def z_down_pressed(self):
+        """Start continuous Z- motion when button is pressed"""
+        self.ros_node.z_jog_direction = -1.0
+        self.ros_node.get_logger().info('⬇ Z- jogging started')
+    
+    def z_released(self):
+        """Stop Z-axis motion when button is released"""
+        self.ros_node.z_jog_direction = 0.0
+        self.ros_node.get_logger().info('⏹ Z jogging stopped')
 
     def emergency_stop(self):
         msg = Bool()
