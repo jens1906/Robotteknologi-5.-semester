@@ -78,6 +78,14 @@ class UserInterfaceNode(Node):
         self.z_jog_direction = 0.0  # 0=stopped, +1=up, -1=down
         self.z_jog_increment = 0.01  # 10mm per step in base Z direction
         self.z_jog_pending_ik = False  # Track if IK call is in progress
+        
+        # XY joystick jogging setup - same IK-based approach
+        self.xy_jog_active = False
+        self.xy_jog_x = 0.0  # -1 to +1 (left to right)
+        self.xy_jog_y = 0.0  # -1 to +1 (down to up)
+        self.xy_jog_increment = 0.01  # 10mm per step
+        self.xy_jog_pending_ik = False
+        
         self.current_joint_states = None
         
         # TF buffer for getting current tool pose
@@ -95,10 +103,13 @@ class UserInterfaceNode(Node):
         # IK service client
         self.ik_client = self.create_client(GetPositionIK, '/compute_ik')
         
-        # Timer for continuous jogging at 5Hz
+        # Timer for Z-axis continuous jogging at 5Hz
         self.z_jog_timer = self.create_timer(0.2, self.z_jog_step)
         
-        self.get_logger().info('Z-axis jogging ready (Cartesian IK method)')
+        # Timer for XY joystick jogging at 5Hz
+        self.xy_jog_timer = self.create_timer(0.2, self.xy_jog_step)
+        
+        self.get_logger().info('Z-axis and XY jogging ready (Cartesian IK method)')
 
         self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
@@ -234,6 +245,30 @@ class UserInterfaceNode(Node):
         except Exception as e:
             self.get_logger().error(f'IK response error: {e}')
 
+    def xy_jog_ik_response(self, future):
+        """Handle IK service response for XY jogging"""
+        self.xy_jog_pending_ik = False
+        try:
+            response = future.result()
+            if response.error_code.val == MoveItErrorCodes.SUCCESS:
+                # Send joint trajectory with IK solution
+                msg = JointTrajectory()
+                msg.joint_names = list(response.solution.joint_state.name[:6])
+                
+                point = JointTrajectoryPoint()
+                point.positions = list(response.solution.joint_state.position[:6])
+                point.velocities = [0.0] * 6
+                point.accelerations = [0.0] * 6
+                point.time_from_start = Duration(sec=0, nanosec=180000000)  # 180ms
+                
+                msg.points = [point]
+                self.joint_trajectory_pub.publish(msg)
+            else:
+                if printlogger:
+                    self.get_logger().warn(f'XY IK failed with error code: {response.error_code.val}')
+        except Exception as e:
+            self.get_logger().error(f'XY IK response error: {e}')
+
     def z_jog_step(self):
         """Send incremental Cartesian Z movement via IK + joint trajectory"""
         if self.z_jog_direction == 0.0:
@@ -299,6 +334,71 @@ class UserInterfaceNode(Node):
             
         except Exception as e:
             self.get_logger().error(f'Z-jog error: {e}')
+
+    def xy_jog_step(self):
+        # Check if joystick is centered (no movement)
+        if abs(self.xy_jog_x) < 0.05 and abs(self.xy_jog_y) < 0.05:
+            if self.xy_jog_active:
+                self.xy_jog_active = False
+                self.get_logger().info('XY jogging stopped')
+            return
+        
+        if self.current_joint_states is None:
+            return
+            
+        if self.xy_jog_pending_ik:
+            return  # Skip if previous IK call still pending
+        
+        if not self.xy_jog_active:
+            self.xy_jog_active = True
+            self.get_logger().info('XY jogging active')
+        
+        try:
+            # Get current tool pose from TF
+            transform = self.tf_buffer.lookup_transform(
+                'base_link',
+                'tool0',
+                rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=0.1)
+            )
+            
+            # Create target pose with XY offset in base_link frame
+            target_pose = PoseStamped()
+            target_pose.header.frame_id = 'base_link'
+            target_pose.header.stamp = self.get_clock().now().to_msg()
+            
+            # Apply X and Y offsets based on joystick position
+            target_pose.pose.position.x = transform.transform.translation.x + (self.xy_jog_increment * self.xy_jog_x)
+            target_pose.pose.position.y = transform.transform.translation.y + (self.xy_jog_increment * self.xy_jog_y)
+            target_pose.pose.position.z = transform.transform.translation.z  # Keep Z constant
+            
+            # Keep orientation constant
+            target_pose.pose.orientation.x = transform.transform.rotation.x
+            target_pose.pose.orientation.y = transform.transform.rotation.y
+            target_pose.pose.orientation.z = transform.transform.rotation.z
+            target_pose.pose.orientation.w = transform.transform.rotation.w
+            
+            # Call IK service
+            if not self.ik_client.service_is_ready():
+                return
+                
+            ik_request = GetPositionIK.Request()
+            ik_request.ik_request.group_name = 'ur_manipulator'
+            ik_request.ik_request.pose_stamped = target_pose
+            ik_request.ik_request.avoid_collisions = False
+            ik_request.ik_request.timeout = Duration(sec=0, nanosec=50000000)
+            
+            # Set current joint state as seed
+            ik_request.ik_request.robot_state.joint_state = self.current_joint_states
+            
+            # Call IK asynchronously
+            self.xy_jog_pending_ik = True
+            future = self.ik_client.call_async(ik_request)
+            future.add_done_callback(self.xy_jog_ik_response)
+            
+        except Exception as e:
+            if printlogger:
+                self.get_logger().error(f'XY-jog error: {e}')
 
     def corrosion_thresholding_callback(self, msg):
         if self.ui_connected_pub_state ==False:
@@ -395,6 +495,8 @@ class UserInterface(QMainWindow):
         
         # Connect joystick signals
         self.ui.Joystick.touched.connect(self.on_joystick_touched)
+        self.ui.Joystick.moved.connect(self.on_joystick_moved)
+        self.ui.Joystick.released.connect(self.on_joystick_released)
         
         # Hide statusLabel
         self.ui.statusLabel.hide()
@@ -709,6 +811,37 @@ class UserInterface(QMainWindow):
                 if reply == QMessageBox.StandardButton.Yes:
                     self.reset_vision()
                     if printlogger: self.ros_node.get_logger().info('Adjustments reset by joystick touch')
+    
+    def on_joystick_moved(self, direction_tuple):
+        from user_interface.joystick import Direction
+        
+        direction, distance = direction_tuple
+        
+        # Convert direction enum to XY coordinates (-1 to +1)
+        # X: negative=left, positive=right
+        # Y: negative=down, positive=up
+        if direction == Direction.Right:
+            self.ros_node.xy_jog_x = distance
+            self.ros_node.xy_jog_y = 0.0
+        elif direction == Direction.Left:
+            self.ros_node.xy_jog_x = -distance
+            self.ros_node.xy_jog_y = 0.0
+        elif direction == Direction.Up:
+            self.ros_node.xy_jog_x = 0.0
+            self.ros_node.xy_jog_y = distance
+        elif direction == Direction.Down:
+            self.ros_node.xy_jog_x = 0.0
+            self.ros_node.xy_jog_y = -distance
+        
+        if printlogger:
+            self.ros_node.get_logger().info(f'Joystick: {direction.name} dist={distance:.2f} -> X={self.ros_node.xy_jog_x:.2f} Y={self.ros_node.xy_jog_y:.2f}')
+    
+    def on_joystick_released(self):
+        """Stop XY jogging when joystick is released"""
+        self.ros_node.xy_jog_x = 0.0
+        self.ros_node.xy_jog_y = 0.0
+        if printlogger:
+            self.ros_node.get_logger().info('Joystick released - XY jogging stopped')
     
     def update_video_frame(self, img):
         """Convert numpy BGR array to QPixmap and display in videoLabel"""
