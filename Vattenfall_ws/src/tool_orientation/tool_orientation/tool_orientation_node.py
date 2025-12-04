@@ -332,9 +332,9 @@ if ROS2_AVAILABLE:
             
             #Publisher for trajectory with quaternions (unified format)
             trajectory_qos = QoSProfile(
-                depth=1,
+                depth=10,
                 reliability=QoSReliabilityPolicy.RELIABLE,
-                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                durability=QoSDurabilityPolicy.VOLATILE,
             )
             self.trajectory_pub = self.create_publisher(
                 PoseArray,
