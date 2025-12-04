@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ur3e_workstation">
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="$(arg ur_type)">
 
   <!-- Arguments -->
   <xacro:arg name="ur_type" default="ur3e"/>
