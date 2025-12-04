@@ -416,15 +416,30 @@ def main():
     rclpy.init()
     node = CartesianPathFollower()
     
-    # Wait for path
-    while not node.path_received:
-        rclpy.spin_once(node, timeout_sec=0.5)
-        
-    # Run once
-    node.execute_path()
-    
-    node.destroy_node()
-    rclpy.shutdown()
+    try:
+        while rclpy.ok():
+            # Wait for path
+            node.get_logger().info('Waiting for path on /tool_orientation/path...')
+            while not node.path_received and rclpy.ok():
+                rclpy.spin_once(node, timeout_sec=0.5)
+            
+            if not rclpy.ok():
+                break
+                
+            # Execute path
+            node.get_logger().info('Path received! Starting execution...')
+            node.execute_path()
+            
+            # Reset for next path
+            node.path_received = False
+            node.waypoints = []
+            node.get_logger().info('Execution finished. Ready for next path.')
+            
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
