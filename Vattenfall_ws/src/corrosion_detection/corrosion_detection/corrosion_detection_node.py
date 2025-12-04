@@ -4,8 +4,8 @@ import numpy as np
 import message_filters
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
-from sensor_msgs.msg import Image
-from std_msgs.msg import Float32MultiArray, Bool
+from sensor_msgs.msg import Image, PointCloud2, PointField
+from std_msgs.msg import Float32MultiArray, Bool, Header
 import tf2_ros
 from tf2_ros import TransformException
 from scipy.ndimage import median_filter
@@ -13,8 +13,6 @@ import os
 from datetime import datetime  
 
 
-### INCREASE RESOLUTION OF RGB AND DEPTH AND DECREASE FPS IN REALSENSE VIEWER FOR BETTER RESULTS ###
-### MAKE IT SO THE CORROSION CLOUD CAN BE PLOTTED IN RVIZ ###
 
 
 
@@ -22,10 +20,11 @@ from datetime import datetime
 
 # Camera intrinsics from /camera/color/camera_info
 # K matrix: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
-fx = 615.389  # Focal length X (pixels)
-fy = 615.737  # Focal length Y (pixels)
-cx = 324.183  # Principal point X (pixels)
-cy = 242.415  # Principal point Y (pixels)
+# For 1280x720 resolution (D435 native depth resolution)
+fx = 923.0838  # Focal length X (pixels)
+fy = 923.6057  # Focal length Y (pixels)
+cx = 646.2750  # Principal point X (pixels)
+cy = 363.6223  # Principal point Y (pixels)
 
 kernel = np.ones((5, 5), np.uint8)
 
@@ -88,6 +87,11 @@ class CorrosionDetector(Node):
         self.corrosion_corrosion = self.create_publisher(Float32MultiArray, '/corrosion/corrosion', 10)
         self.corrosion_workspace = self.create_publisher(Float32MultiArray, '/corrosion/workspace', 10)
         self.corrosion_tool_size = self.create_publisher(Float32MultiArray, '/corrosion/tool_size', 10)
+        
+        # RViz-compatible PointCloud2 publishers for visualization
+        self.corrosion_pointcloud_pub = self.create_publisher(PointCloud2, '/corrosion/pointcloud_rviz', 10)
+        self.workspace_pointcloud_pub = self.create_publisher(PointCloud2, '/corrosion/workspace_rviz', 10)
+        
         self.ui_corrosion_area_accept_sub = self.create_subscription(Bool, '/ui/corrosion_area_accept_pub', self.ui_corrosion_area_accept_callback, 10)        
         self.ui_corrosion_add_sub = self.create_subscription(Image, '/ui/corrosion_area_add_pub', self.ui_corrosion_add_callback, image_qos)
         self.ui_corrosion_remove_sub = self.create_subscription(Image, '/ui/corrosion_area_remove_pub', self.ui_corrosion_remove_callback, image_qos)
@@ -122,8 +126,8 @@ class CorrosionDetector(Node):
         self.tf_received = False  # Flag to track if transform is available
         self.target_frame = 'base_link'  # Robot base frame
         self.source_frame = 'tool0'  # End-effector frame
-        self.ui_corrosion_add = np.zeros((480, 640), np.uint8)
-        self.ui_corrosion_remove = np.zeros((480, 640), np.uint8)
+        self.ui_corrosion_add = np.zeros((720, 1280), np.uint8)  # 1280x720 resolution
+        self.ui_corrosion_remove = np.zeros((720, 1280), np.uint8)  # 1280x720 resolution
         self.depthstack_for_mean = []
 
         # Create save directory if it doesn't exist
@@ -211,6 +215,54 @@ class CorrosionDetector(Node):
         self.running_status = False
         self.corrosion_accepted = False
         self.get_logger().info('Terminate command received, stopping activities')
+
+    def create_pointcloud2_msg(self, xyz_points, frame_id='world'):
+        """
+        Convert numpy array of XYZ points (in mm) to PointCloud2 message for RViz.
+        Points are converted to meters for RViz visualization.
+        
+        Args:
+            xyz_points: numpy array of shape (N, 3) with XYZ coordinates in mm
+            frame_id: coordinate frame for the point cloud
+        
+        Returns:
+            PointCloud2 message
+        """
+        if len(xyz_points) == 0:
+            # Return empty point cloud
+            msg = PointCloud2()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = frame_id
+            msg.height = 1
+            msg.width = 0
+            return msg
+        
+        # Convert mm to meters for RViz
+        xyz_meters = xyz_points.astype(np.float32) / 1000.0
+        
+        # Create PointCloud2 message
+        msg = PointCloud2()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = frame_id
+        
+        # Define point fields (x, y, z as float32)
+        msg.fields = [
+            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+        ]
+        
+        msg.is_bigendian = False
+        msg.point_step = 12  # 3 floats * 4 bytes each
+        msg.height = 1
+        msg.width = len(xyz_meters)
+        msg.row_step = msg.point_step * msg.width
+        msg.is_dense = True
+        
+        # Convert to bytes
+        msg.data = xyz_meters.tobytes()
+        
+        return msg
 
     def quaternion_to_rotation_matrix(self, q):
         x, y, z, w = q.x, q.y, q.z, q.w
@@ -356,6 +408,7 @@ class CorrosionDetector(Node):
             if showImages:
                 self.visualize_point_cloud(xyz_data, xyz_offset, color_image)
             
+            # Publish original Float32MultiArray format
             msg = Float32MultiArray()
             msg.data = xyz_data.flatten().tolist()
             self.corrosion_corrosion.publish(msg)
@@ -363,6 +416,16 @@ class CorrosionDetector(Node):
             msg = Float32MultiArray()
             msg.data = xyz_offset.flatten().tolist()
             self.corrosion_workspace.publish(msg)
+            
+            # Publish RViz-compatible PointCloud2 format
+            corrosion_pc2 = self.create_pointcloud2_msg(xyz_data, frame_id='world')
+            self.corrosion_pointcloud_pub.publish(corrosion_pc2)
+            
+            workspace_pc2 = self.create_pointcloud2_msg(xyz_offset, frame_id='world')
+            self.workspace_pointcloud_pub.publish(workspace_pc2)
+            
+            self.get_logger().info(f'Published PointCloud2: corrosion={len(xyz_data)} pts, workspace={len(xyz_offset)} pts')
+            
             if printlogger: self.get_logger().info('Corrosion area accepted')
 
             msg = Float32MultiArray()

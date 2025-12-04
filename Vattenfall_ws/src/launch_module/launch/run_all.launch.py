@@ -45,11 +45,11 @@ def generate_launch_description():
             name='tool_orientation',
             output='screen',
         ),
-        #Node(
-        #    package='user_interface',
-        #    executable='user_interface_node',
-        #    name='user_interface',
-        #    output='screen',
-        #    parameters=[{'dt': 0.1,'neighbor_range': 3}],
-        #),
+        Node(
+            package='user_interface',
+            executable='user_interface_node',
+            name='user_interface',
+            output='screen',
+            parameters=[{'dt': 0.1,'neighbor_range': 3}],
+        ),
     ])

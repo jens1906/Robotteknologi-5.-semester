@@ -44,8 +44,9 @@ def generate_launch_description():
                 'enable_gyro': False,
                 
                 # Resolution and framerate - THIS IS KEY!
-                'rgb_camera.profile': '640x480x30',
-                'depth_module.profile': '848x480x30',  # D435 native depth resolution
+                # Using 1280x720 for both to match D435 native depth and allow proper alignment
+                'rgb_camera.color_profile': '1280x720x15',
+                'depth_module.depth_profile': '1280x720x15',
                 
                 # Alignment - THIS ENSURES DEPTH ALIGNS TO COLOR!
                 'align_depth.enable': True,

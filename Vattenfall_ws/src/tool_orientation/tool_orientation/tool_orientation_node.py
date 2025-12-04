@@ -70,6 +70,16 @@ def smooth_orientation_sequence(orientation_matrices, smoothing_alpha=0.35, max_
 
     return smoothed
 
+def enforce_fixed_yaw(orientation_matrices, target_yaw_rad):
+    #Clamp yaw for every orientation so camera stays upright relative world Z
+    adjusted = orientation_matrices.copy()
+    for i in range(len(adjusted)):
+        rot = R.from_matrix(adjusted[i])
+        euler = rot.as_euler('ZYX', degrees=False)
+        euler[0] = target_yaw_rad
+        adjusted[i] = R.from_euler('ZYX', euler, degrees=False).as_matrix()
+    return adjusted
+
 def normalize_or_none(v, epsilon=1e-12):
     norm = np.linalg.norm(v)
     if norm < epsilon:
@@ -322,9 +332,9 @@ if ROS2_AVAILABLE:
             
             #Publisher for trajectory with quaternions (unified format)
             trajectory_qos = QoSProfile(
-                depth=1,
+                depth=10,
                 reliability=QoSReliabilityPolicy.RELIABLE,
-                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+                durability=QoSDurabilityPolicy.VOLATILE,
             )
             self.trajectory_pub = self.create_publisher(
                 PoseArray,
@@ -357,6 +367,8 @@ if ROS2_AVAILABLE:
             self.declare_parameter('initial_roll_quaternion', [0.707, 0.0, 0.0, -0.707])
             self.declare_parameter('orientation_smoothing_alpha', 0.35)
             self.declare_parameter('max_orientation_step_deg', 25.0)
+            self.declare_parameter('lock_yaw', False)
+            self.declare_parameter('yaw_reference_quaternion', [0.0, 0.0, 0.0, 0.0])
             
             #Storage for received data
             self.path_xyz = None
@@ -421,6 +433,19 @@ if ROS2_AVAILABLE:
                 quat = [-0.707, 0.0, 0.0, 0.707]
             return quaternion_axis(quat, axis_index=1)
 
+        def get_yaw_reference_angle(self):
+            quat_value = self.get_parameter('yaw_reference_quaternion').value
+            try:
+                if len(quat_value) != 4:
+                    raise ValueError('Quaternion must have 4 components')
+                quat = [float(q) for q in quat_value]
+            except Exception:
+                quat = [0.0, 0.0, 1.0, 0.0]
+            try:
+                return R.from_quat(quat).as_euler('ZYX', degrees=False)[0]
+            except Exception:
+                return np.pi  # default 180° yaw if conversion fails
+
         def compute_and_publish_orientations(self, path_xyz, on_surface, dt=0.1, neighbor_range=3, off_surface_height=0.05):
             #Compute orientations and publish positions + rotation matrices
 
@@ -454,6 +479,14 @@ if ROS2_AVAILABLE:
                 self.get_logger().info(
                     f'Applied orientation smoothing (alpha={smoothing_alpha:.2f}, '
                     f'max_step={max_step_deg:.1f} deg)'
+                )
+
+            if bool(self.get_parameter('lock_yaw').value):
+                yaw_target = self.get_yaw_reference_angle()
+                orientations = enforce_fixed_yaw(orientations, yaw_target)
+                self.get_logger().info(
+                    f'Locked yaw to {np.rad2deg(yaw_target):.1f} deg '
+                    '(fixed camera up reference)'
                 )
             
             # Convert off_surface_height from meters to millimeters for consistent units
@@ -509,45 +542,7 @@ if ROS2_AVAILABLE:
             self.trajectory_pub.publish(trajectory_msg)
             self.get_logger().info(f'Published {len(adjusted_positions)} waypoints with quaternions')
             
-            # Save PoseArray to file for quick replay
-            self.save_posearray_to_file(trajectory_msg)
-            
             return adjusted_positions, orientations
-        
-        def save_posearray_to_file(self, pose_array_msg):
-            """Save PoseArray to a YAML file that can be replayed with ros2 topic pub."""
-            from pathlib import Path
-
-            # Create output directory if it doesn't exist
-            output_dir = Path.home() / 'Documents' / 'GitHub' / 'Robotteknologi-5.-semester' / 'saved_paths'
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            # Create filename with timestamp
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            yaml_file = output_dir / f'posearray_{timestamp}.yaml'
-
-            # Save as YAML (ROS2 CLI friendly format)
-            with open(yaml_file, 'w') as f:
-                f.write("header:\n")
-                f.write(f"  frame_id: '{pose_array_msg.header.frame_id}'\n")
-                f.write("poses:\n")
-                for pose in pose_array_msg.poses:
-                    f.write("  - position:\n")
-                    f.write(f"      x: {pose.position.x}\n")
-                    f.write(f"      y: {pose.position.y}\n")
-                    f.write(f"      z: {pose.position.z}\n")
-                    f.write("    orientation:\n")
-                    f.write(f"      x: {pose.orientation.x}\n")
-                    f.write(f"      y: {pose.orientation.y}\n")
-                    f.write(f"      z: {pose.orientation.z}\n")
-                    f.write(f"      w: {pose.orientation.w}\n")
-
-            self.get_logger().info('✓ Saved PoseArray to:')
-            self.get_logger().info(f'  YAML: {yaml_file}')
-            self.get_logger().info('')
-            self.get_logger().info('To replay this path, run:')
-            self.get_logger().info(f"  ros2 topic pub --once /tool_orientation/path geometry_msgs/msg/PoseArray \"$(cat {yaml_file})\"")
 
 
     def main(args=None):
