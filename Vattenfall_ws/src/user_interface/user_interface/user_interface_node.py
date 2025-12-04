@@ -177,7 +177,6 @@ class UserInterfaceNode(Node):
             self.get_logger().error(f'Error in image_match: {e}')
 
     def corrosion_thresholding_callback(self, msg):
-        self.get_logger().info('=== Corrosion thresholding callback CALLED ===')
         if self.ui_connected_pub_state ==False:
             self.ui_connected_pub_state = True
             connected_msg = Bool()
@@ -187,7 +186,9 @@ class UserInterfaceNode(Node):
 
         corrosion_image = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
         self.last_Threshold_frame = corrosion_image
-        self.get_logger().info(f'Saved threshold frame with shape: {corrosion_image.shape}')            
+        if printlogger:
+            self.get_logger().info('=== Corrosion thresholding callback CALLED ===')
+            self.get_logger().info(f'Saved threshold frame with shape: {corrosion_image.shape}')            
 
     def accept_corrosion_area(self, accept: bool):
         # Logic to accept or reject corrosion area

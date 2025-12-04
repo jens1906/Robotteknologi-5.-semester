@@ -13,7 +13,7 @@ import os
 from datetime import datetime  
 
 
-
+# Transformation of raw data and make it plotable in RViz
 
 
 
@@ -42,7 +42,7 @@ class CorrosionDetector(Node):
             reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.VOLATILE,
             history=QoSHistoryPolicy.KEEP_LAST,
-            depth=5
+            depth=1
         )
         
         # Hand-Eye Calibration Matrix (Camera to End Effector)
@@ -84,6 +84,8 @@ class CorrosionDetector(Node):
         self.toolsizes = [30, 25]  # Example tool sizes in mm
 
         self.corrosion_thresholding = self.create_publisher(Image, '/corrosion/thresholding_pub', image_qos)
+        self.corrosion_thresholding_rviz = self.create_publisher(Image, '/corrosion/thresholding_pub_rviz', image_qos)
+
         self.corrosion_corrosion = self.create_publisher(Float32MultiArray, '/corrosion/corrosion', 10)
         self.corrosion_workspace = self.create_publisher(Float32MultiArray, '/corrosion/workspace', 10)
         self.corrosion_tool_size = self.create_publisher(Float32MultiArray, '/corrosion/tool_size', 10)
@@ -112,6 +114,7 @@ class CorrosionDetector(Node):
         
         self.get_logger().info('Waiting for camera topics: /camera/color/image_raw and /camera/aligned_depth_to_color/image_raw')
 
+        self.corrosion_proccessing = False
         self.corrosion_accepted = False  
         self.running_status = False 
         self.last_frame = None
@@ -361,10 +364,16 @@ class CorrosionDetector(Node):
 
     def image_match(self, color_msg, depth_msg):
         # Look up the current transform (updates every frame with robot movement)
+        #self.get_logger().info('=== Image match callback CALLED ===')
+        if self.corrosion_proccessing:
+            self.get_logger().info('Skipping image processing - already processing previous frame')
+            return
         if not self.lookup_transform():
             if printlogger:
                 self.get_logger().info('Skipping image processing - transform not available')
             return        
+
+
         if printlogger: self.get_logger().info(f'Image and depth matched {color_msg.header.stamp.sec}.{color_msg.header.stamp.nanosec}')
         color_image = cv.cvtColor(np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3), cv.COLOR_RGB2BGR)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
@@ -375,14 +384,14 @@ class CorrosionDetector(Node):
             self.depthstack_for_mean.pop(0)
 
         # Check if UI masks changed
-        ui_changed = self.arrays_differ(self.last_added_area, self.ui_corrosion_add) or \
-                    self.arrays_differ(self.last_removed_area, self.ui_corrosion_remove)
+        #ui_changed = self.arrays_differ(self.last_added_area, self.ui_corrosion_add) or \
+        #            self.arrays_differ(self.last_removed_area, self.ui_corrosion_remove)
 
         if not self.corrosion_accepted:
             # Process on: first frame, UI change, or movement change, OR subscriber increased
-            should_process = (not self.first_frame_received) or ui_changed or self.movement_change or self.ui_connected_state==False
+            #should_process = (not self.first_frame_received) or ui_changed or self.movement_change or self.ui_connected_state==False
             
-            if should_process:
+            #if should_process:
                 color_threshold_image = color_image.copy()
                 edge = self.Threshold_to_edge_with_edits(color_image)
                 edge = cv.dilate(edge, cv.getStructuringElement(cv.MORPH_ELLIPSE, (5, 5)), iterations=1) 
@@ -397,7 +406,9 @@ class CorrosionDetector(Node):
                 
                 # Publish processed frame
                 self.corrosion_thresholding.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
-
+                self.corrosion_thresholding_rviz.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
+            #else:
+            #    self.corrosion_thresholding.publish(self.numpy_to_image_msg(self.last_frame, "bgr8"))
         elif self.corrosion_accepted and self.running_status == False:
             self.running_status = True
             # Compute per-pixel mean depth from stack
@@ -434,14 +445,10 @@ class CorrosionDetector(Node):
 
             if saveImages:
                 self.save_data(color_image, depth_image, xyz_data, xyz_offset)
-
-
-
-
-
         else:
             if printlogger: self.get_logger().info(f'Corrosion detection is already running, wait for ROBODK to complete {self.corrosion_accepted} {self.running_status}')
 
+        self.corrosion_processing = False
 
     def threshold_corrosion(self, image):
         # Thresholding in HSV color space to detect corrosion
