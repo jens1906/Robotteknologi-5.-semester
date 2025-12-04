@@ -380,7 +380,16 @@ if ROS2_AVAILABLE:
         
         def on_surface_callback(self, msg):
             #Callback for receiving on_surface boolean array
-            self.on_surface = np.array(msg.data, dtype=bool)
+            raw = msg.data
+            if isinstance(raw, (bytes, bytearray, memoryview)):
+                flags_uint8 = np.frombuffer(raw, dtype=np.uint8).copy()
+            else:
+                flags_uint8 = np.array(raw, dtype=np.uint8)
+            self.on_surface = flags_uint8.astype(bool)
+            self.get_logger().debug(
+                f'Received on_surface flags: {len(self.on_surface)} points, '
+                f'{np.sum(~self.on_surface)} off-surface waypoints'
+            )
             self.data_processed = False
             self.try_process_data()
         

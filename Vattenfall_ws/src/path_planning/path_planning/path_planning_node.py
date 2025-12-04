@@ -355,7 +355,7 @@ class PathPlanner(Node):
         # Publish on-surface flags
         if hasattr(self, 'continuous_on_surface'):
             on_surface_msg = ByteMultiArray()
-            on_surface_msg.data = bytes(self.continuous_on_surface.astype(np.uint8).tolist())
+            on_surface_msg.data = self.continuous_on_surface.astype(np.uint8).tolist()
             self.on_surface_pub.publish(on_surface_msg)
             self.get_logger().info('Published on-surface flags')
         else:
