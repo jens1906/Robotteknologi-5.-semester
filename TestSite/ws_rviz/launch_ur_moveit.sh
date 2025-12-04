@@ -9,7 +9,7 @@ set -euo pipefail
 
 # Configurable defaults
 UR_TYPE=${UR_TYPE:-ur3e}
-USE_MOCK_HARDWARE=${USE_MOCK_HARDWARE:-false}
+USE_MOCK_HARDWARE=${USE_MOCK_HARDWARE:-true}
 # Set to 1 to force an identity TF from world->base
 SET_WORLD_BASE_IDENTITY=${SET_WORLD_BASE_IDENTITY:-0}
 # Place robot base at world origin via xacro (0/1)
