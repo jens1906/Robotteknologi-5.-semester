@@ -168,8 +168,8 @@ class TLXWeightWindow(QMainWindow):
             self._update_window_title()
 
     def _update_window_title(self):
-        remaining = len(self._pages) - self._current_index
-        self.setWindowTitle(f"NASA TLX Weighting - Remaining pairs: {remaining}")
+        # Set a static, clean window title (no remaining counter)
+        self.setWindowTitle("NASA TLX Weighting")
 
     def _finish(self):
         # Show summary and offer export.
