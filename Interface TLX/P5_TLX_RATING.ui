@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>800</width>
-    <height>492</height>
+    <width>727</width>
+    <height>696</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -24,7 +24,7 @@
     <item>
      <widget class="QLabel" name="label_2">
       <property name="text">
-       <string>Mental Demand</string>
+       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:700; text-decoration: underline;&quot;&gt;Mental Demand&lt;/span&gt;&lt;span style=&quot; font-weight:700;&quot;&gt;:&lt;/span&gt;&lt;/p&gt;&lt;p&gt;How much mental and perceptual activity was required (e.g., thinking, deciding, calculating, remembering, looking, searching, etc)?&lt;/p&gt;&lt;p&gt;Was the mission easy or demanding, simple or complex, exacting or forgiving?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
       </property>
      </widget>
     </item>
@@ -65,7 +65,7 @@
     <item>
      <widget class="QLabel" name="label_3">
       <property name="text">
-       <string>Physical Demand</string>
+       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:700; text-decoration: underline;&quot;&gt;Physical Demand&lt;/span&gt;&lt;span style=&quot; font-weight:700;&quot;&gt;:&lt;/span&gt;&lt;/p&gt;&lt;p&gt;How much physical activity was required (e.g., pushing, pulling, turning, controlling, activating, etc.)?&lt;/p&gt;&lt;p&gt;Was the mission easy or demanding, slow or brisk, slack or strenuous, restful or laborious?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
       </property>
      </widget>
     </item>
@@ -106,7 +106,7 @@
     <item>
      <widget class="QLabel" name="label_4">
       <property name="text">
-       <string>Temporal Demand</string>
+       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:700; text-decoration: underline;&quot;&gt;Temporal Demand&lt;/span&gt;&lt;span style=&quot; font-weight:700;&quot;&gt;:&lt;/span&gt;&lt;/p&gt;&lt;p&gt;How much time pressure did you feel due to the rate or pace at which the mission occurred?&lt;/p&gt;&lt;p&gt;Was the pace slow and leisurely or rapid and frantic?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
       </property>
      </widget>
     </item>
@@ -147,7 +147,7 @@
     <item>
      <widget class="QLabel" name="label_5">
       <property name="text">
-       <string>Performance</string>
+       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:700; text-decoration: underline;&quot;&gt;Performance&lt;/span&gt;&lt;span style=&quot; font-weight:700;&quot;&gt;:&lt;/span&gt;&lt;/p&gt;&lt;p&gt;How successful do you think you were in accomplishing the goals of the mission?&lt;/p&gt;&lt;p&gt;How satisfied were you with your performance in accomplishing these goals?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
       </property>
      </widget>
     </item>
@@ -188,7 +188,7 @@
     <item>
      <widget class="QLabel" name="label_6">
       <property name="text">
-       <string>Effort</string>
+       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:700; text-decoration: underline;&quot;&gt;Effort&lt;/span&gt;&lt;span style=&quot; font-weight:700;&quot;&gt;:&lt;/span&gt;&lt;/p&gt;&lt;p&gt;How hard did you have to work (mentally and physically) to accomplish your level of performance?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
       </property>
      </widget>
     </item>
@@ -229,7 +229,7 @@
     <item>
      <widget class="QLabel" name="label_7">
       <property name="text">
-       <string>Frustration</string>
+       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:700; text-decoration: underline;&quot;&gt;Frustration&lt;/span&gt;&lt;span style=&quot; font-weight:700;&quot;&gt;:&lt;/span&gt;&lt;/p&gt;&lt;p&gt;How discouraged, stressed, irritated, and annoyed versus gratified, relaxed, content, and complacent did you feel during your mission?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
       </property>
      </widget>
     </item>
@@ -304,7 +304,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>800</width>
+     <width>727</width>
      <height>33</height>
     </rect>
    </property>
