@@ -55,7 +55,7 @@ echo "Using description launchfile: $DESCRIPTION_LAUNCHFILE"
 # Note: ur_control might not pass 'base_at_world_origin' to the included launch file, so it relies on the default (false).
 ros2 launch ur_robot_driver ur_control.launch.py \
     ur_type:=$UR_TYPE \
-    robot_ip:=192.168.56.106 \
+    robot_ip:=192.168.0.106 \
     use_mock_hardware:=$USE_MOCK_HARDWARE \
     launch_rviz:=true \
     description_launchfile:="$DESCRIPTION_LAUNCHFILE" \
@@ -94,7 +94,7 @@ set +e
 ros2 launch ./custom_ur_moveit.launch.py \
     ur_type:=$UR_TYPE \
     launch_rviz:=true \
-    robot_ip:=192.168.56.106 \
+    robot_ip:=192.168.0.106 \
     use_mock_hardware:=$USE_MOCK_HARDWARE \
     base_at_world_origin:=$BASE_AT_WORLD_ORIGIN
 ret=$?
