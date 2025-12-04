@@ -13,8 +13,6 @@ import os
 from datetime import datetime  
 
 
-### INCREASE RESOLUTION OF RGB AND DEPTH AND DECREASE FPS IN REALSENSE VIEWER FOR BETTER RESULTS ###
-### MAKE IT SO THE CORROSION CLOUD CAN BE PLOTTED IN RVIZ ###
 
 
 
@@ -22,10 +20,11 @@ from datetime import datetime
 
 # Camera intrinsics from /camera/color/camera_info
 # K matrix: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
-fx = 615.389  # Focal length X (pixels)
-fy = 615.737  # Focal length Y (pixels)
-cx = 324.183  # Principal point X (pixels)
-cy = 242.415  # Principal point Y (pixels)
+# For 1280x720 resolution (D435 native depth resolution)
+fx = 923.0838  # Focal length X (pixels)
+fy = 923.6057  # Focal length Y (pixels)
+cx = 646.2750  # Principal point X (pixels)
+cy = 363.6223  # Principal point Y (pixels)
 
 kernel = np.ones((5, 5), np.uint8)
 
@@ -127,8 +126,8 @@ class CorrosionDetector(Node):
         self.tf_received = False  # Flag to track if transform is available
         self.target_frame = 'base_link'  # Robot base frame
         self.source_frame = 'tool0'  # End-effector frame
-        self.ui_corrosion_add = np.zeros((480, 640), np.uint8)
-        self.ui_corrosion_remove = np.zeros((480, 640), np.uint8)
+        self.ui_corrosion_add = np.zeros((720, 1280), np.uint8)  # 1280x720 resolution
+        self.ui_corrosion_remove = np.zeros((720, 1280), np.uint8)  # 1280x720 resolution
         self.depthstack_for_mean = []
 
         # Create save directory if it doesn't exist
