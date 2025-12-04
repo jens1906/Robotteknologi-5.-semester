@@ -367,8 +367,8 @@ if ROS2_AVAILABLE:
             self.declare_parameter('initial_roll_quaternion', [0.707, 0.0, 0.0, -0.707])
             self.declare_parameter('orientation_smoothing_alpha', 0.35)
             self.declare_parameter('max_orientation_step_deg', 25.0)
-            self.declare_parameter('lock_yaw', True)
-            self.declare_parameter('yaw_reference_quaternion', [0.0, 0.0, 1.0, 0.0])
+            self.declare_parameter('lock_yaw', False)
+            self.declare_parameter('yaw_reference_quaternion', [0.0, 0.0, 0.0, 0.0])
             
             #Storage for received data
             self.path_xyz = None
