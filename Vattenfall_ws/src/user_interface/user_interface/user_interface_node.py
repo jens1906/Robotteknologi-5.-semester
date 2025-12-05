@@ -114,7 +114,7 @@ class UserInterfaceNode(Node):
         self.corrosion_thresholding_pub = self.create_subscription(CompressedImage, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
         color_sub = message_filters.Subscriber(self, CompressedImage, '/camera/color/image_raw/compressed', qos_profile=image_qos)
-        depth_sub = message_filters.Subscriber(self, CompressedImage, '/camera/aligned_depth_to_color/image_raw/compressedDepth', qos_profile=image_qos)
+        depth_sub = message_filters.Subscriber(self, CompressedImage, '/camera/aligned_depth_to_color/image_raw/compressed', qos_profile=image_qos)
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
         
@@ -256,7 +256,6 @@ class UserInterfaceNode(Node):
         try:
             response = future.result()
             if response.error_code.val == MoveItErrorCodes.SUCCESS:
-                # Send joint trajectory with IK solution
                 msg = JointTrajectory()
                 msg.joint_names = list(response.solution.joint_state.name[:6])
                 
@@ -628,8 +627,8 @@ class UserInterface(QMainWindow):
             return
         
         # Home position: 90, -90, 90, -90, -90, 0 degrees
-        home_angles = [math.radians(90), math.radians(-90), math.radians(90),
-                       math.radians(-90), math.radians(-90), math.radians(0)]
+        home_angles = [math.radians(68), math.radians(-83.5), math.radians(84),
+                       math.radians(-89.5), math.radians(-90), math.radians(339)]
         
         joint_names = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
                        'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']

@@ -92,6 +92,7 @@ class CorrosionDetector(Node):
         # RViz-compatible PointCloud2 publishers for visualization
         self.corrosion_pointcloud_pub = self.create_publisher(PointCloud2, '/corrosion/pointcloud_rviz', 10)
         self.workspace_pointcloud_pub = self.create_publisher(PointCloud2, '/corrosion/workspace_rviz', 10)
+        self.total_curved_surface_pub = self.create_publisher(PointCloud2, '/corrosion/total_curved_surface_rviz', 10)
         
         self.ui_corrosion_area_accept_sub = self.create_subscription(Bool, '/ui/corrosion_area_accept_pub', self.ui_corrosion_area_accept_callback, 10)        
         self.ui_corrosion_add_sub = self.create_subscription(Image, '/ui/corrosion_area_add_pub', self.ui_corrosion_add_callback, image_qos)
@@ -431,6 +432,9 @@ class CorrosionDetector(Node):
             mean_depth = np.mean(np.stack(self.depthstack_for_mean, axis=0), axis=0).astype(np.uint16)
             xyz_data, xyz_offset = self.combine_and_transform(self.edge_to_scatter_plot(color_image), mean_depth)
             
+            # Generate full depth surface point cloud
+            xyz_full_surface = self.depth_image_to_pointcloud(mean_depth)
+            
             # Visualize the 3D point cloud before publishing
             if showImages:
                 self.visualize_point_cloud(xyz_data, xyz_offset, color_image)
@@ -451,7 +455,11 @@ class CorrosionDetector(Node):
             workspace_pc2 = self.create_pointcloud2_msg(xyz_offset, frame_id='world')
             self.workspace_pointcloud_pub.publish(workspace_pc2)
             
-            self.get_logger().info(f'Published PointCloud2: corrosion={len(xyz_data)} pts, workspace={len(xyz_offset)} pts')
+            # Publish full curved surface point cloud
+            full_surface_pc2 = self.create_pointcloud2_msg(xyz_full_surface, frame_id='world')
+            self.total_curved_surface_pub.publish(full_surface_pc2)
+            
+            self.get_logger().info(f'Published PointCloud2: corrosion={len(xyz_data)} pts, workspace={len(xyz_offset)} pts, full_surface={len(xyz_full_surface)} pts')
             
             if printlogger: self.get_logger().info('Corrosion area accepted')
 
@@ -562,6 +570,53 @@ class CorrosionDetector(Node):
         filtered_depth = median_filter(depth, size=kernel_size)
         return filtered_depth
     
+    def depth_image_to_pointcloud(self, depth_image):
+        """
+        Convert entire depth image to 3D point cloud in world frame.
+        
+        Args:
+            depth_image: numpy array of depth values (H, W) in mm
+            
+        Returns:
+            xyz_world: numpy array of 3D points (N, 3) in world frame (mm)
+        """
+        h, w = depth_image.shape
+        
+        # Create meshgrid of pixel coordinates
+        x_indices, y_indices = np.meshgrid(np.arange(w), np.arange(h))
+        
+        # Flatten arrays
+        x_flat = x_indices.flatten()
+        y_flat = y_indices.flatten()
+        depth_flat = depth_image.flatten()
+        
+        # Filter out zero/invalid depth values
+        valid_mask = depth_flat > 0
+        x_valid = x_flat[valid_mask]
+        y_valid = y_flat[valid_mask]
+        depth_valid = depth_flat[valid_mask]
+        
+        # Convert to camera XYZ coordinates
+        xyz_camera = np.column_stack((
+            (x_valid - cx) * depth_valid / fx,
+            (y_valid - cy) * depth_valid / fy,
+            depth_valid
+        ))
+        
+        # Apply hand-eye calibration to transform from camera frame to base_link frame
+        xyz_base = self.apply_hand_eye_transform(xyz_camera)
+        
+        # Transform from base_link to world frame
+        if len(xyz_base) > 0:
+            ones = np.ones((xyz_base.shape[0], 1))
+            xyz_base_homogeneous = np.hstack([xyz_base, ones])
+            xyz_world_homogeneous = (self.T_base_to_world @ xyz_base_homogeneous.T).T
+            xyz_world = xyz_world_homogeneous[:, :3]
+        else:
+            xyz_world = xyz_base
+        
+        self.get_logger().info(f'Generated full surface point cloud: {len(xyz_world)} points')
+        return xyz_world
 
     def combine_and_transform(self, scatter_data_tuple, depth, depthFiles=None):
         # Unpack the tuple (original, offset)
