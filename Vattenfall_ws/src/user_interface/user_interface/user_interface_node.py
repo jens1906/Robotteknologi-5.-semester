@@ -627,8 +627,8 @@ class UserInterface(QMainWindow):
             return
         
         # Home position: 90, -90, 90, -90, -90, 0 degrees
-        home_angles = [math.radians(68), math.radians(-83.5), math.radians(84),
-                       math.radians(-89.5), math.radians(-90), math.radians(339)]
+        home_angles = [math.radians(69.5), math.radians(-78.3), math.radians(77.8),
+                       math.radians(-88.7), math.radians(-90.3), math.radians(340.2)]
         
         joint_names = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
                        'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
