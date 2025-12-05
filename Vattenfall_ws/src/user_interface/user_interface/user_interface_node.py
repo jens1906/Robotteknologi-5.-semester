@@ -114,7 +114,7 @@ class UserInterfaceNode(Node):
         self.corrosion_thresholding_pub = self.create_subscription(CompressedImage, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
         color_sub = message_filters.Subscriber(self, CompressedImage, '/camera/color/image_raw/compressed', qos_profile=image_qos)
-        depth_sub = message_filters.Subscriber(self, CompressedImage, '/camera/aligned_depth_to_color/image_raw/compressed', qos_profile=image_qos)
+        depth_sub = message_filters.Subscriber(self, CompressedImage, '/camera/aligned_depth_to_color/image_raw/compressedDepth', qos_profile=image_qos)
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
         
@@ -183,11 +183,11 @@ class UserInterfaceNode(Node):
             color_np_arr = np.frombuffer(color_msg.data, np.uint8)
             color_image = cv.imdecode(color_np_arr, cv.IMREAD_COLOR)
             
-            # Decompress depth image (CompressedDepth format - PNG16 with custom header)
-            # CompressedDepth has a 12-byte header, then PNG data
+            # Decompress depth image (CompressedDepth format - PNG16 with 12-byte header)
+            # CompressedDepth header: 8 bytes (format) + 4 bytes (depth quantization)
             depth_header_size = 12
             depth_np_arr = np.frombuffer(depth_msg.data[depth_header_size:], np.uint8)
-            depth_image = cv.imdecode(depth_np_arr, cv.IMREAD_UNCHANGED)
+            depth_image = cv.imdecode(depth_np_arr, cv.IMREAD_UNCHANGED)  # IMREAD_UNCHANGED preserves 16-bit
             
             # Allocate corrosion_area_add and corrosion_area_remove only once on first image match
             if self.ui_instance is None:
