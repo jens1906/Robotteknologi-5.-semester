@@ -371,9 +371,9 @@ class UserInterfaceNode(Node):
             target_pose.header.frame_id = 'base_link'
             target_pose.header.stamp = self.get_clock().now().to_msg()
             
-            # Apply X and Y offsets based on joystick position
-            target_pose.pose.position.x = transform.transform.translation.x + (self.xy_jog_increment * self.xy_jog_x)
-            target_pose.pose.position.y = transform.transform.translation.y + (self.xy_jog_increment * self.xy_jog_y)
+            # Apply X and Y offsets based on joystick position (inverted)
+            target_pose.pose.position.x = transform.transform.translation.x - (self.xy_jog_increment * self.xy_jog_x)
+            target_pose.pose.position.y = transform.transform.translation.y - (self.xy_jog_increment * self.xy_jog_y)
             target_pose.pose.position.z = transform.transform.translation.z  # Keep Z constant
             
             # Keep orientation constant
@@ -702,16 +702,10 @@ class UserInterface(QMainWindow):
             self.ui.stackedWidget.setCurrentIndex(0)
             self.joystick_terminate_change_page(True)
             self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
+            
             if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
         else:
             if printlogger: self.ros_node.get_logger().info('Run robot pressed cancelled')
-
-        msg = Bool()
-        msg.data = True
-        self.ui.stackedWidget.setCurrentIndex(0)
-        self.joystick_terminate_change_page(True)
-        self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
-        if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
     
     def joystick_terminate_change_page(self, state):
         if state:
