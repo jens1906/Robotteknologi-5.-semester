@@ -128,8 +128,8 @@ class CorrosionDetector(Node):
         self.tf_received = False  # Flag to track if transform is available
         self.target_frame = 'base_link'  # Robot base frame
         self.source_frame = 'tool0'  # End-effector frame
-        self.ui_corrosion_add = np.zeros((720, 1280), np.uint8)  # 1280x720 resolution
-        self.ui_corrosion_remove = np.zeros((720, 1280), np.uint8)  # 1280x720 resolution
+        self.ui_corrosion_add = None  # Will be initialized to match camera resolution
+        self.ui_corrosion_remove = None  # Will be initialized to match camera resolution
         self.depthstack_for_mean = []
 
         # Create save directory if it doesn't exist
@@ -387,6 +387,13 @@ class CorrosionDetector(Node):
         if printlogger: self.get_logger().info(f'Image and depth matched {color_msg.header.stamp.sec}.{color_msg.header.stamp.nanosec}')
         color_image = cv.cvtColor(np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3), cv.COLOR_RGB2BGR)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
+
+        # Initialize UI masks to match camera resolution on first frame
+        if self.ui_corrosion_add is None:
+            h, w = color_image.shape[:2]
+            self.ui_corrosion_add = np.zeros((h, w), np.uint8)
+            self.ui_corrosion_remove = np.zeros((h, w), np.uint8)
+            self.get_logger().info(f'Initialized UI corrosion masks to match camera resolution: {w}x{h}')
 
         # Maintain rolling buffer of last 5 depth images for mean calculation
         self.depthstack_for_mean.append(depth_image.copy())

@@ -19,7 +19,7 @@ from moveit_msgs.srv import GetPositionIK
 from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion
 from rclpy.action import ActionClient
 from tf2_ros import Buffer, TransformListener
-from PyQt6.QtGui import QImage, QPixmap, QFont
+from PyQt6.QtGui import QImage, QPixmap, QFont, QKeySequence, QShortcut
 from user_interface.GUI import Ui_MainWindow
 from PyQt6.QtCore import pyqtSignal, QObject, Qt
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QMessageBox, QTextEdit
@@ -546,7 +546,25 @@ class UserInterface(QMainWindow):
                                             "Adjust robot arm position<br>"
                                             "<b>Terminate</b><br>"
                                             "Stop current operation")
+        
+        # Setup keyboard shortcut for fullscreen toggle (F11)
+        self.fullscreen_shortcut = QShortcut(QKeySequence('F11'), self)
+        self.fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
+        
+        # Setup keyboard shortcut to quit (Escape when in fullscreen)
+        self.quit_shortcut = QShortcut(QKeySequence('Escape'), self)
+        self.quit_shortcut.activated.connect(self.exit_fullscreen)
+        
+        # Setup Ctrl+C shortcut to quit application
+        self.ctrl_c_shortcut = QShortcut(QKeySequence('Ctrl+C'), self)
+        self.ctrl_c_shortcut.activated.connect(self.force_quit)
 
+
+    def force_quit(self):
+        """Force quit the application"""
+        self.ros_node.get_logger().info('Force quit requested')
+        self.cleanup()
+        QApplication.quit()
 
     def customize_tabs(self):
         tabbar = self.ui.tabWidget.tabBar()
@@ -971,6 +989,21 @@ class UserInterface(QMainWindow):
         self.cleanup()
         event.accept()
     
+    def toggle_fullscreen(self):
+        """Toggle between fullscreen and windowed mode (F11)"""
+        if self.isFullScreen():
+            self.showNormal()
+            self.ros_node.get_logger().info('Exited fullscreen mode')
+        else:
+            self.showFullScreen()
+            self.ros_node.get_logger().info('Entered fullscreen mode')
+    
+    def exit_fullscreen(self):
+        """Exit fullscreen mode (Escape key)"""
+        if self.isFullScreen():
+            self.showNormal()
+            self.ros_node.get_logger().info('Exited fullscreen mode')
+    
     def cleanup(self):
         """Cleanup function to run before topics disable"""
         self.ros_node.get_logger().info('Cleaning up - publishing final state')
@@ -986,17 +1019,19 @@ class UserInterface(QMainWindow):
 
 def main():
     import signal
+    import sys
+    
+    # Force immediate exit on Ctrl+C
+    signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
     
     rclpy.init()
     app = QApplication(sys.argv)
+    
+    # Allow Ctrl+C to work with Qt event loop
+    import signal
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    
     window = UserInterface()
-    
-    # Handle Ctrl-C
-    def signal_handler(sig, frame):
-        window.cleanup()
-        sys.exit(0)
-    
-    signal.signal(signal.SIGINT, signal_handler)
     
     window.show()
     window.customize_tabs()
