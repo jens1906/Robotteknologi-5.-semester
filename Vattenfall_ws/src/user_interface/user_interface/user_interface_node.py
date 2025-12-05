@@ -8,7 +8,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 from pathlib import Path
 from std_msgs.msg import Bool
-from sensor_msgs.msg import Image, JointState
+from sensor_msgs.msg import Image, JointState, CompressedImage
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from control_msgs.action import FollowJointTrajectory
 from rcl_interfaces.msg import Log
@@ -76,14 +76,14 @@ class UserInterfaceNode(Node):
         # Z-axis jogging setup - uses TF + IK for proper Cartesian motion
         self.z_jog_active = False
         self.z_jog_direction = 0.0  # 0=stopped, +1=up, -1=down
-        self.z_jog_increment = 0.01  # 10mm per step in base Z direction
+        self.z_jog_increment = 0.010  # 10mm per step in base Z direction
         self.z_jog_pending_ik = False  # Track if IK call is in progress
         
         # XY joystick jogging setup - same IK-based approach
         self.xy_jog_active = False
         self.xy_jog_x = 0.0  # -1 to +1 (left to right)
         self.xy_jog_y = 0.0  # -1 to +1 (down to up)
-        self.xy_jog_increment = 0.01  # 10mm per step
+        self.xy_jog_increment = 0.010  # 10mm per step
         self.xy_jog_pending_ik = False
         
         self.current_joint_states = None
@@ -113,8 +113,8 @@ class UserInterfaceNode(Node):
 
         self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
-        color_sub = message_filters.Subscriber(self, Image, '/camera/color/image_raw', qos_profile=image_qos)
-        depth_sub = message_filters.Subscriber(self, Image, '/camera/aligned_depth_to_color/image_raw', qos_profile=image_qos)
+        color_sub = message_filters.Subscriber(self, CompressedImage, '/camera/color/image_raw/compressed', qos_profile=image_qos)
+        depth_sub = message_filters.Subscriber(self, CompressedImage, '/camera/aligned_depth_to_color/image_raw/compressedDepth', qos_profile=image_qos)
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
         
@@ -179,10 +179,15 @@ class UserInterfaceNode(Node):
 
     def image_match(self, color_msg, depth_msg):
         try:
-            # RealSense wrapper publishes RGB8, convert to BGR8 for OpenCV/display
-            color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
-            color_image = cv.cvtColor(color_image, cv.COLOR_RGB2BGR)
-            depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
+            # Decompress color image (JPEG/PNG compressed)
+            color_np_arr = np.frombuffer(color_msg.data, np.uint8)
+            color_image = cv.imdecode(color_np_arr, cv.IMREAD_COLOR)
+            
+            # Decompress depth image (CompressedDepth format - PNG16 with custom header)
+            # CompressedDepth has a 12-byte header, then PNG data
+            depth_header_size = 12
+            depth_np_arr = np.frombuffer(depth_msg.data[depth_header_size:], np.uint8)
+            depth_image = cv.imdecode(depth_np_arr, cv.IMREAD_UNCHANGED)
             
             # Allocate corrosion_area_add and corrosion_area_remove only once on first image match
             if self.ui_instance is None:
