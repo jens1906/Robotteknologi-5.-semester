@@ -10,8 +10,6 @@ set -euo pipefail
 # Configurable defaults
 UR_TYPE=${UR_TYPE:-ur3e}
 USE_MOCK_HARDWARE=${USE_MOCK_HARDWARE:-true}
-# Enable MoveIt Servo by default (can override via env or CLI)
-LAUNCH_SERVO=${LAUNCH_SERVO:-false}
 # Set to 1 to force an identity TF from world->base
 SET_WORLD_BASE_IDENTITY=${SET_WORLD_BASE_IDENTITY:-0}
 # Place robot base at world origin via xacro (0/1)
@@ -84,11 +82,7 @@ echo "/robot_description received."
 # 5) Launch the stable, standard MoveIt launcher with RViz
 echo "Starting standard MoveIt launcher (foreground)..."
 set +e
-ros2 launch ur_moveit_config ur_moveit.launch.py \
-    ur_type:=$UR_TYPE \
-    launch_rviz:=true \
-    launch_servo:=$LAUNCH_SERVO \
-    use_mock_hardware:=$USE_MOCK_HARDWARE "$@"
+ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=$UR_TYPE launch_rviz:=true
 ret=$?
 set -e
 
