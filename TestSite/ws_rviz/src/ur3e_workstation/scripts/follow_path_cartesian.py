@@ -138,8 +138,8 @@ class CartesianPathFollower(Node):
         goal.request.group_name = 'ur_manipulator'
         goal.request.num_planning_attempts = 20
         goal.request.allowed_planning_time = 10.0
-        goal.request.max_velocity_scaling_factor = 0.05  # Slower for initial move
-        goal.request.max_acceleration_scaling_factor = 0.05  # Slower for initial move
+        goal.request.max_velocity_scaling_factor = 0.1
+        goal.request.max_acceleration_scaling_factor = 0.1
         goal.request.planner_id = "RRTConnectkConfigDefault"
         
         # Create constraints
@@ -234,12 +234,9 @@ class CartesianPathFollower(Node):
             request.group_name = 'ur_manipulator'
             request.link_name = 'tool0'
             request.waypoints = remaining_waypoints
-            request.max_step = 0.01  # 1cm interpolation (finer steps avoid singularities)
-            request.jump_threshold = 0.0  # Strict: reject any joint jump (0.0 = disabled/strictest)
+            request.max_step = 0.05  # 5cm interpolation
+            request.jump_threshold = 1.5  # Prevent large joint jumps (approx 85 degrees)
             request.avoid_collisions = True
-            
-            # Add path constraints to limit joint velocities for smoother motion
-            request.path_constraints.joint_constraints = []
             
             future = self.cartesian_path_client.call_async(request)
             rclpy.spin_until_future_complete(self, future)
@@ -342,10 +339,10 @@ class CartesianPathFollower(Node):
         """Move to a pose using MoveGroup (PTP)."""
         goal = MoveGroup.Goal()
         goal.request.group_name = 'ur_manipulator'
-        goal.request.num_planning_attempts = 20
-        goal.request.allowed_planning_time = 5.0  # More time for difficult poses
-        goal.request.max_velocity_scaling_factor = 0.1
-        goal.request.max_acceleration_scaling_factor = 0.05
+        goal.request.num_planning_attempts = 10
+        goal.request.allowed_planning_time = 1.0
+        goal.request.max_velocity_scaling_factor = 0.2
+        goal.request.max_acceleration_scaling_factor = 0.1
         goal.request.planner_id = "RRTConnectkConfigDefault"
         
         c = Constraints()
