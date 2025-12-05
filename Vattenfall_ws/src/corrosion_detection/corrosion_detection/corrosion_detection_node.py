@@ -4,7 +4,7 @@ import numpy as np
 import message_filters
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
-from sensor_msgs.msg import Image, PointCloud2, PointField
+from sensor_msgs.msg import Image, PointCloud2, PointField, CompressedImage
 from std_msgs.msg import Float32MultiArray, Bool, Header
 import tf2_ros
 from tf2_ros import TransformException
@@ -83,8 +83,7 @@ class CorrosionDetector(Node):
         
         self.toolsizes = [30, 25]  # Example tool sizes in mm
 
-        self.corrosion_thresholding = self.create_publisher(Image, '/corrosion/thresholding_pub', image_qos)
-        self.corrosion_thresholding_rviz = self.create_publisher(Image, '/corrosion/thresholding_pub_rviz', image_qos)
+        self.corrosion_thresholding = self.create_publisher(CompressedImage, '/corrosion/thresholding_pub', image_qos)
 
         self.corrosion_corrosion = self.create_publisher(Float32MultiArray, '/corrosion/corrosion', 10)
         self.corrosion_workspace = self.create_publisher(Float32MultiArray, '/corrosion/workspace', 10)
@@ -93,6 +92,7 @@ class CorrosionDetector(Node):
         # RViz-compatible PointCloud2 publishers for visualization
         self.corrosion_pointcloud_pub = self.create_publisher(PointCloud2, '/corrosion/pointcloud_rviz', 10)
         self.workspace_pointcloud_pub = self.create_publisher(PointCloud2, '/corrosion/workspace_rviz', 10)
+        self.total_curved_surface_pub = self.create_publisher(PointCloud2, '/corrosion/total_curved_surface_rviz', 10)
         
         self.ui_corrosion_area_accept_sub = self.create_subscription(Bool, '/ui/corrosion_area_accept_pub', self.ui_corrosion_area_accept_callback, 10)        
         self.ui_corrosion_add_sub = self.create_subscription(Image, '/ui/corrosion_area_add_pub', self.ui_corrosion_add_callback, image_qos)
@@ -129,8 +129,8 @@ class CorrosionDetector(Node):
         self.tf_received = False  # Flag to track if transform is available
         self.target_frame = 'base_link'  # Robot base frame
         self.source_frame = 'tool0'  # End-effector frame
-        self.ui_corrosion_add = np.zeros((720, 1280), np.uint8)  # 1280x720 resolution
-        self.ui_corrosion_remove = np.zeros((720, 1280), np.uint8)  # 1280x720 resolution
+        self.ui_corrosion_add = None  # Will be initialized to match camera resolution
+        self.ui_corrosion_remove = None  # Will be initialized to match camera resolution
         self.depthstack_for_mean = []
 
         # Create save directory if it doesn't exist
@@ -346,6 +346,17 @@ class CorrosionDetector(Node):
         msg.data = img.tobytes()
         return msg
 
+    def numpy_to_compressed_image_msg(self, img):
+        """Convert numpy BGR image to CompressedImage message (JPEG format)."""
+        msg = CompressedImage()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.format = "jpeg"
+        # Encode as JPEG (quality 90)
+        success, encoded = cv.imencode('.jpg', img, [cv.IMWRITE_JPEG_QUALITY, 90])
+        if success:
+            msg.data = encoded.tobytes()
+        return msg
+
     @staticmethod
     def arrays_differ(a, b):
         """Check if two numpy arrays differ, handling None cases."""
@@ -378,6 +389,13 @@ class CorrosionDetector(Node):
         color_image = cv.cvtColor(np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3), cv.COLOR_RGB2BGR)
         depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
 
+        # Initialize UI masks to match camera resolution on first frame
+        if self.ui_corrosion_add is None:
+            h, w = color_image.shape[:2]
+            self.ui_corrosion_add = np.zeros((h, w), np.uint8)
+            self.ui_corrosion_remove = np.zeros((h, w), np.uint8)
+            self.get_logger().info(f'Initialized UI corrosion masks to match camera resolution: {w}x{h}')
+
         # Maintain rolling buffer of last 5 depth images for mean calculation
         self.depthstack_for_mean.append(depth_image.copy())
         if len(self.depthstack_for_mean) > 10:
@@ -404,9 +422,8 @@ class CorrosionDetector(Node):
                 self.movement_change = False
                 self.first_frame_received = True
                 
-                # Publish processed frame
-                self.corrosion_thresholding.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
-                self.corrosion_thresholding_rviz.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
+                # Publish processed frame as compressed
+                self.corrosion_thresholding.publish(self.numpy_to_compressed_image_msg(color_threshold_image))
             #else:
             #    self.corrosion_thresholding.publish(self.numpy_to_image_msg(self.last_frame, "bgr8"))
         elif self.corrosion_accepted and self.running_status == False:
@@ -414,6 +431,9 @@ class CorrosionDetector(Node):
             # Compute per-pixel mean depth from stack
             mean_depth = np.mean(np.stack(self.depthstack_for_mean, axis=0), axis=0).astype(np.uint16)
             xyz_data, xyz_offset = self.combine_and_transform(self.edge_to_scatter_plot(color_image), mean_depth)
+            
+            # Generate full depth surface point cloud
+            xyz_full_surface = self.depth_image_to_pointcloud(mean_depth)
             
             # Visualize the 3D point cloud before publishing
             if showImages:
@@ -435,7 +455,11 @@ class CorrosionDetector(Node):
             workspace_pc2 = self.create_pointcloud2_msg(xyz_offset, frame_id='world')
             self.workspace_pointcloud_pub.publish(workspace_pc2)
             
-            self.get_logger().info(f'Published PointCloud2: corrosion={len(xyz_data)} pts, workspace={len(xyz_offset)} pts')
+            # Publish full curved surface point cloud
+            full_surface_pc2 = self.create_pointcloud2_msg(xyz_full_surface, frame_id='world')
+            self.total_curved_surface_pub.publish(full_surface_pc2)
+            
+            self.get_logger().info(f'Published PointCloud2: corrosion={len(xyz_data)} pts, workspace={len(xyz_offset)} pts, full_surface={len(xyz_full_surface)} pts')
             
             if printlogger: self.get_logger().info('Corrosion area accepted')
 
@@ -546,6 +570,53 @@ class CorrosionDetector(Node):
         filtered_depth = median_filter(depth, size=kernel_size)
         return filtered_depth
     
+    def depth_image_to_pointcloud(self, depth_image):
+        """
+        Convert entire depth image to 3D point cloud in world frame.
+        
+        Args:
+            depth_image: numpy array of depth values (H, W) in mm
+            
+        Returns:
+            xyz_world: numpy array of 3D points (N, 3) in world frame (mm)
+        """
+        h, w = depth_image.shape
+        
+        # Create meshgrid of pixel coordinates
+        x_indices, y_indices = np.meshgrid(np.arange(w), np.arange(h))
+        
+        # Flatten arrays
+        x_flat = x_indices.flatten()
+        y_flat = y_indices.flatten()
+        depth_flat = depth_image.flatten()
+        
+        # Filter out zero/invalid depth values
+        valid_mask = depth_flat > 0
+        x_valid = x_flat[valid_mask]
+        y_valid = y_flat[valid_mask]
+        depth_valid = depth_flat[valid_mask]
+        
+        # Convert to camera XYZ coordinates
+        xyz_camera = np.column_stack((
+            (x_valid - cx) * depth_valid / fx,
+            (y_valid - cy) * depth_valid / fy,
+            depth_valid
+        ))
+        
+        # Apply hand-eye calibration to transform from camera frame to base_link frame
+        xyz_base = self.apply_hand_eye_transform(xyz_camera)
+        
+        # Transform from base_link to world frame
+        if len(xyz_base) > 0:
+            ones = np.ones((xyz_base.shape[0], 1))
+            xyz_base_homogeneous = np.hstack([xyz_base, ones])
+            xyz_world_homogeneous = (self.T_base_to_world @ xyz_base_homogeneous.T).T
+            xyz_world = xyz_world_homogeneous[:, :3]
+        else:
+            xyz_world = xyz_base
+        
+        self.get_logger().info(f'Generated full surface point cloud: {len(xyz_world)} points')
+        return xyz_world
 
     def combine_and_transform(self, scatter_data_tuple, depth, depthFiles=None):
         # Unpack the tuple (original, offset)

@@ -8,7 +8,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 from pathlib import Path
 from std_msgs.msg import Bool
-from sensor_msgs.msg import Image, JointState
+from sensor_msgs.msg import Image, JointState, CompressedImage
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from control_msgs.action import FollowJointTrajectory
 from rcl_interfaces.msg import Log
@@ -19,7 +19,7 @@ from moveit_msgs.srv import GetPositionIK
 from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion
 from rclpy.action import ActionClient
 from tf2_ros import Buffer, TransformListener
-from PyQt6.QtGui import QImage, QPixmap, QFont
+from PyQt6.QtGui import QImage, QPixmap, QFont, QKeySequence, QShortcut
 from user_interface.GUI import Ui_MainWindow
 from PyQt6.QtCore import pyqtSignal, QObject, Qt
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QMessageBox, QTextEdit
@@ -76,14 +76,14 @@ class UserInterfaceNode(Node):
         # Z-axis jogging setup - uses TF + IK for proper Cartesian motion
         self.z_jog_active = False
         self.z_jog_direction = 0.0  # 0=stopped, +1=up, -1=down
-        self.z_jog_increment = 0.01  # 10mm per step in base Z direction
+        self.z_jog_increment = 0.010  # 10mm per step in base Z direction
         self.z_jog_pending_ik = False  # Track if IK call is in progress
         
         # XY joystick jogging setup - same IK-based approach
         self.xy_jog_active = False
         self.xy_jog_x = 0.0  # -1 to +1 (left to right)
         self.xy_jog_y = 0.0  # -1 to +1 (down to up)
-        self.xy_jog_increment = 0.01  # 10mm per step
+        self.xy_jog_increment = 0.010  # 10mm per step
         self.xy_jog_pending_ik = False
         
         self.current_joint_states = None
@@ -111,10 +111,10 @@ class UserInterfaceNode(Node):
         
         self.get_logger().info('Z-axis and XY jogging ready (Cartesian IK method)')
 
-        self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
+        self.corrosion_thresholding_pub = self.create_subscription(CompressedImage, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
-        color_sub = message_filters.Subscriber(self, Image, '/camera/color/image_raw', qos_profile=image_qos)
-        depth_sub = message_filters.Subscriber(self, Image, '/camera/aligned_depth_to_color/image_raw', qos_profile=image_qos)
+        color_sub = message_filters.Subscriber(self, CompressedImage, '/camera/color/image_raw/compressed', qos_profile=image_qos)
+        depth_sub = message_filters.Subscriber(self, CompressedImage, '/camera/aligned_depth_to_color/image_raw/compressedDepth', qos_profile=image_qos)
         sync = message_filters.ApproximateTimeSynchronizer([color_sub, depth_sub], 10, 0.1)
         sync.registerCallback(self.image_match)
         
@@ -179,10 +179,15 @@ class UserInterfaceNode(Node):
 
     def image_match(self, color_msg, depth_msg):
         try:
-            # RealSense wrapper publishes RGB8, convert to BGR8 for OpenCV/display
-            color_image = np.frombuffer(color_msg.data, dtype=np.uint8).reshape(color_msg.height, color_msg.width, 3)
-            color_image = cv.cvtColor(color_image, cv.COLOR_RGB2BGR)
-            depth_image = np.frombuffer(depth_msg.data, dtype=np.uint16).reshape(depth_msg.height, depth_msg.width)
+            # Decompress color image (JPEG/PNG compressed)
+            color_np_arr = np.frombuffer(color_msg.data, np.uint8)
+            color_image = cv.imdecode(color_np_arr, cv.IMREAD_COLOR)
+            
+            # Decompress depth image (CompressedDepth format - PNG16 with 12-byte header)
+            # CompressedDepth header: 8 bytes (format) + 4 bytes (depth quantization)
+            depth_header_size = 12
+            depth_np_arr = np.frombuffer(depth_msg.data[depth_header_size:], np.uint8)
+            depth_image = cv.imdecode(depth_np_arr, cv.IMREAD_UNCHANGED)  # IMREAD_UNCHANGED preserves 16-bit
             
             # Allocate corrosion_area_add and corrosion_area_remove only once on first image match
             if self.ui_instance is None:
@@ -251,7 +256,6 @@ class UserInterfaceNode(Node):
         try:
             response = future.result()
             if response.error_code.val == MoveItErrorCodes.SUCCESS:
-                # Send joint trajectory with IK solution
                 msg = JointTrajectory()
                 msg.joint_names = list(response.solution.joint_state.name[:6])
                 
@@ -367,9 +371,9 @@ class UserInterfaceNode(Node):
             target_pose.header.frame_id = 'base_link'
             target_pose.header.stamp = self.get_clock().now().to_msg()
             
-            # Apply X and Y offsets based on joystick position
-            target_pose.pose.position.x = transform.transform.translation.x + (self.xy_jog_increment * self.xy_jog_x)
-            target_pose.pose.position.y = transform.transform.translation.y + (self.xy_jog_increment * self.xy_jog_y)
+            # Apply X and Y offsets based on joystick position (inverted)
+            target_pose.pose.position.x = transform.transform.translation.x - (self.xy_jog_increment * self.xy_jog_x)
+            target_pose.pose.position.y = transform.transform.translation.y - (self.xy_jog_increment * self.xy_jog_y)
             target_pose.pose.position.z = transform.transform.translation.z  # Keep Z constant
             
             # Keep orientation constant
@@ -408,7 +412,9 @@ class UserInterfaceNode(Node):
             self.ui_connected_pub.publish(connected_msg)
             self.get_logger().info('Published UI connected state as True')
 
-        corrosion_image = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
+        # Decompress JPEG image
+        np_arr = np.frombuffer(msg.data, np.uint8)
+        corrosion_image = cv.imdecode(np_arr, cv.IMREAD_COLOR)
         self.last_Threshold_frame = corrosion_image
         if printlogger:
             self.get_logger().info('=== Corrosion thresholding callback CALLED ===')
@@ -539,7 +545,25 @@ class UserInterface(QMainWindow):
                                             "Adjust robot arm position<br>"
                                             "<b>Terminate</b><br>"
                                             "Stop current operation")
+        
+        # Setup keyboard shortcut for fullscreen toggle (F11)
+        self.fullscreen_shortcut = QShortcut(QKeySequence('F11'), self)
+        self.fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
+        
+        # Setup keyboard shortcut to quit (Escape when in fullscreen)
+        self.quit_shortcut = QShortcut(QKeySequence('Escape'), self)
+        self.quit_shortcut.activated.connect(self.exit_fullscreen)
+        
+        # Setup Ctrl+C shortcut to quit application
+        self.ctrl_c_shortcut = QShortcut(QKeySequence('Ctrl+C'), self)
+        self.ctrl_c_shortcut.activated.connect(self.force_quit)
 
+
+    def force_quit(self):
+        """Force quit the application"""
+        self.ros_node.get_logger().info('Force quit requested')
+        self.cleanup()
+        QApplication.quit()
 
     def customize_tabs(self):
         tabbar = self.ui.tabWidget.tabBar()
@@ -603,8 +627,8 @@ class UserInterface(QMainWindow):
             return
         
         # Home position: 90, -90, 90, -90, -90, 0 degrees
-        home_angles = [math.radians(90), math.radians(-90), math.radians(90),
-                       math.radians(-90), math.radians(-90), math.radians(0)]
+        home_angles = [math.radians(69.5), math.radians(-78.3), math.radians(77.8),
+                       math.radians(-88.7), math.radians(-90.3), math.radians(340.2)]
         
         joint_names = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
                        'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
@@ -678,16 +702,10 @@ class UserInterface(QMainWindow):
             self.ui.stackedWidget.setCurrentIndex(0)
             self.joystick_terminate_change_page(True)
             self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
+            
             if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
         else:
             if printlogger: self.ros_node.get_logger().info('Run robot pressed cancelled')
-
-        msg = Bool()
-        msg.data = True
-        self.ui.stackedWidget.setCurrentIndex(0)
-        self.joystick_terminate_change_page(True)
-        self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
-        if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
     
     def joystick_terminate_change_page(self, state):
         if state:
@@ -964,6 +982,21 @@ class UserInterface(QMainWindow):
         self.cleanup()
         event.accept()
     
+    def toggle_fullscreen(self):
+        """Toggle between fullscreen and windowed mode (F11)"""
+        if self.isFullScreen():
+            self.showNormal()
+            self.ros_node.get_logger().info('Exited fullscreen mode')
+        else:
+            self.showFullScreen()
+            self.ros_node.get_logger().info('Entered fullscreen mode')
+    
+    def exit_fullscreen(self):
+        """Exit fullscreen mode (Escape key)"""
+        if self.isFullScreen():
+            self.showNormal()
+            self.ros_node.get_logger().info('Exited fullscreen mode')
+    
     def cleanup(self):
         """Cleanup function to run before topics disable"""
         self.ros_node.get_logger().info('Cleaning up - publishing final state')
@@ -979,17 +1012,19 @@ class UserInterface(QMainWindow):
 
 def main():
     import signal
+    import sys
+    
+    # Force immediate exit on Ctrl+C
+    signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
     
     rclpy.init()
     app = QApplication(sys.argv)
+    
+    # Allow Ctrl+C to work with Qt event loop
+    import signal
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    
     window = UserInterface()
-    
-    # Handle Ctrl-C
-    def signal_handler(sig, frame):
-        window.cleanup()
-        sys.exit(0)
-    
-    signal.signal(signal.SIGINT, signal_handler)
     
     window.show()
     window.customize_tabs()
