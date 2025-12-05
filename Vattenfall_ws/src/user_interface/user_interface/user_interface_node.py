@@ -111,7 +111,7 @@ class UserInterfaceNode(Node):
         
         self.get_logger().info('Z-axis and XY jogging ready (Cartesian IK method)')
 
-        self.corrosion_thresholding_pub = self.create_subscription(Image, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
+        self.corrosion_thresholding_pub = self.create_subscription(CompressedImage, '/corrosion/thresholding_pub', self.corrosion_thresholding_callback, image_qos)
         self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)
         color_sub = message_filters.Subscriber(self, CompressedImage, '/camera/color/image_raw/compressed', qos_profile=image_qos)
         depth_sub = message_filters.Subscriber(self, CompressedImage, '/camera/aligned_depth_to_color/image_raw/compressedDepth', qos_profile=image_qos)
@@ -413,7 +413,9 @@ class UserInterfaceNode(Node):
             self.ui_connected_pub.publish(connected_msg)
             self.get_logger().info('Published UI connected state as True')
 
-        corrosion_image = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
+        # Decompress JPEG image
+        np_arr = np.frombuffer(msg.data, np.uint8)
+        corrosion_image = cv.imdecode(np_arr, cv.IMREAD_COLOR)
         self.last_Threshold_frame = corrosion_image
         if printlogger:
             self.get_logger().info('=== Corrosion thresholding callback CALLED ===')
