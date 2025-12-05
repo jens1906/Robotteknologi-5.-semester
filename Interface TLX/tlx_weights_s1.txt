@@ -1,0 +1,6 @@
+Mental Demand: 3
+Physical Demand: 1
+Temporal Demand: 1
+Performance: 4
+Effort: 5
+Frustration: 1
