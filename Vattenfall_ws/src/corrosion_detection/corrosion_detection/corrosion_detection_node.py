@@ -4,7 +4,7 @@ import numpy as np
 import message_filters
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
-from sensor_msgs.msg import Image, PointCloud2, PointField
+from sensor_msgs.msg import Image, PointCloud2, PointField, CompressedImage
 from std_msgs.msg import Float32MultiArray, Bool, Header
 import tf2_ros
 from tf2_ros import TransformException
@@ -83,8 +83,7 @@ class CorrosionDetector(Node):
         
         self.toolsizes = [30, 25]  # Example tool sizes in mm
 
-        self.corrosion_thresholding = self.create_publisher(Image, '/corrosion/thresholding_pub', image_qos)
-        self.corrosion_thresholding_rviz = self.create_publisher(Image, '/corrosion/thresholding_pub_rviz', image_qos)
+        self.corrosion_thresholding = self.create_publisher(CompressedImage, '/corrosion/thresholding_pub', image_qos)
 
         self.corrosion_corrosion = self.create_publisher(Float32MultiArray, '/corrosion/corrosion', 10)
         self.corrosion_workspace = self.create_publisher(Float32MultiArray, '/corrosion/workspace', 10)
@@ -346,6 +345,17 @@ class CorrosionDetector(Node):
         msg.data = img.tobytes()
         return msg
 
+    def numpy_to_compressed_image_msg(self, img):
+        """Convert numpy BGR image to CompressedImage message (JPEG format)."""
+        msg = CompressedImage()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.format = "jpeg"
+        # Encode as JPEG (quality 90)
+        success, encoded = cv.imencode('.jpg', img, [cv.IMWRITE_JPEG_QUALITY, 90])
+        if success:
+            msg.data = encoded.tobytes()
+        return msg
+
     @staticmethod
     def arrays_differ(a, b):
         """Check if two numpy arrays differ, handling None cases."""
@@ -404,9 +414,8 @@ class CorrosionDetector(Node):
                 self.movement_change = False
                 self.first_frame_received = True
                 
-                # Publish processed frame
-                self.corrosion_thresholding.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
-                self.corrosion_thresholding_rviz.publish(self.numpy_to_image_msg(color_threshold_image, "bgr8"))
+                # Publish processed frame as compressed
+                self.corrosion_thresholding.publish(self.numpy_to_compressed_image_msg(color_threshold_image))
             #else:
             #    self.corrosion_thresholding.publish(self.numpy_to_image_msg(self.last_frame, "bgr8"))
         elif self.corrosion_accepted and self.running_status == False:

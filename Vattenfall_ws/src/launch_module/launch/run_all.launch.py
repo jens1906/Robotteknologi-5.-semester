@@ -7,14 +7,14 @@ from pathlib import Path
 
 def generate_launch_description():
     # Get path to realsense_wrapper launch file
-    #realsense_wrapper_share = FindPackageShare('realsense_wrapper').find('realsense_wrapper')
-    #realsense_launch = Path(realsense_wrapper_share) / 'launch' / 'rs_launch.py'
+    realsense_wrapper_share = FindPackageShare('realsense_wrapper').find('realsense_wrapper')
+    realsense_launch = Path(realsense_wrapper_share) / 'launch' / 'rs_launch.py'
     
     return LaunchDescription([
         # Include RealSense wrapper launch
-        #IncludeLaunchDescription(
-        #    PythonLaunchDescriptionSource(str(realsense_launch))
-        #),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(str(realsense_launch))
+        ),
         #Node(
         #    package='realsense_publisher',
         #    executable='realsense_publisher_node',
@@ -45,11 +45,11 @@ def generate_launch_description():
             name='tool_orientation',
             output='screen',
         ),
-        Node(
-            package='user_interface',
-            executable='user_interface_node',
-            name='user_interface',
-            output='screen',
-            parameters=[{'dt': 0.1,'neighbor_range': 3}],
-        ),
+        #Node(
+        #    package='user_interface',
+        #    executable='user_interface_node',
+        #    name='user_interface',
+        #    output='screen',
+        #    parameters=[{'dt': 0.1,'neighbor_range': 3}],
+        #),
     ])
