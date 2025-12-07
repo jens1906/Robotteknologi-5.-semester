@@ -183,11 +183,11 @@ class UserInterfaceNode(Node):
             color_np_arr = np.frombuffer(color_msg.data, np.uint8)
             color_image = cv.imdecode(color_np_arr, cv.IMREAD_COLOR)
             
-            # Decompress depth image (CompressedDepth format - PNG16 with custom header)
-            # CompressedDepth has a 12-byte header, then PNG data
+            # Decompress depth image (CompressedDepth format - PNG16 with 12-byte header)
+            # CompressedDepth header: 8 bytes (format) + 4 bytes (depth quantization)
             depth_header_size = 12
             depth_np_arr = np.frombuffer(depth_msg.data[depth_header_size:], np.uint8)
-            depth_image = cv.imdecode(depth_np_arr, cv.IMREAD_UNCHANGED)
+            depth_image = cv.imdecode(depth_np_arr, cv.IMREAD_UNCHANGED)  # IMREAD_UNCHANGED preserves 16-bit
             
             # Allocate corrosion_area_add and corrosion_area_remove only once on first image match
             if self.ui_instance is None:
@@ -256,7 +256,6 @@ class UserInterfaceNode(Node):
         try:
             response = future.result()
             if response.error_code.val == MoveItErrorCodes.SUCCESS:
-                # Send joint trajectory with IK solution
                 msg = JointTrajectory()
                 msg.joint_names = list(response.solution.joint_state.name[:6])
                 
@@ -372,9 +371,9 @@ class UserInterfaceNode(Node):
             target_pose.header.frame_id = 'base_link'
             target_pose.header.stamp = self.get_clock().now().to_msg()
             
-            # Apply X and Y offsets based on joystick position
-            target_pose.pose.position.x = transform.transform.translation.x + (self.xy_jog_increment * self.xy_jog_x)
-            target_pose.pose.position.y = transform.transform.translation.y + (self.xy_jog_increment * self.xy_jog_y)
+            # Apply X and Y offsets based on joystick position (inverted)
+            target_pose.pose.position.x = transform.transform.translation.x - (self.xy_jog_increment * self.xy_jog_x)
+            target_pose.pose.position.y = transform.transform.translation.y - (self.xy_jog_increment * self.xy_jog_y)
             target_pose.pose.position.z = transform.transform.translation.z  # Keep Z constant
             
             # Keep orientation constant
@@ -628,8 +627,8 @@ class UserInterface(QMainWindow):
             return
         
         # Home position: 90, -90, 90, -90, -90, 0 degrees
-        home_angles = [math.radians(90), math.radians(-90), math.radians(90),
-                       math.radians(-90), math.radians(-90), math.radians(0)]
+        home_angles = [math.radians(69.5), math.radians(-78.3), math.radians(77.8),
+                       math.radians(-88.7), math.radians(-90.3), math.radians(340.2)]
         
         joint_names = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
                        'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
@@ -703,16 +702,10 @@ class UserInterface(QMainWindow):
             self.ui.stackedWidget.setCurrentIndex(0)
             self.joystick_terminate_change_page(True)
             self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
+            
             if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
         else:
             if printlogger: self.ros_node.get_logger().info('Run robot pressed cancelled')
-
-        msg = Bool()
-        msg.data = True
-        self.ui.stackedWidget.setCurrentIndex(0)
-        self.joystick_terminate_change_page(True)
-        self.ros_node.ui_corrosion_area_accept_pub.publish(msg)
-        if printlogger: self.ros_node.get_logger().info('Run Robot pressed')
     
     def joystick_terminate_change_page(self, state):
         if state:

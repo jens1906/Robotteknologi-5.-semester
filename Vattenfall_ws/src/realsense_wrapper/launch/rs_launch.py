@@ -45,8 +45,8 @@ def generate_launch_description():
                 
                 # Resolution and framerate
                 # Color at 1280x720, depth at 640x480 (D435 native), aligned depth will be 1280x720
-                'rgb_camera.color_profile': '1280x720x5',
-                'depth_module.depth_profile': '640x480x5',
+                'rgb_camera.color_profile': '1280x720x15',
+                'depth_module.depth_profile': '640x480x15',
                 
                 # Alignment - THIS ENSURES DEPTH ALIGNS TO COLOR!
                 'align_depth.enable': True,
