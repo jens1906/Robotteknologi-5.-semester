@@ -332,8 +332,8 @@ class PathPlanner(Node):
                             next_start - self.tool_size * vec_next / norm_next,
                             next_start
                         )
-                        path.append(bezier_curve)
-                        on_surface.extend([False] * len(bezier_curve))
+                        path.append(bezier_curve[1:-1])  # Exclude endpoints to avoid duplicates
+                        on_surface.extend([False] * len(bezier_curve)-2)  # Bézier segments are off-surface
 
             # Store on_surface flags for use in publish_path
             self.continuous_on_surface = np.array(on_surface)
