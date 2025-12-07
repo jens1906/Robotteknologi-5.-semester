@@ -379,12 +379,39 @@ if ROS2_AVAILABLE:
             self.get_logger().info('Publishing to: /tool_orientation/path (PoseArray with quaternions)')
         
         def on_surface_callback(self, msg):
-            #Callback for receiving on_surface boolean array
+            # Callback for receiving on_surface boolean array
+            # Handle multiple possible shapes of msg.data depending on rosidl/python representation:
+            # - bytes / bytearray / memoryview
+            # - list/tuple of ints
+            # - list/tuple of single-byte bytes objects (e.g., [b'\x00', b'\x01'])
             raw = msg.data
-            if isinstance(raw, (bytes, bytearray, memoryview)):
-                flags_uint8 = np.frombuffer(raw, dtype=np.uint8).copy()
-            else:
-                flags_uint8 = np.array(raw, dtype=np.uint8)
+            try:
+                if isinstance(raw, (bytes, bytearray, memoryview)):
+                    flags_uint8 = np.frombuffer(raw, dtype=np.uint8).copy()
+                elif isinstance(raw, (list, tuple)):
+                    if len(raw) == 0:
+                        flags_uint8 = np.array([], dtype=np.uint8)
+                    elif all(isinstance(x, (int, np.integer)) for x in raw):
+                        flags_uint8 = np.array(raw, dtype=np.uint8)
+                    elif all(isinstance(x, (bytes, bytearray)) for x in raw):
+                        # Join single-byte elements into one bytes object
+                        joined = b''.join(raw)
+                        flags_uint8 = np.frombuffer(joined, dtype=np.uint8).copy()
+                    else:
+                        # Fallback: try to convert each element to an int (handle bytes of length 1)
+                        converted = []
+                        for x in raw:
+                            if isinstance(x, (bytes, bytearray)) and len(x) == 1:
+                                converted.append(x[0])
+                            else:
+                                converted.append(int(x))
+                        flags_uint8 = np.array(converted, dtype=np.uint8)
+                else:
+                    flags_uint8 = np.array(raw, dtype=np.uint8)
+            except Exception as e:
+                self.get_logger().error(f'Failed to parse on_surface data: {e}')
+                return
+
             self.on_surface = flags_uint8.astype(bool)
             self.get_logger().debug(
                 f'Received on_surface flags: {len(self.on_surface)} points, '
