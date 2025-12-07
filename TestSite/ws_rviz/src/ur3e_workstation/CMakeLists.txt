@@ -35,6 +35,7 @@ install(PROGRAMS
   scripts/follow_line_cartesian.py
   scripts/point_visualizer.py
   scripts/single_point_publisher.py
+  scripts/ur5_moveit_client.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
