@@ -207,10 +207,10 @@ class CartesianPathFollower(Node):
         
         goal = MoveGroup.Goal()
         goal.request.group_name = 'ur_manipulator'
-        goal.request.num_planning_attempts = 10
-        goal.request.allowed_planning_time = 5.0
-        goal.request.max_velocity_scaling_factor = 0.1
-        goal.request.max_acceleration_scaling_factor = 0.1
+        goal.request.num_planning_attempts = 5
+        goal.request.allowed_planning_time = 2.0
+        goal.request.max_velocity_scaling_factor = 0.5
+        goal.request.max_acceleration_scaling_factor = 0.5
         goal.request.planner_id = "RRTConnectkConfigDefault"
         
         # Create joint constraints
@@ -255,7 +255,7 @@ class CartesianPathFollower(Node):
             self.get_logger().error(f'✗ Failed to reach start configuration: {result.error_code.val}')
             return False
 
-    def retime_trajectory(self, trajectory, speed=0.05):
+    def retime_trajectory(self, trajectory, speed=0.1):
         """
         Retime the trajectory to enforce a constant Cartesian speed.
         Uses FK to calculate actual distances.
