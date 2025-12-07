@@ -355,7 +355,9 @@ class PathPlanner(Node):
         # Publish on-surface flags
         if hasattr(self, 'continuous_on_surface'):
             on_surface_msg = ByteMultiArray()
-            on_surface_msg.data = self.continuous_on_surface.astype(np.uint8).tolist()
+            # rosidl_generator_py expects a Python `bytes` object for ByteMultiArray.data
+            # Convert the uint8 array (0/1 flags) to bytes so the C extension can accept it.
+            on_surface_msg.data = bytes(self.continuous_on_surface.astype(np.uint8).tolist())
             self.on_surface_pub.publish(on_surface_msg)
             self.get_logger().info('Published on-surface flags')
         else:
