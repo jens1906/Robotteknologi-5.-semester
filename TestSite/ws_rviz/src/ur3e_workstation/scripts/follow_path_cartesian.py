@@ -7,21 +7,23 @@ Executes the path exactly as provided without iteration or modification.
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Pose, PoseArray
-from moveit_msgs.srv import GetCartesianPath
+from moveit_msgs.srv import GetCartesianPath, GetPositionIK, GetPositionFK
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
-from moveit_msgs.msg import Constraints, PositionConstraint, OrientationConstraint, BoundingVolume
+from moveit_msgs.msg import Constraints, PositionConstraint, OrientationConstraint, BoundingVolume, RobotState, PositionIKRequest, JointConstraint
 from shape_msgs.msg import SolidPrimitive
+from sensor_msgs.msg import JointState
 from rclpy.action import ActionClient
 import sys
 import time
 import numpy as np
+import math
 
 class CartesianPathFollower(Node):
     def __init__(self):
         super().__init__('cartesian_path_follower')
         
         self.get_logger().info('='*60)
-        self.get_logger().info('Cartesian Path Follower - Single Run Mode')
+        self.get_logger().info('Cartesian Path Follower - Continuous Mode')
         self.get_logger().info('='*60)
         
         self.waypoints = []
@@ -33,8 +35,28 @@ class CartesianPathFollower(Node):
             '/compute_cartesian_path'
         )
         
+        # Service client for IK
+        self.ik_client = self.create_client(
+            GetPositionIK,
+            '/compute_ik'
+        )
+
+        # Service client for FK
+        self.fk_client = self.create_client(
+            GetPositionFK,
+            '/compute_fk'
+        )
+        
         if not self.cartesian_path_client.wait_for_service(timeout_sec=10.0):
             self.get_logger().error('Cartesian path service not available!')
+            sys.exit(1)
+            
+        if not self.ik_client.wait_for_service(timeout_sec=10.0):
+            self.get_logger().error('IK service not available!')
+            sys.exit(1)
+
+        if not self.fk_client.wait_for_service(timeout_sec=10.0):
+            self.get_logger().error('FK service not available!')
             sys.exit(1)
         
         # Action client for trajectory execution
@@ -67,7 +89,19 @@ class CartesianPathFollower(Node):
             10
         )
         
+        # Subscribe to joint states for IK seeding
+        self.joint_state_sub = self.create_subscription(
+            JointState,
+            '/joint_states',
+            self.joint_state_callback,
+            10
+        )
+        self.current_joint_state = None
+        
         self.get_logger().info('Waiting for path on /tool_orientation/path...')
+
+    def joint_state_callback(self, msg):
+        self.current_joint_state = msg
 
     def path_callback(self, msg):
         if self.path_received:
@@ -130,49 +164,76 @@ class CartesianPathFollower(Node):
             
         return corrected_poses
 
-    def move_to_start_pose(self, pose):
-        """Move to the first waypoint using standard PTP planning."""
-        self.get_logger().info('Moving to start pose...')
+    def get_ik(self, pose):
+        """Get IK solution for a pose, seeded with current state."""
+        req = GetPositionIK.Request()
+        req.ik_request.group_name = 'ur_manipulator'
+        req.ik_request.pose_stamped.header.frame_id = 'world'
+        req.ik_request.pose_stamped.pose = pose
+        req.ik_request.avoid_collisions = True
+        
+        # Seed with current state if available
+        if self.current_joint_state:
+            req.ik_request.robot_state.joint_state = self.current_joint_state
+        
+        future = self.ik_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        
+        if future.done():
+            result = future.result()
+            if result.error_code.val == 1:
+                return result.solution
+        return None
+
+    def get_fk(self, joint_state):
+        """Get FK solution for a joint state."""
+        req = GetPositionFK.Request()
+        req.header.frame_id = 'world'
+        req.fk_link_names = ['tool0']
+        req.robot_state.joint_state = joint_state
+        
+        future = self.fk_client.call_async(req)
+        rclpy.spin_until_future_complete(self, future)
+        
+        if future.done():
+            result = future.result()
+            if result.error_code.val == 1:
+                return result.pose_stamped[0].pose
+        return None
+
+    def move_to_joint_state(self, joint_state):
+        """Move to a specific joint configuration using MoveGroup."""
+        self.get_logger().info('Moving to start configuration...')
         
         goal = MoveGroup.Goal()
         goal.request.group_name = 'ur_manipulator'
-        goal.request.num_planning_attempts = 20
-        goal.request.allowed_planning_time = 10.0
+        goal.request.num_planning_attempts = 10
+        goal.request.allowed_planning_time = 5.0
         goal.request.max_velocity_scaling_factor = 0.1
         goal.request.max_acceleration_scaling_factor = 0.1
         goal.request.planner_id = "RRTConnectkConfigDefault"
         
-        # Create constraints
+        # Create joint constraints
         c = Constraints()
+        for i, name in enumerate(joint_state.name):
+            jc = PositionConstraint() # Wait, we need JointConstraint? No, MoveIt uses JointConstraint
+            # But msg definition: JointConstraint
+            pass 
         
-        # Position constraint
-        pc = PositionConstraint()
-        pc.header.frame_id = 'world'
-        pc.link_name = 'tool0'
-        pc.weight = 1.0
-        bv = BoundingVolume()
-        sp = SolidPrimitive()
-        sp.type = SolidPrimitive.SPHERE
-        sp.dimensions = [0.01] # 1cm tolerance
-        bv.primitives.append(sp)
-        p_pose = Pose()
-        p_pose.position = pose.position
-        p_pose.orientation.w = 1.0
-        bv.primitive_poses.append(p_pose)
-        pc.constraint_region = bv
-        c.position_constraints.append(pc)
+        # Actually, simpler to just set goal_constraints with joint constraints
+        # But constructing JointConstraint manually is tedious.
+        # Let's use the 'joint_constraints' field of Constraints
+        from moveit_msgs.msg import JointConstraint
         
-        # Orientation constraint
-        oc = OrientationConstraint()
-        oc.header.frame_id = 'world'
-        oc.link_name = 'tool0'
-        oc.orientation = pose.orientation
-        oc.absolute_x_axis_tolerance = 0.1
-        oc.absolute_y_axis_tolerance = 0.1
-        oc.absolute_z_axis_tolerance = 0.1
-        oc.weight = 1.0
-        c.orientation_constraints.append(oc)
-        
+        for i, name in enumerate(joint_state.name):
+            jc = JointConstraint()
+            jc.joint_name = name
+            jc.position = joint_state.position[i]
+            jc.tolerance_above = 0.001
+            jc.tolerance_below = 0.001
+            jc.weight = 1.0
+            c.joint_constraints.append(jc)
+            
         goal.request.goal_constraints.append(c)
         
         future = self.move_group_client.send_goal_async(goal)
@@ -188,11 +249,106 @@ class CartesianPathFollower(Node):
         
         result = res_future.result().result
         if result.error_code.val == 1: # SUCCESS
-            self.get_logger().info('✓ Reached start pose')
+            self.get_logger().info('✓ Reached start configuration')
             return True
         else:
-            self.get_logger().error(f'✗ Failed to reach start pose: {result.error_code.val}')
+            self.get_logger().error(f'✗ Failed to reach start configuration: {result.error_code.val}')
             return False
+
+    def retime_trajectory(self, trajectory, speed=0.05):
+        """
+        Retime the trajectory to enforce a constant Cartesian speed.
+        Uses FK to calculate actual distances.
+        Filters points that are too close to ensure smooth execution.
+        Enforces joint velocity limits to prevent snapping.
+        """
+        points = trajectory.joint_trajectory.points
+        if not points:
+            return
+            
+        self.get_logger().info(f'Retiming {len(points)} points for constant speed {speed} m/s...')
+        
+        new_points = []
+        
+        # Start with the first point
+        points[0].time_from_start.sec = 0
+        points[0].time_from_start.nanosec = 0
+        points[0].velocities = []
+        points[0].accelerations = []
+        points[0].effort = []
+        
+        new_points.append(points[0])
+        
+        # Get FK for first point
+        js = JointState()
+        js.name = trajectory.joint_trajectory.joint_names
+        js.position = points[0].positions
+        prev_pose = self.get_fk(js)
+        
+        if not prev_pose:
+            self.get_logger().error('Failed to compute FK for start point')
+            return
+
+        current_time = 0.0
+        min_dt = 0.01 # Minimum time step (100Hz)
+        max_joint_speed = 0.5 # rad/s limit to prevent snapping
+        
+        for i in range(1, len(points)):
+            point = points[i]
+            
+            # Get FK for current point
+            js.position = point.positions
+            curr_pose = self.get_fk(js)
+            
+            if not curr_pose:
+                continue
+                
+            # Calculate Cartesian distance
+            dx = curr_pose.position.x - prev_pose.position.x
+            dy = curr_pose.position.y - prev_pose.position.y
+            dz = curr_pose.position.z - prev_pose.position.z
+            dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+            
+            # Calculate required time for Cartesian speed
+            dt_cart = dist / speed
+            
+            # Calculate required time for Joint speed
+            prev_joints = new_points[-1].positions
+            curr_joints = point.positions
+            max_joint_diff = 0.0
+            for j in range(len(curr_joints)):
+                diff = abs(curr_joints[j] - prev_joints[j])
+                if diff > max_joint_diff:
+                    max_joint_diff = diff
+            
+            dt_joint = max_joint_diff / max_joint_speed
+            
+            # Use the largest required time
+            dt = max(dt_cart, dt_joint)
+            
+            # If the point is too close (resulting in tiny dt), skip it to maintain smoothness
+            # unless it's the last point
+            if dt < min_dt and i < len(points) - 1:
+                continue
+                
+            # If we kept it, update time
+            current_time += dt
+            
+            point.time_from_start.sec = int(current_time)
+            point.time_from_start.nanosec = int((current_time - int(current_time)) * 1e9)
+            
+            # Clear dynamics
+            point.velocities = []
+            point.accelerations = []
+            point.effort = []
+            
+            new_points.append(point)
+            prev_pose = curr_pose
+            
+        self.get_logger().info(f'Reduced points from {len(points)} to {len(new_points)}')
+        self.get_logger().info(f'Total trajectory time: {current_time:.2f}s')
+        
+        trajectory.joint_trajectory.points = new_points
 
     def execute_path(self):
         if not self.waypoints:
@@ -204,136 +360,74 @@ class CartesianPathFollower(Node):
         all_waypoints = self.ensure_continuous_orientation(self.waypoints)
         total_points = len(all_waypoints)
         
-        # Track success for each point
-        # 0: Not attempted/Unknown, 1: Success, 2: Failed
-        point_status = [0] * total_points
+        # 1. Find a valid start configuration (IK)
+        self.get_logger().info('Computing IK for start pose...')
+        start_robot_state = self.get_ik(all_waypoints[0])
         
-        # 1. Move to start
-        if not self.move_to_start_pose(all_waypoints[0]):
-            self.get_logger().error('Aborting: Could not reach start point')
-            # Mark all as failed
-            point_status = [2] * total_points
-            self.print_report(point_status)
+        if not start_robot_state:
+            self.get_logger().error('Could not find IK solution for start pose!')
             return
             
-        # Mark first point as success (we are there)
-        point_status[0] = 1
-        current_index = 0 # The index of the waypoint we are currently AT
+        self.get_logger().info('✓ Found valid start configuration')
         
-        while current_index < total_points - 1:
-            # We are at all_waypoints[current_index]
-            # We want to go to the rest
-            remaining_waypoints = all_waypoints[current_index:] # Includes current as start
+        # 2. Plan the ENTIRE path from this start configuration
+        self.get_logger().info(f'Planning continuous path for {total_points} points...')
+        
+        request = GetCartesianPath.Request()
+        request.header.frame_id = 'world'
+        request.header.stamp = self.get_clock().now().to_msg()
+        request.group_name = 'ur_manipulator'
+        request.link_name = 'tool0'
+        request.start_state = start_robot_state # Seed with our found IK
+        request.waypoints = all_waypoints # Plan through ALL points
+        request.max_step = 0.01  # 1cm interpolation
+        request.jump_threshold = 0.0 
+        request.avoid_collisions = True
+        
+        future = self.cartesian_path_client.call_async(request)
+        rclpy.spin_until_future_complete(self, future)
+        
+        if future.done():
+            response = future.result()
+            fraction = response.fraction
             
-            self.get_logger().info(f'Planning from point {current_index+1}/{total_points}...')
-            
-            # Try Cartesian Path first
-            request = GetCartesianPath.Request()
-            request.header.frame_id = 'world'
-            request.header.stamp = self.get_clock().now().to_msg()
-            request.group_name = 'ur_manipulator'
-            request.link_name = 'tool0'
-            request.waypoints = remaining_waypoints
-            request.max_step = 0.05  # 5cm interpolation
-            request.jump_threshold = 1.5  # Prevent large joint jumps (approx 85 degrees)
-            request.avoid_collisions = True
-            
-            future = self.cartesian_path_client.call_async(request)
-            rclpy.spin_until_future_complete(self, future)
-            
-            if future.done():
-                response = future.result()
-                fraction = response.fraction
-                
-                # Calculate how many NEW points we can reach
-                # fraction is against len(remaining_waypoints)
-                # If fraction = 1.0, we reached all.
-                # If fraction = 0.0, we didn't move.
-                
-                # Number of segments in remaining_waypoints is len - 1
-                # But GetCartesianPath fraction logic is a bit fuzzy.
-                # Usually: points_planned = fraction * len(remaining_waypoints)
-                
-                points_planned = int(fraction * len(remaining_waypoints))
-                
-                # If we have a valid trajectory, execute it
-                if points_planned > 0 and response.solution.joint_trajectory.points:
-                    self.get_logger().info(f'Cartesian path found for {points_planned} points (fraction: {fraction:.2f})')
-                    
-                    goal = ExecuteTrajectory.Goal()
-                    goal.trajectory = response.solution
-                    
-                    goal_future = self.execute_trajectory_client.send_goal_async(goal)
-                    rclpy.spin_until_future_complete(self, goal_future)
-                    
-                    if goal_future.done() and goal_future.result().accepted:
-                        handle = goal_future.result()
-                        res_future = handle.get_result_async()
-                        rclpy.spin_until_future_complete(self, res_future)
-                        
-                        if res_future.result().result.error_code.val == 1:
-                            # Execution successful
-                            # Mark points as success
-                            for i in range(points_planned):
-                                idx = current_index + i
-                                if idx < total_points:
-                                    point_status[idx] = 1
-                            
-                            current_index += points_planned
-                            # If we reached the end, break
-                            if current_index >= total_points - 1:
-                                break
-                            
-                            # If we are here, it means we executed a PARTIAL path.
-                            # The next point (current_index + 1) is where it failed.
-                            # We will fall through to the fallback logic.
-                        else:
-                            self.get_logger().error('Cartesian execution failed')
-                else:
-                    self.get_logger().warn('Cartesian path failed to make progress')
-
-            # If we haven't finished, we are stuck at current_index.
-            # The next target is current_index + 1
-            next_target_idx = current_index + 1
-            if next_target_idx >= total_points:
-                break
-                
-            self.get_logger().info(f'⚠ Cartesian path stopped at point {next_target_idx+1}. Attempting PTP fallback...')
-            
-            # Fallback: Try PTP to next point
-            target_pose = all_waypoints[next_target_idx]
-            if self.move_to_pose_ptp(target_pose):
-                self.get_logger().info(f'✓ PTP recovery successful to point {next_target_idx+1}')
-                point_status[next_target_idx] = 1
-                current_index = next_target_idx
+            if fraction < 1.0:
+                self.get_logger().error(f'✗ Path planning failed! Only computed {fraction*100:.1f}% of the path.')
+                self.get_logger().error('The start configuration might not allow the full path.')
+                return
             else:
-                self.get_logger().error(f'✗ PTP recovery failed for point {next_target_idx+1}. Skipping...')
-                point_status[next_target_idx] = 2 # Failed
-                # We are still at current_index physically, but we give up on next_target_idx
-                # We advance current_index logically to try the one after
-                current_index = next_target_idx 
-                # Note: We are physically at 'current_index - 1' (or wherever we were), 
-                # but we set current_index to the failed one so the loop tries from there+1.
-                # Actually, if we skip, we might be far away. 
-                # The next Cartesian plan will start from 'current_index' (which is the failed point).
-                # But we are NOT there.
-                # GetCartesianPath uses current robot state as start.
-                # So if we pass `waypoints = [failed_point, next_point, ...]`, it will try to plan from CURRENT pose to failed_point.
-                # We just tried that and it failed.
-                
-                # So we should try to plan from CURRENT pose to `next_point` (skipping failed_point).
-                # So we increment current_index, but we don't add it to the waypoints list for the next Cartesian attempt?
-                # Wait, `remaining_waypoints = all_waypoints[current_index:]`
-                # If current_index is the failed point, we include it.
-                # We want to EXCLUDE it.
-                
-                # Let's just increment current_index. The next loop will try `all_waypoints[current_index:]`.
-                # Since we are NOT at `all_waypoints[current_index]`, the Cartesian planner will try to connect 
-                # Current Robot Pose -> all_waypoints[current_index].
-                # This is effectively trying to go to the point after the failed one.
-                pass
+                self.get_logger().info('✓ Computed 100% of the path')
 
-        self.print_report(point_status)
+            if response.solution.joint_trajectory.points:
+                # 3. Move to the start configuration
+                if not self.move_to_joint_state(start_robot_state.joint_state):
+                    self.get_logger().error('Aborting: Could not reach start configuration')
+                    return
+                
+                # 4. Retime for constant speed
+                # CHANGE SPEED HERE: 0.05 m/s is a safe, visible speed
+                self.retime_trajectory(response.solution, speed=0.05)
+                
+                goal = ExecuteTrajectory.Goal()
+                goal.trajectory = response.solution
+                
+                self.get_logger().info('Executing continuous path...')
+                goal_future = self.execute_trajectory_client.send_goal_async(goal)
+                rclpy.spin_until_future_complete(self, goal_future)
+                
+                if goal_future.done() and goal_future.result().accepted:
+                    handle = goal_future.result()
+                    res_future = handle.get_result_async()
+                    rclpy.spin_until_future_complete(self, res_future)
+                    
+                    if res_future.result().result.error_code.val == 1:
+                        self.get_logger().info('✓ Execution complete')
+                    else:
+                        self.get_logger().error('✗ Execution failed')
+            else:
+                self.get_logger().error('No trajectory generated')
+
+
 
     def move_to_pose_ptp(self, pose):
         """Move to a pose using MoveGroup (PTP)."""
