@@ -48,9 +48,13 @@ class CorrosionDetector(Node):
         # Hand-Eye Calibration Matrix (Camera to End Effector)
         # This transforms points from camera frame to robot end-effector frame
         self.T_camera_to_ee = np.array([
-            [-0.996, -0.088, -0.009, 39.945],
-            [ 0.088, -0.996, -0.005, 47.026],
-            [-0.008, -0.005,  1.000, -6.355],
+            #[-0.996, -0.088, -0.009, 39.945],
+            #[ 0.088, -0.996, -0.005, 47.026],
+            #[-0.008, -0.005,  1.000, -6.355],
+            #[ 0.000,  0.000,  0.000,  1.000]
+            [ -1.000, 0.000, 0.000, 39.945],
+            [ 0.000, -1.000, 0.000, 47.026],
+            [ 0.000, 0.000, 1.000, -6.355],
             [ 0.000,  0.000,  0.000,  1.000]
         ])
         if printlogger:
@@ -62,7 +66,7 @@ class CorrosionDetector(Node):
         T_world_to_base = np.array([
             [-1.000, -0.000,  0.000,  0.200],
             [-0.000,  0.000, -1.000,  0.218],
-            [-0.000, -1.000, -0.000,  -0.350],
+            [-0.000, -1.000, -0.000,  -0.250],
             [ 0.000,  0.000,  0.000,  1.000]
         ])
         
@@ -543,9 +547,21 @@ class CorrosionDetector(Node):
         # Combine transformations: Camera -> End-effector -> Base
         if self.combined_transformation_of_ur is not None:
             # Combined transformation matrix
+            
+
 
             T_total = self.combined_transformation_of_ur @ self.T_camera_to_ee
-            
+            self.get_logger().info('Using combined total transformation for point transformation')
+            self.get_logger().info(f'Total Transformation Matrix:\n{T_total}')
+            self.get_logger().info(f'Translation (mm): [{T_total[0,3]:.1f}, {T_total[1,3]:.1f}, {T_total[2,3]:.1f}] mm')
+            self.get_logger().info(f'Rotation Matrix:\n{T_total[0:3,0:3]}')
+            self.get_logger().info('Combined Transformation Matrix computed successfully')
+            self.get_logger().info('Using ur transformation for point transformation')
+            self.get_logger().info(f'Translation (mm): [{self.combined_transformation_of_ur[0,3]:.1f}, {self.combined_transformation_of_ur[1,3]:.1f}, {self.combined_transformation_of_ur[2,3]:.1f}] mm')
+            self.get_logger().info(f'Rotation Matrix:\n{self.combined_transformation_of_ur[0:3,0:3]}')
+            self.get_logger().info('Combined Transformation Matrix computed successfully')
+
+
             # Apply combined transformation in one step: T_total @ points^T -> (4, N)
             xyz_base_homogeneous = (T_total @ xyz_homogeneous.T).T
             

@@ -54,14 +54,18 @@ class PathPlanner(Node):
             super().__init__('path_planner_node') # Initialize ROS2 node
             self.declare_parameter('point_spacing', 10)
             self.declare_parameter('n_bezier', 50)
+            # Option to disable on-surface checking and force all flags to True
+            self.declare_parameter('disable_onsurface_check', True)
 
             # Load parameters from ROS if not provided
             self.point_spacing = point_spacing if point_spacing is not None else self.get_parameter('point_spacing').value
             self.n_bezier = n_bezier if n_bezier is not None else self.get_parameter('n_bezier').value
+            self.disable_onsurface_check = self.get_parameter('disable_onsurface_check').value
         else:
             # Test mode - use provided values or defaults
             self.point_spacing = point_spacing if point_spacing is not None else 1
             self.n_bezier = n_bezier if n_bezier is not None else 50
+            self.disable_onsurface_check = False
         
         self.tau = np.linspace(0, 1, self.n_bezier)
 
@@ -355,9 +359,13 @@ class PathPlanner(Node):
         # Publish on-surface flags
         if hasattr(self, 'continuous_on_surface'):
             on_surface_msg = ByteMultiArray()
-            # rosidl_generator_py expects a Python `bytes` object for ByteMultiArray.data
-            # Convert the uint8 array (0/1 flags) to bytes so the C extension can accept it.
-            on_surface_msg.data = bytes(self.continuous_on_surface.astype(np.uint8).tolist())
+            length = len(self.continuous_on_surface)
+            # If disable_onsurface_check is True, force all flags to True (1)
+            if getattr(self, 'disable_onsurface_check', False):
+                on_surface_msg.data = bytes([1] * length)
+            else:
+                on_surface_msg.data = bytes(self.continuous_on_surface.astype(np.uint8).tolist())
+
             self.on_surface_pub.publish(on_surface_msg)
             self.get_logger().info('Published on-surface flags')
         else:
