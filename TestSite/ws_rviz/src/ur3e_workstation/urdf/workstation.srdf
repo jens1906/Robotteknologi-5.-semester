@@ -8,24 +8,6 @@
     <!-- Define end effector -->
     <end_effector name="tool0" parent_link="tool0" group="ur_manipulator"/>
     
-    <!-- Disable collisions between workstation structure parts and robot base -->
-    <disable_collisions link1="world" link2="bordplade" reason="Adjacent"/>
-    <disable_collisions link1="bordplade" link2="mount" reason="Adjacent"/>
-    <disable_collisions link1="mount" link2="base_link" reason="Adjacent"/>
-    <disable_collisions link1="mount" link2="base_link_inertia" reason="Adjacent"/>
-    <disable_collisions link1="mount" link2="shoulder_link" reason="Adjacent"/>
-    
-    <!-- Disable collisions between table/mount and upper robot links (they're far apart) -->
-    <disable_collisions link1="bordplade" link2="base_link" reason="Never"/>
-    <disable_collisions link1="bordplade" link2="base_link_inertia" reason="Never"/>
-    <disable_collisions link1="bordplade" link2="shoulder_link" reason="Never"/>
-    <disable_collisions link1="bordplade" link2="upper_arm_link" reason="Never"/>
-    <disable_collisions link1="mount" link2="upper_arm_link" reason="Default"/>
-    
-    <!-- ENABLE collisions between test plate and robot - DO NOT DISABLE -->
-    <!-- The robot should NOT pass through the test plate! -->
-    <!-- Removed all testpladekurve collision disables to enable proper collision detection -->
-    
     <!-- Disable collisions between end effector tool parts (camera holder and camera) -->
     <disable_collisions link1="tool0" link2="realsense_holder" reason="Adjacent"/>
     <disable_collisions link1="tool0" link2="rsd435" reason="Adjacent"/>

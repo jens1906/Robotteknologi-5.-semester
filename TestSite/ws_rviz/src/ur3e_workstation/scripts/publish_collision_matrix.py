@@ -49,7 +49,6 @@ class CollisionMatrixPublisher(Node):
             ('bordplade', 'base_link_inertia'),
             ('bordplade', 'shoulder_link'),
             ('bordplade', 'upper_arm_link'),
-            ('mount', 'upper_arm_link'),
             ('testpladekurve', 'base_link'),
             ('testpladekurve', 'base_link_inertia'),
             ('testpladekurve', 'shoulder_link'),
@@ -66,6 +65,9 @@ class CollisionMatrixPublisher(Node):
             ('wrist_1_link', 'wrist_2_link'),
             ('wrist_2_link', 'wrist_3_link'),
             ('wrist_3_link', 'tool0'),
+            # Add pairs that were causing issues
+            ('bordplade', 'forearm_link'),
+            ('bordplade', 'wrist_1_link'),
         ]
         
         # Build the collision matrix

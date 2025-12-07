@@ -36,6 +36,7 @@ install(PROGRAMS
   scripts/point_visualizer.py
   scripts/single_point_publisher.py
   scripts/ur5_moveit_client.py
+  scripts/publish_environment.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

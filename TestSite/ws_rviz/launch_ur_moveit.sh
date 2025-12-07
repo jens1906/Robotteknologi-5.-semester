@@ -76,18 +76,20 @@ echo "/robot_description received."
 # 4) Kick off collision matrix publisher a bit later so MoveIt is ready
 (
 	sleep 8
+	echo "Publishing environment collision objects (background)..."
+	ros2 run ur3e_workstation publish_environment.py \
+		>/tmp/publish_environment.log 2>&1
+	
 	echo "Publishing custom collision matrix (background)..."
 	ros2 run ur3e_workstation publish_collision_matrix.py \
 		>/tmp/publish_collision_matrix.log 2>&1 & echo $! >/tmp/publish_collision_matrix.pid
 ) &
 
-# 5) Launch the stable, standard MoveIt launcher with RViz
-echo "Starting standard MoveIt launcher (foreground)..."
+# 5) Launch the custom MoveIt launcher with RViz (using correct SRDF)
+echo "Starting custom MoveIt launcher (foreground)..."
 set +e
-ros2 launch ur_moveit_config ur_moveit.launch.py \
+ros2 launch ur3e_workstation custom_moveit.launch.py \
     ur_type:=$UR_TYPE \
-    launch_rviz:=true \
-    launch_servo:=$LAUNCH_SERVO \
     use_mock_hardware:=$USE_MOCK_HARDWARE "$@"
 ret=$?
 set -e
