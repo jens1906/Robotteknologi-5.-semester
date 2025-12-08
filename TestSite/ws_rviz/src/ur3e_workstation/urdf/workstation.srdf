@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <robot name="ur3e_workstation">
+    <!-- Virtual joint to connect the robot to the world -->
+    <virtual_joint name="virtual_joint" type="fixed" parent_frame="world" child_link="base_link"/>
+
     <!-- Define the planning group using the UR manipulator group -->
     <group name="ur_manipulator">
         <chain base_link="base_link" tip_link="tool0"/>

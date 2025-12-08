@@ -85,6 +85,14 @@ echo "/robot_description received."
 		>/tmp/publish_collision_matrix.log 2>&1 & echo $! >/tmp/publish_collision_matrix.pid
 ) &
 
+# 4.5) Ensure the trajectory controller is active (it often starts inactive in mock mode)
+(
+	sleep 15
+	echo "Ensuring scaled_joint_trajectory_controller is active..."
+	ros2 control set_controller_state scaled_joint_trajectory_controller active >/dev/null 2>&1 || true
+) &
+_pids+=($!)
+
 # 5) Launch the custom MoveIt launcher with RViz (using correct SRDF)
 echo "Starting custom MoveIt launcher (foreground)..."
 set +e
