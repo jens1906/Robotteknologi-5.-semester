@@ -1,0 +1,6 @@
+Mental Demand: 15
+Physical Demand: 0
+Temporal Demand: 15
+Performance: 0
+Effort: 0
+Frustration: 25
