@@ -577,9 +577,45 @@ if ROS2_AVAILABLE:
             
             self.trajectory_pub.publish(trajectory_msg)
             self.get_logger().info(f'Published {len(adjusted_positions)} waypoints with quaternions')
-            
+            self.save_posearray_to_file(trajectory_msg)
+
+
             return adjusted_positions, orientations
 
+        def save_posearray_to_file(self, pose_array_msg):
+            """Save PoseArray to a YAML file that can be replayed with ros2 topic pub."""
+            from pathlib import Path
+
+            # Create output directory if it doesn't exist
+            output_dir = Path.home() / 'Documents' / 'GitHub' / 'Robotteknologi-5.-semester' / 'saved_paths'
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create filename with timestamp
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            yaml_file = output_dir / f'posearray_{timestamp}.yaml'
+
+            # Save as YAML (ROS2 CLI friendly format)
+            with open(yaml_file, 'w') as f:
+                f.write("header:\n")
+                f.write(f"  frame_id: '{pose_array_msg.header.frame_id}'\n")
+                f.write("poses:\n")
+                for pose in pose_array_msg.poses:
+                    f.write("  - position:\n")
+                    f.write(f"      x: {pose.position.x}\n")
+                    f.write(f"      y: {pose.position.y}\n")
+                    f.write(f"      z: {pose.position.z}\n")
+                    f.write("    orientation:\n")
+                    f.write(f"      x: {pose.orientation.x}\n")
+                    f.write(f"      y: {pose.orientation.y}\n")
+                    f.write(f"      z: {pose.orientation.z}\n")
+                    f.write(f"      w: {pose.orientation.w}\n")
+
+            self.get_logger().info('✓ Saved PoseArray to:')
+            self.get_logger().info(f'  YAML: {yaml_file}')
+            self.get_logger().info('')
+            self.get_logger().info('To replay this path, run:')
+            self.get_logger().info(f"  ros2 topic pub --once /tool_orientation/path geometry_msgs/msg/PoseArray \"$(cat {yaml_file})\"")
 
     def main(args=None):
         rclpy.init(args=args)

@@ -53,7 +53,7 @@ class PathPlanner(Node):
         if not test_active:
             super().__init__('path_planner_node') # Initialize ROS2 node
             self.declare_parameter('point_spacing', 10)
-            self.declare_parameter('n_bezier', 50)
+            self.declare_parameter('n_bezier', 25)
             # Option to disable on-surface checking and force all flags to True
             self.declare_parameter('disable_onsurface_check', True)
 
@@ -333,7 +333,7 @@ class PathPlanner(Node):
                             next_start
                         )
                         path.append(bezier_curve[1:-1])  # Exclude endpoints to avoid duplicates
-                        on_surface.extend([False] * len(bezier_curve)-2)  # Bézier segments are off-surface
+                        on_surface.extend([False] * (len(bezier_curve) - 2))  # Bézier segments are off-surface
 
             # Store on_surface flags for use in publish_path
             self.continuous_on_surface = np.array(on_surface)
