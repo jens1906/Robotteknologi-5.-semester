@@ -1,6 +1,0 @@
-Mental Demand: 50
-Physical Demand: 50
-Temporal Demand: 50
-Performance: 50
-Effort: 50
-Frustration: 50

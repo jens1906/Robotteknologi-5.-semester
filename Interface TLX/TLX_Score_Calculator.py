@@ -72,28 +72,25 @@ def compute_overall_workload(weights: Dict[str, float], ratings: Dict[str, float
     total_w = 0.0
     total_wr = 0.0
     for key in DIMENSION_KEYS:
-        w = weights.get(key, 0.0)
-        r = ratings.get(key, 0.0)
+        # Use direct lookups to raise KeyError when a key is missing
+        w = weights[key]
+        r = ratings[key]
         p = w * r
         products[key] = p
         total_w += w
         total_wr += p
-    if total_w == 0.0:
-        raise ZeroDivisionError("Sum of weights is zero; cannot compute workload.")
+    if total_w != 15.0:
+        raise ZeroDivisionError("Sum of weights is not 15; cannot compute workload.")
     return total_wr / total_w, products
 
 
-def main():
+def main(w: str, r: str):
     # Default paths relative to this script directory
     base_dir = os.path.dirname(__file__)
-    weights_path = os.path.join(base_dir, "tlx_weights.txt")
-    ratings_path = os.path.join(base_dir, "tlx_ratings.txt")
+    weights_path = os.path.join(base_dir, w)
+    ratings_path = os.path.join(base_dir, r)
 
-    # Allow optional CLI args: weights_path ratings_path
-    if len(sys.argv) >= 2:
-        weights_path = sys.argv[1]
-    if len(sys.argv) >= 3:
-        ratings_path = sys.argv[2]
+    # Paths are provided by caller; CLI is handled in __main__
 
     weights = parse_kv_file(weights_path)
     ratings = parse_kv_file(ratings_path)
@@ -107,10 +104,11 @@ def main():
     print("")
     to_label = lambda k: k.replace("_", " ").title()
     for key in DIMENSION_KEYS:
-        print(f"{to_label(key)}: weight={weights.get(key, 0.0)} rating={ratings.get(key, 0.0)} product={products.get(key, 0.0)}")
+        print(f"{to_label(key)}: weight={weights[key]} rating={ratings[key]} product={products[key]}")
     print("")
     print(f"Overall_Workload = sum(weights*ratings)/sum(weights) = {overall}")
 
 
 if __name__ == "__main__":
-    main()
+    for s in ("s1", "s2", "s3", "s4"):
+        main(f"tlx_weights_{s}.txt", f"tlx_ratings_{s}.txt")
