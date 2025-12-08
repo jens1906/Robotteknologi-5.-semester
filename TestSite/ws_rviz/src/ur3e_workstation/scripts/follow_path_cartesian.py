@@ -17,6 +17,7 @@ import sys
 import time
 import numpy as np
 import math
+import random
 
 class CartesianPathFollower(Node):
     def __init__(self):
@@ -164,16 +165,18 @@ class CartesianPathFollower(Node):
             
         return corrected_poses
 
-    def get_ik(self, pose):
-        """Get IK solution for a pose, seeded with current state."""
+    def get_ik(self, pose, seed_joint_state=None):
+        """Get IK solution for a pose, optionally seeded."""
         req = GetPositionIK.Request()
         req.ik_request.group_name = 'ur_manipulator'
         req.ik_request.pose_stamped.header.frame_id = 'world'
         req.ik_request.pose_stamped.pose = pose
         req.ik_request.avoid_collisions = True
         
-        # Seed with current state if available
-        if self.current_joint_state:
+        # Seed
+        if seed_joint_state:
+            req.ik_request.robot_state.joint_state = seed_joint_state
+        elif self.current_joint_state:
             req.ik_request.robot_state.joint_state = self.current_joint_state
         
         future = self.ik_client.call_async(req)
@@ -360,72 +363,95 @@ class CartesianPathFollower(Node):
         all_waypoints = self.ensure_continuous_orientation(self.waypoints)
         total_points = len(all_waypoints)
         
-        # 1. Find a valid start configuration (IK)
-        self.get_logger().info('Computing IK for start pose...')
-        start_robot_state = self.get_ik(all_waypoints[0])
+        # Try to find a valid start configuration that allows the FULL path
+        # We will try multiple IK seeds if the first one fails
+        max_attempts = 30
+        best_solution = None
+        best_start_state = None
         
-        if not start_robot_state:
-            self.get_logger().error('Could not find IK solution for start pose!')
-            return
-            
-        self.get_logger().info('✓ Found valid start configuration')
+        self.get_logger().info(f'Attempting to find valid plan (max {max_attempts} attempts)...')
         
-        # 2. Plan the ENTIRE path from this start configuration
-        self.get_logger().info(f'Planning continuous path for {total_points} points...')
-        
-        request = GetCartesianPath.Request()
-        request.header.frame_id = 'world'
-        request.header.stamp = self.get_clock().now().to_msg()
-        request.group_name = 'ur_manipulator'
-        request.link_name = 'tool0'
-        request.start_state = start_robot_state # Seed with our found IK
-        request.waypoints = all_waypoints # Plan through ALL points
-        request.max_step = 0.01  # 1cm interpolation
-        request.jump_threshold = 0.0 
-        request.avoid_collisions = True
-        
-        future = self.cartesian_path_client.call_async(request)
-        rclpy.spin_until_future_complete(self, future)
-        
-        if future.done():
-            response = future.result()
-            fraction = response.fraction
-            
-            if fraction < 1.0:
-                self.get_logger().error(f'✗ Path planning failed! Only computed {fraction*100:.1f}% of the path.')
-                self.get_logger().error('The start configuration might not allow the full path.')
-                return
+        for attempt in range(max_attempts):
+            # Determine seed
+            seed = None
+            if attempt == 0:
+                # First attempt: use current state
+                seed = self.current_joint_state
             else:
-                self.get_logger().info('✓ Computed 100% of the path')
+                # Random seed to find alternative configurations (elbow up/down, etc)
+                seed = JointState()
+                if self.current_joint_state:
+                    seed.name = self.current_joint_state.name
+                else:
+                    seed.name = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 
+                               'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
+                
+                # Randomize positions within typical range
+                seed.position = [random.uniform(-3.14, 3.14) for _ in range(len(seed.name))]
 
-            if response.solution.joint_trajectory.points:
-                # 3. Move to the start configuration
-                if not self.move_to_joint_state(start_robot_state.joint_state):
-                    self.get_logger().error('Aborting: Could not reach start configuration')
-                    return
+            # 1. Find IK
+            start_robot_state = self.get_ik(all_waypoints[0], seed)
+            if not start_robot_state:
+                continue
                 
-                # 4. Retime for constant speed
-                # CHANGE SPEED HERE: 0.05 m/s is a safe, visible speed
-                self.retime_trajectory(response.solution, speed=0.05)
+            # 2. Plan Cartesian path from this start state
+            request = GetCartesianPath.Request()
+            request.header.frame_id = 'world'
+            request.header.stamp = self.get_clock().now().to_msg()
+            request.group_name = 'ur_manipulator'
+            request.link_name = 'tool0'
+            request.start_state = start_robot_state
+            request.waypoints = all_waypoints
+            request.max_step = 0.01
+            request.jump_threshold = 0.0 
+            request.avoid_collisions = True
+            
+            future = self.cartesian_path_client.call_async(request)
+            rclpy.spin_until_future_complete(self, future)
+            
+            if future.done():
+                response = future.result()
+                if response.fraction >= 1.0:
+                    self.get_logger().info(f'✓ Found valid plan on attempt {attempt+1}')
+                    best_solution = response.solution
+                    best_start_state = start_robot_state
+                    break
+                else:
+                    # Only log failures occasionally to avoid spam
+                    if attempt % 5 == 0:
+                        self.get_logger().info(f'Attempt {attempt+1}: Only computed {response.fraction*100:.1f}%')
+
+        if not best_solution:
+            self.get_logger().error('Could not find a valid path configuration after all attempts.')
+            return
+
+        if best_solution.joint_trajectory.points:
+            # 3. Move to the start configuration
+            if not self.move_to_joint_state(best_start_state.joint_state):
+                self.get_logger().error('Aborting: Could not reach start configuration')
+                return
+            
+            # 4. Retime for constant speed
+            self.retime_trajectory(best_solution, speed=0.05)
+            
+            goal = ExecuteTrajectory.Goal()
+            goal.trajectory = best_solution
+            
+            self.get_logger().info('Executing continuous path...')
+            goal_future = self.execute_trajectory_client.send_goal_async(goal)
+            rclpy.spin_until_future_complete(self, goal_future)
+            
+            if goal_future.done() and goal_future.result().accepted:
+                handle = goal_future.result()
+                res_future = handle.get_result_async()
+                rclpy.spin_until_future_complete(self, res_future)
                 
-                goal = ExecuteTrajectory.Goal()
-                goal.trajectory = response.solution
-                
-                self.get_logger().info('Executing continuous path...')
-                goal_future = self.execute_trajectory_client.send_goal_async(goal)
-                rclpy.spin_until_future_complete(self, goal_future)
-                
-                if goal_future.done() and goal_future.result().accepted:
-                    handle = goal_future.result()
-                    res_future = handle.get_result_async()
-                    rclpy.spin_until_future_complete(self, res_future)
-                    
-                    if res_future.result().result.error_code.val == 1:
-                        self.get_logger().info('✓ Execution complete')
-                    else:
-                        self.get_logger().error('✗ Execution failed')
-            else:
-                self.get_logger().error('No trajectory generated')
+                if res_future.result().result.error_code.val == 1:
+                    self.get_logger().info('✓ Execution complete')
+                else:
+                    self.get_logger().error('✗ Execution failed')
+        else:
+            self.get_logger().error('No trajectory generated')
 
 
 
