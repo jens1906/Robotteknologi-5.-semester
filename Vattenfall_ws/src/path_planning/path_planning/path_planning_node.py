@@ -53,7 +53,7 @@ class PathPlanner(Node):
         if not test_active:
             super().__init__('path_planner_node') # Initialize ROS2 node
             self.declare_parameter('point_spacing', 10)
-            self.declare_parameter('n_bezier', 25)
+            self.declare_parameter('n_bezier', 15)
             # Option to disable on-surface checking and force all flags to True
             self.declare_parameter('disable_onsurface_check', True)
 

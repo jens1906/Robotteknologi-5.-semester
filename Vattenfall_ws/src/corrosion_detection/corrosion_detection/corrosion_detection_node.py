@@ -66,7 +66,7 @@ class CorrosionDetector(Node):
         T_world_to_base = np.array([
             [-1.000, -0.000,  0.000,  0.200],
             [-0.000,  0.000, -1.000,  0.218],
-            [-0.000, -1.000, -0.000,  -0.350],
+            [-0.000, -1.000, -0.000,  -0.275],
             [ 0.000,  0.000,  0.000,  1.000]
         ])
         
@@ -104,7 +104,6 @@ class CorrosionDetector(Node):
         self.ui_emergency_stop_sub = self.create_subscription(Bool, '/ui/emergency_stop_pub', self.ui_emergency_stop_callback, 10)
         self.ui_terminate_pub_sub = self.create_subscription(Bool, '/ui/terminate_pub', self.ui_terminate_callback, 10)
         self.ui_connected_pub_sub = self.create_subscription(Bool, '/ui/connected_pub', self.ui_connected_callback, 10)
-        self.ROBODK_completion_notification = self.create_subscription(Bool, '/ROBODK/completion_notification_pub', self.ROBODK_completion_notification_callback, 10)        
         
         # Initialize tf2 buffer and listener for proper transform lookups
         self.tf_buffer = tf2_ros.Buffer()
@@ -200,16 +199,6 @@ class CorrosionDetector(Node):
     def ui_connected_callback(self, msg):
         self.ui_connected_state = msg.data
         if printlogger: self.get_logger().info(f'UI connected state updated: {self.ui_connected_state}')
-
-
-    def ROBODK_completion_notification_callback(self, msg):
-        if msg.data == True:
-            self.running_status = False
-            self.corrosion_accepted = False
-            if printlogger:
-               self.get_logger().info('ROBODK has completed the path, ready for new corrosion area')
-        if printlogger:
-           self.get_logger().info(f'State: corrosion_accepted={self.corrosion_accepted}, running_status={self.running_status}')
 
     def ui_emergency_stop_callback(self, msg):
         self.running_status = False
