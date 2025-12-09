@@ -7,6 +7,50 @@ set -euo pipefail
 # - Keep the robot base at world origin
 # - Optionally publish identity TF world->base if needed
 
+# --- Portability Checks ---
+
+# 1. Detect ROS Distro
+if [ -z "${ROS_DISTRO:-}" ]; then
+    # Try to find setup.bash in /opt/ros/
+    if [ -f "/opt/ros/jazzy/setup.bash" ]; then
+        ROS_DISTRO="jazzy"
+    elif [ -f "/opt/ros/humble/setup.bash" ]; then
+        ROS_DISTRO="humble"
+    elif [ -f "/opt/ros/rolling/setup.bash" ]; then
+        ROS_DISTRO="rolling"
+    elif [ -f "/opt/ros/iron/setup.bash" ]; then
+        ROS_DISTRO="iron"
+    else
+        echo "Error: Could not detect ROS_DISTRO. Please source your ROS installation manually."
+        exit 1
+    fi
+    echo "Detected ROS_DISTRO: $ROS_DISTRO"
+    set +u
+    source "/opt/ros/$ROS_DISTRO/setup.bash"
+    set -u
+fi
+
+# 2. Check for Python dependencies (trimesh is required for publish_environment.py)
+if ! python3 -c "import trimesh" >/dev/null 2>&1; then
+    echo "Error: Python module 'trimesh' is missing."
+    echo "Please install it using: pip3 install trimesh"
+    echo "Or: sudo apt install python3-trimesh"
+    exit 1
+fi
+
+# 3. Check for required ROS packages
+if ! ros2 pkg list | grep -q "ur_robot_driver"; then
+    echo "Error: Package 'ur_robot_driver' not found."
+    echo "Please install it: sudo apt install ros-$ROS_DISTRO-ur-robot-driver"
+    exit 1
+fi
+
+if ! ros2 pkg list | grep -q "ur_moveit_config"; then
+    echo "Error: Package 'ur_moveit_config' not found."
+    echo "Please install it: sudo apt install ros-$ROS_DISTRO-ur-moveit-config"
+    exit 1
+fi
+
 # Configurable defaults
 UR_TYPE=${UR_TYPE:-ur3e}
 USE_MOCK_HARDWARE=${USE_MOCK_HARDWARE:-true}
@@ -21,11 +65,12 @@ BASE_AT_WORLD_ORIGIN=${BASE_AT_WORLD_ORIGIN:-0}
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
-# Source ROS 2 + this workspace (disable nounset for setup scripts)
+# Source this workspace (disable nounset for setup scripts)
 set +u
-source /opt/ros/jazzy/setup.bash
 if [ -f install/setup.bash ]; then
 	source install/setup.bash
+else
+    echo "Warning: install/setup.bash not found. Did you run 'colcon build'?"
 fi
 set -u
 

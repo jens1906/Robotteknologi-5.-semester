@@ -5,6 +5,7 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from moveit_configs_utils import MoveItConfigsBuilder
+import yaml
 
 def launch_setup(context, *args, **kwargs):
     ur_type = LaunchConfiguration("ur_type").perform(context)
@@ -32,6 +33,14 @@ def launch_setup(context, *args, **kwargs):
         .planning_pipelines(pipelines=["ompl", "pilz_industrial_motion_planner"])
         .to_moveit_configs()
     )
+
+    # Override OMPL config with our custom one
+    ompl_config_path = os.path.join(workstation_pkg, "config", "ompl_planning.yaml")
+    if os.path.exists(ompl_config_path):
+        with open(ompl_config_path, "r") as f:
+            custom_ompl = yaml.safe_load(f)
+        if "ompl" in moveit_config.planning_pipelines:
+            moveit_config.planning_pipelines["ompl"].update(custom_ompl)
 
     # 2. Move Group Node
     move_group_node = Node(
