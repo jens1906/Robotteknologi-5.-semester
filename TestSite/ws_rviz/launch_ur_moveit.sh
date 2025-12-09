@@ -32,10 +32,16 @@ fi
 
 # 2. Check for Python dependencies (trimesh is required for publish_environment.py)
 if ! python3 -c "import trimesh" >/dev/null 2>&1; then
-    echo "Error: Python module 'trimesh' is missing."
-    echo "Please install it using: pip3 install trimesh"
-    echo "Or: sudo apt install python3-trimesh"
-    exit 1
+    echo "Python module 'trimesh' is missing. Attempting to auto-install..."
+    if ! pip3 install trimesh; then
+        echo "Standard install failed. Trying user install..."
+        if ! pip3 install --user trimesh; then
+             echo "Error: Could not auto-install 'trimesh'. Please install it manually."
+             echo "Try: sudo apt install python3-trimesh"
+             exit 1
+        fi
+    fi
+    echo "'trimesh' installed successfully."
 fi
 
 # 3. Check for required ROS packages
