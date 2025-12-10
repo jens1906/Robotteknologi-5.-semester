@@ -28,7 +28,7 @@ cy = 363.6223  # Principal point Y (pixels)
 
 kernel = np.ones((5, 5), np.uint8)
 
-saveImages = False
+saveImages = True
 showImages = True
 printlogger = False
 
