@@ -1,0 +1,43 @@
+Session,Dimension,Weight,Rating,Product,Overall_Workload
+s1,Mental Demand,3.0,20.0,60.0,
+s1,Physical Demand,1.0,10.0,10.0,
+s1,Temporal Demand,1.0,5.0,5.0,
+s1,Performance,4.0,85.0,340.0,
+s1,Effort,5.0,15.0,75.0,
+s1,Frustration,1.0,10.0,10.0,
+s1,Overall_Workload,,,,33.333333333333336
+s2,Mental Demand,3.0,60.0,180.0,
+s2,Physical Demand,0.0,5.0,0.0,
+s2,Temporal Demand,4.0,5.0,20.0,
+s2,Performance,2.0,15.0,30.0,
+s2,Effort,5.0,35.0,175.0,
+s2,Frustration,1.0,10.0,10.0,
+s2,Overall_Workload,,,,27.666666666666668
+s3,Mental Demand,4.0,60.0,240.0,
+s3,Physical Demand,2.0,20.0,40.0,
+s3,Temporal Demand,3.0,10.0,30.0,
+s3,Performance,3.0,20.0,60.0,
+s3,Effort,1.0,40.0,40.0,
+s3,Frustration,2.0,5.0,10.0,
+s3,Overall_Workload,,,,28.0
+s4,Mental Demand,2.0,10.0,20.0,
+s4,Physical Demand,0.0,5.0,0.0,
+s4,Temporal Demand,3.0,5.0,15.0,
+s4,Performance,5.0,0.0,0.0,
+s4,Effort,1.0,20.0,20.0,
+s4,Frustration,4.0,30.0,120.0,
+s4,Overall_Workload,,,,11.666666666666666
+s5,Mental Demand,1.0,15.0,15.0,
+s5,Physical Demand,0.0,0.0,0.0,
+s5,Temporal Demand,4.0,15.0,60.0,
+s5,Performance,3.0,0.0,0.0,
+s5,Effort,2.0,0.0,0.0,
+s5,Frustration,5.0,25.0,125.0,
+s5,Overall_Workload,,,,13.333333333333334
+s6,Mental Demand,2.0,15.0,30.0,
+s6,Physical Demand,0.0,5.0,0.0,
+s6,Temporal Demand,1.0,15.0,15.0,
+s6,Performance,5.0,10.0,50.0,
+s6,Effort,3.0,0.0,0.0,
+s6,Frustration,4.0,25.0,100.0,
+s6,Overall_Workload,,,,13.0
