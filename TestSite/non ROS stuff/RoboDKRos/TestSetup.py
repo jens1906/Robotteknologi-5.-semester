@@ -77,7 +77,7 @@ def main():
     ]))
 
     # --- TestpladeKurve ---
-    testplade_path = Path(__file__).parent / "TestpladeKurobodkros_dirrve v3.stl"
+    testplade_path = Path(__file__).parent / "TestpladeKurve v3.stl"
     if testplade_path.exists():
         testplade = RDK.AddFile(str(testplade_path))
         testplade.setParent(frame4)

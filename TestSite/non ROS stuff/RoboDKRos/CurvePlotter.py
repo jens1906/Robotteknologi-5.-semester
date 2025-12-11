@@ -90,8 +90,7 @@ def build_curve_with_normals(sx, sy, sz, L=200, S=40, N=6, rot_deg=0, tilt_deg=4
 
 if __name__ == "__main__":
     RDK = Robolink()
-    mat6 = build_curve_with_normals(0, 0, 0, L=100, S=20, N=4, rot_deg=0, tilt_deg=180)
-    print(mat6)
+    mat6 = build_curve_with_normals(0, -300, 0, L=100, S=20, N=4, rot_deg=0, tilt_deg=180)
     curve = RDK.AddCurve(mat6)
     curve.setName("Curve_with_correct_tilt")
     curve.setParent(RDK.Item("Frame 3"))
