@@ -1,12 +1,19 @@
 """
-Standalone test script for testing conformal parameterization with your PLY file.
+Standalone test script for testing conformal parameterization with point cloud files.
 
 Usage:
-    python test_with_ply.py <path_to_ply_file>
+    # Single file mode (training and evaluation on same data):
+    python test_with_ply.py <path_to_file>
     
-Example:
+    # Two-file mode (train on first, evaluate on second):
+    python test_with_ply.py <training_file> --eval <evaluation_file>
+    
+Examples:
     python test_with_ply.py point_cloud.ply
+    python test_with_ply.py workspace_pointcloud_1.npy --eval workspace_pointcloud_2.npy
     python test_with_ply.py "../Surface parameterisation/point_cloud.ply"
+    
+Supported formats: .ply, .npy
 """
 
 import sys
@@ -29,6 +36,39 @@ def load_ply_file(filepath):
         sys.exit(1)
     except Exception as e:
         print(f"Error loading PLY file: {e}")
+        sys.exit(1)
+
+
+def load_point_cloud(filepath):
+    """
+    Load point cloud from PLY or NPY file.
+    
+    Args:
+        filepath: Path to .ply or .npy file
+        
+    Returns:
+        points: Nx3 numpy array of (x, y, z) coordinates
+    """
+    if not os.path.exists(filepath):
+        print(f"Error: File not found: {filepath}")
+        sys.exit(1)
+        
+    ext = os.path.splitext(filepath)[1].lower()
+    
+    if ext == '.npy':
+        try:
+            points = np.load(filepath)
+            if points.ndim != 2 or points.shape[1] != 3:
+                print(f"Error: NPY file must contain Nx3 array, got shape {points.shape}")
+                sys.exit(1)
+            return points
+        except Exception as e:
+            print(f"Error loading NPY file: {e}")
+            sys.exit(1)
+    elif ext == '.ply':
+        return load_ply_file(filepath)
+    else:
+        print(f"Error: Unsupported file format '{ext}'. Use .ply or .npy")
         sys.exit(1)
 
 
@@ -208,8 +248,337 @@ def create_interactive_visualization(surf, points):
     plt.show()
 
 
-def test_parameterization(ply_file_path):
-    """Test conformal parameterization with a PLY file"""
+def find_uv_for_point(surf, target_xyz_local, initial_uv=None, max_iter=50, tol=1e-6):
+    """
+    Find the UV coordinates that map closest to a target XYZ point.
+    
+    Uses numerical optimization to solve: argmin_uv ||surf.interpolate(uv) - target||
+    
+    Args:
+        surf: Parameterization object with interpolators
+        target_xyz_local: Target point in local coordinates (1x3)
+        initial_uv: Initial guess for UV (if None, uses nearest training point)
+        max_iter: Maximum optimization iterations
+        tol: Convergence tolerance
+        
+    Returns:
+        uv: Optimal UV coordinates (1x2)
+        residual: Distance from interpolated point to target
+    """
+    from scipy.optimize import minimize
+    
+    target = target_xyz_local.flatten()
+    
+    # Get UV bounds for constraints
+    bounds = surf.get_uv_bounds()
+    uv_bounds = [(bounds['u_min'], bounds['u_max']), 
+                 (bounds['v_min'], bounds['v_max'])]
+    
+    # Initial guess: find nearest training point in XY and use its UV
+    if initial_uv is None:
+        xy_target = target[:2]
+        xy_train = surf.points_local[:, :2]
+        distances = np.linalg.norm(xy_train - xy_target, axis=1)
+        nearest_idx = np.argmin(distances)
+        initial_uv = surf.uv_params[nearest_idx].copy()
+    
+    def objective(uv):
+        """Distance from interpolated point to target"""
+        uv_2d = np.atleast_2d(uv)
+        # Interpolate in local coordinates
+        x_interp = surf.interpolator_x(uv_2d)[0]
+        y_interp = surf.interpolator_y(uv_2d)[0]
+        z_interp = surf.interpolator_z(uv_2d)[0]
+        
+        if np.isnan(x_interp) or np.isnan(y_interp) or np.isnan(z_interp):
+            return 1e10  # Penalty for outside domain
+        
+        interp_point = np.array([x_interp, y_interp, z_interp])
+        return np.linalg.norm(interp_point - target)
+    
+    # Optimize
+    result = minimize(objective, initial_uv, method='L-BFGS-B', 
+                     bounds=uv_bounds, options={'maxiter': max_iter, 'ftol': tol})
+    
+    return result.x, result.fun
+
+
+def evaluate_on_second_pointcloud(surf, eval_points, visualize=True, max_eval_points=5000):
+    """
+    Evaluate interpolation quality using a second independent point cloud.
+    
+    Uses proper UV-based evaluation:
+    1. For each eval point, find optimal UV via numerical optimization
+    2. Interpolate XYZ from that UV using the trained pipeline
+    3. Measure residual distance (how close the surface gets to each point)
+    
+    This tests the ACTUAL parameterization pipeline (UV → XYZ mapping).
+    
+    Args:
+        surf: Trained Parameterization object
+        eval_points: Nx3 array of evaluation points (from second point cloud)
+        visualize: Whether to show visualization plots
+        max_eval_points: Maximum points to evaluate (for performance)
+        
+    Returns:
+        dict: Evaluation metrics including errors and statistics
+    """
+    from scipy.spatial import cKDTree
+    
+    print("\n" + "=" * 70)
+    print("  EVALUATING ON SECOND POINT CLOUD (UV-Based Method)")
+    print("=" * 70)
+    
+    print(f"\n   Evaluation points: {len(eval_points)}")
+    print(f"   X range: [{np.min(eval_points[:, 0]):.3f}, {np.max(eval_points[:, 0]):.3f}]")
+    print(f"   Y range: [{np.min(eval_points[:, 1]):.3f}, {np.max(eval_points[:, 1]):.3f}]")
+    print(f"   Z range: [{np.min(eval_points[:, 2]):.3f}, {np.max(eval_points[:, 2]):.3f}]")
+    
+    # Subsample if too many points (optimization is expensive)
+    if len(eval_points) > max_eval_points:
+        print(f"\n   Subsampling to {max_eval_points} points for performance...")
+        indices = np.random.choice(len(eval_points), max_eval_points, replace=False)
+        eval_points_subset = eval_points[indices]
+    else:
+        eval_points_subset = eval_points
+        indices = np.arange(len(eval_points))
+    
+    n_eval = len(eval_points_subset)
+    
+    # Transform evaluation points to local frame
+    print("\n   Transforming to local frame...")
+    eval_local = surf.global_to_local(eval_points_subset)
+    
+    # Build KD-tree for fast initial UV guess lookup
+    print("   Building KD-tree for initial UV estimation...")
+    train_xy = surf.points_local[:, :2]
+    kdtree_xy = cKDTree(train_xy)
+    
+    # Find optimal UV for each evaluation point
+    print(f"   Finding optimal UV coordinates for {n_eval} points...")
+    print("   (This may take a moment...)")
+    
+    eval_uv = np.zeros((n_eval, 2))
+    residuals = np.zeros(n_eval)
+    interpolated_local = np.zeros((n_eval, 3))
+    
+    # Progress tracking
+    progress_step = max(1, n_eval // 10)
+    
+    for i in range(n_eval):
+        if i % progress_step == 0:
+            print(f"      Progress: {i}/{n_eval} ({100*i/n_eval:.0f}%)")
+        
+        target_local = eval_local[i]
+        
+        # Find nearest training point for initial guess
+        _, nearest_idx = kdtree_xy.query(target_local[:2])
+        initial_uv = surf.uv_params[nearest_idx].copy()
+        
+        # Optimize to find best UV
+        optimal_uv, residual = find_uv_for_point(surf, target_local, initial_uv)
+        
+        eval_uv[i] = optimal_uv
+        residuals[i] = residual
+        
+        # Store interpolated point
+        uv_2d = np.atleast_2d(optimal_uv)
+        interpolated_local[i, 0] = surf.interpolator_x(uv_2d)[0]
+        interpolated_local[i, 1] = surf.interpolator_y(uv_2d)[0]
+        interpolated_local[i, 2] = surf.interpolator_z(uv_2d)[0]
+    
+    print(f"      Progress: {n_eval}/{n_eval} (100%)")
+    
+    # Filter out failed optimizations (NaN or very high residuals)
+    valid_mask = ~np.isnan(interpolated_local).any(axis=1) & (residuals < 1e9)
+    n_valid = np.sum(valid_mask)
+    n_invalid = n_eval - n_valid
+    
+    print(f"\n   Valid points: {n_valid}/{n_eval} ({100*n_valid/n_eval:.1f}%)")
+    if n_invalid > 0:
+        print(f"   Points outside domain: {n_invalid}")
+    
+    # Extract valid data
+    eval_local_valid = eval_local[valid_mask]
+    interp_local_valid = interpolated_local[valid_mask]
+    eval_uv_valid = eval_uv[valid_mask]
+    residuals_valid = residuals[valid_mask]
+    
+    # Compute component-wise errors in local frame
+    errors_x = np.abs(interp_local_valid[:, 0] - eval_local_valid[:, 0])
+    errors_y = np.abs(interp_local_valid[:, 1] - eval_local_valid[:, 1])
+    errors_z = np.abs(interp_local_valid[:, 2] - eval_local_valid[:, 2])
+    
+    # Signed Z error (most important for surface)
+    z_errors_signed = interp_local_valid[:, 2] - eval_local_valid[:, 2]
+    
+    # 3D residual (distance from surface to point)
+    errors_3d = residuals_valid
+    
+    # Compute metrics
+    metrics = {
+        'n_total': len(eval_points),
+        'n_evaluated': n_eval,
+        'n_valid': n_valid,
+        'n_invalid': n_invalid,
+        'coverage': n_valid / n_eval,
+        
+        # 3D surface distance (residual from optimization)
+        'mean_residual': float(np.mean(errors_3d)),
+        'max_residual': float(np.max(errors_3d)),
+        'std_residual': float(np.std(errors_3d)),
+        'rmse_residual': float(np.sqrt(np.mean(errors_3d**2))),
+        'median_residual': float(np.median(errors_3d)),
+        
+        # Per-axis errors
+        'mean_error_x': float(np.mean(errors_x)),
+        'mean_error_y': float(np.mean(errors_y)),
+        'mean_error_z': float(np.mean(errors_z)),
+        'max_error_x': float(np.max(errors_x)),
+        'max_error_y': float(np.max(errors_y)),
+        'max_error_z': float(np.max(errors_z)),
+        
+        # Z-error (signed, to detect bias)
+        'mean_z_error_signed': float(np.mean(z_errors_signed)),
+        'std_z_error_signed': float(np.std(z_errors_signed)),
+        
+        # Percentiles
+        'residual_95th': float(np.percentile(errors_3d, 95)),
+        'residual_99th': float(np.percentile(errors_3d, 99)),
+    }
+    
+    # Print results
+    print("\n   " + "-" * 50)
+    print("   EVALUATION RESULTS (UV-Based Surface Distance)")
+    print("   " + "-" * 50)
+    print(f"   Surface Residual (distance from surface to eval points):")
+    print(f"     Mean residual:  {metrics['mean_residual']:.6f}")
+    print(f"     Median residual:{metrics['median_residual']:.6f}")
+    print(f"     Max residual:   {metrics['max_residual']:.6f}")
+    print(f"     RMSE:           {metrics['rmse_residual']:.6f}")
+    print(f"     Std deviation:  {metrics['std_residual']:.6f}")
+    print(f"     95th percentile:{metrics['residual_95th']:.6f}")
+    print(f"     99th percentile:{metrics['residual_99th']:.6f}")
+    print(f"\n   Per-Axis Mean Errors (Local Frame):")
+    print(f"     X: {metrics['mean_error_x']:.6f}  (max: {metrics['max_error_x']:.6f})")
+    print(f"     Y: {metrics['mean_error_y']:.6f}  (max: {metrics['max_error_y']:.6f})")
+    print(f"     Z: {metrics['mean_error_z']:.6f}  (max: {metrics['max_error_z']:.6f})")
+    print(f"\n   Signed Z-Error (bias check):")
+    print(f"     Mean signed:    {metrics['mean_z_error_signed']:.6f}")
+    print(f"     Std signed:     {metrics['std_z_error_signed']:.6f}")
+    if abs(metrics['mean_z_error_signed']) > metrics['std_z_error_signed'] * 0.1:
+        print(f"     ⚠ Note: Non-zero mean suggests systematic bias")
+    else:
+        print(f"     ✓ No significant systematic bias detected")
+    print("   " + "-" * 50)
+    
+    if visualize and n_valid > 0:
+        create_evaluation_visualization_uv(
+            surf, eval_local_valid, interp_local_valid, eval_uv_valid, residuals_valid, z_errors_signed
+        )
+    
+    return metrics
+
+
+def create_evaluation_visualization_uv(surf, eval_local, interp_local, eval_uv, residuals, z_errors):
+    """
+    Create visualization for UV-based evaluation.
+    """
+    print("\n   Creating evaluation visualization...")
+    
+    fig = plt.figure(figsize=(18, 12))
+    
+    # 1. Residual (surface distance) distribution
+    ax1 = fig.add_subplot(231)
+    ax1.hist(residuals, bins=50, edgecolor='black', alpha=0.7, color='steelblue')
+    ax1.axvline(np.mean(residuals), color='r', linestyle='--', linewidth=2, 
+                label=f'Mean: {np.mean(residuals):.4f}')
+    ax1.axvline(np.median(residuals), color='g', linestyle='--', linewidth=2,
+                label=f'Median: {np.median(residuals):.4f}')
+    ax1.set_xlabel('Surface Distance (Residual)', fontsize=11)
+    ax1.set_ylabel('Count', fontsize=11)
+    ax1.set_title('Surface Distance Distribution', fontsize=12, fontweight='bold')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. Residual heatmap in UV space
+    ax2 = fig.add_subplot(232)
+    scatter = ax2.scatter(eval_uv[:, 0], eval_uv[:, 1], c=residuals, 
+                          cmap='hot', s=5, alpha=0.7)
+    plt.colorbar(scatter, ax=ax2, label='Residual')
+    ax2.set_xlabel('U', fontsize=11)
+    ax2.set_ylabel('V', fontsize=11)
+    ax2.set_title('Residual Distribution in UV Space', fontsize=12, fontweight='bold')
+    ax2.set_aspect('equal')
+    
+    # 3. Residual heatmap in XY space (local)
+    ax3 = fig.add_subplot(233)
+    scatter3 = ax3.scatter(eval_local[:, 0], eval_local[:, 1], c=residuals, 
+                           cmap='hot', s=5, alpha=0.7)
+    plt.colorbar(scatter3, ax=ax3, label='Residual')
+    ax3.set_xlabel('Local X', fontsize=11)
+    ax3.set_ylabel('Local Y', fontsize=11)
+    ax3.set_title('Residual Distribution in XY Space', fontsize=12, fontweight='bold')
+    ax3.set_aspect('equal')
+    
+    # 4. Signed Z-error histogram
+    ax4 = fig.add_subplot(234)
+    ax4.hist(z_errors, bins=50, edgecolor='black', alpha=0.7, color='purple')
+    ax4.axvline(0, color='k', linestyle='-', linewidth=2)
+    ax4.axvline(np.mean(z_errors), color='r', linestyle='--', linewidth=2,
+                label=f'Mean: {np.mean(z_errors):.4f}')
+    ax4.set_xlabel('Z Error (Surface - Actual)', fontsize=11)
+    ax4.set_ylabel('Count', fontsize=11)
+    ax4.set_title('Signed Z-Error Distribution', fontsize=12, fontweight='bold')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
+    
+    # 5. 3D view - actual vs surface points
+    ax5 = fig.add_subplot(235, projection='3d')
+    subsample = min(2000, len(eval_local))
+    idx = np.random.choice(len(eval_local), subsample, replace=False)
+    ax5.scatter(eval_local[idx, 0], eval_local[idx, 1], eval_local[idx, 2], 
+               c='blue', s=2, alpha=0.5, label='Actual (Point Cloud 2)')
+    ax5.scatter(interp_local[idx, 0], interp_local[idx, 1], interp_local[idx, 2],
+               c='red', s=2, alpha=0.5, label='Surface (Interpolated)')
+    ax5.set_xlabel('Local X')
+    ax5.set_ylabel('Local Y')
+    ax5.set_zlabel('Local Z')
+    ax5.set_title('Actual vs Surface Points (Local Frame)', fontsize=12, fontweight='bold')
+    ax5.legend()
+    
+    # 6. Cumulative residual distribution
+    ax6 = fig.add_subplot(236)
+    sorted_residuals = np.sort(residuals)
+    cumulative = np.arange(1, len(sorted_residuals) + 1) / len(sorted_residuals)
+    ax6.plot(sorted_residuals, cumulative, linewidth=2, color='steelblue')
+    ax6.axhline(0.95, color='r', linestyle='--', alpha=0.7, label='95%')
+    ax6.axhline(0.99, color='orange', linestyle='--', alpha=0.7, label='99%')
+    p95 = np.percentile(residuals, 95)
+    p99 = np.percentile(residuals, 99)
+    ax6.axvline(p95, color='r', linestyle=':', alpha=0.5)
+    ax6.axvline(p99, color='orange', linestyle=':', alpha=0.5)
+    ax6.set_xlabel('Residual Threshold', fontsize=11)
+    ax6.set_ylabel('Fraction of Points Below Threshold', fontsize=11)
+    ax6.set_title(f'Cumulative Distribution (95%: {p95:.4f}, 99%: {p99:.4f})', fontsize=12, fontweight='bold')
+    ax6.legend()
+    ax6.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.suptitle('UV-Based Surface Evaluation: Distance from Interpolated Surface to Eval Points', 
+                 fontsize=14, fontweight='bold', y=1.02)
+    plt.show()
+
+
+def test_parameterization(training_file_path, eval_file_path=None):
+    """
+    Test conformal parameterization with point cloud file(s).
+    
+    Args:
+        training_file_path: Path to training point cloud (.ply or .npy)
+        eval_file_path: Optional path to evaluation point cloud (.ply or .npy)
+                        If None, evaluation uses the training data.
+    """
     
     # Import the module
     try:
@@ -223,13 +592,9 @@ def test_parameterization(ply_file_path):
     print("  TESTING CONFORMAL PARAMETERIZATION")
     print("=" * 70)
     
-    # Load point cloud
-    print(f"\n1. Loading PLY file: {ply_file_path}")
-    if not os.path.exists(ply_file_path):
-        print(f"Error: File not found: {ply_file_path}")
-        return False
-    
-    points = load_ply_file(ply_file_path)
+    # Load training point cloud
+    print(f"\n1. Loading training point cloud: {training_file_path}")
+    points = load_point_cloud(training_file_path)
     print(f"   Loaded {len(points)} points")
     print(f"   X range: [{np.min(points[:, 0]):.3f}, {np.max(points[:, 0]):.3f}]")
     print(f"   Y range: [{np.min(points[:, 1]):.3f}, {np.max(points[:, 1]):.3f}]")
@@ -261,8 +626,8 @@ def test_parameterization(ply_file_path):
     surf.build_inverse_interpolation()
     print(f"   Interpolation ready")
     
-    # Evaluate quality
-    print("\n7. Evaluating quality metrics...")
+    # Evaluate quality on training data (reconstruction error)
+    print("\n6. Evaluating reconstruction quality (training data)...")
     sample_size = min(1000, len(points))
     metrics = surf.evaluate_quality(sample_size=sample_size)
     print(f"   Quality evaluation complete")
@@ -272,8 +637,8 @@ def test_parameterization(ply_file_path):
     print(f"   RMSE: {metrics['rmse']:.6f}")
     print(f"   Std deviation: {metrics['std_error']:.6f}")
     
-    # Test interpolation
-    print("\n6. Testing interpolation...")
+    # Test interpolation on training data
+    print("\n7. Testing interpolation on training data...")
     n_test = min(10, len(points))
     test_indices = np.random.choice(len(points), n_test, replace=False)
     test_uv = surf.uv_params[test_indices]
@@ -287,7 +652,7 @@ def test_parameterization(ply_file_path):
     print(f"   Max error: {np.max(errors):.6f}")
     
     # Test frame transformations
-    print("\n9. Testing frame transformations...")
+    print("\n8. Testing frame transformations...")
     n_transform = min(20, len(points))
     test_points = points[:n_transform]
     
@@ -295,11 +660,18 @@ def test_parameterization(ply_file_path):
     reconstructed = surf.local_to_global(local_points)
     transform_errors = np.linalg.norm(reconstructed - test_points, axis=1)
     
-    print(f"    Round-trip transformation tested on {n_transform} points")
-    print(f"    Max reconstruction error: {np.max(transform_errors):.10f}")
+    print(f"   Round-trip transformation tested on {n_transform} points")
+    print(f"   Max reconstruction error: {np.max(transform_errors):.10f}")
+    
+    # If evaluation file is provided, evaluate on second point cloud
+    eval_metrics = None
+    if eval_file_path is not None:
+        print(f"\n9. Loading evaluation point cloud: {eval_file_path}")
+        eval_points = load_point_cloud(eval_file_path)
+        eval_metrics = evaluate_on_second_pointcloud(surf, eval_points, visualize=True)
     
     # Launch interactive visualization
-    print("\n8. Launching interactive visualization...")
+    print("\n10. Launching interactive visualization...")
     create_interactive_visualization(surf, points)
     
     # Summary
@@ -307,38 +679,103 @@ def test_parameterization(ply_file_path):
     print("  ALL TESTS PASSED!")
     print("=" * 70)
     print("\nSummary:")
-    print(f"  • Point cloud: {len(points)} points")
+    print(f"  • Training point cloud: {len(points)} points")
     print(f"  • UV parameterization: {uv.shape}")
     print(f"  • Interpolation: Working")
     print(f"  • Frame transformations: Working")
+    
+    if eval_metrics is not None:
+        print(f"\n  Evaluation on Second Point Cloud (UV-Based):")
+        print(f"  • Evaluated points: {eval_metrics['n_evaluated']} ({eval_metrics['n_valid']} valid)")
+        print(f"  • Mean surface distance: {eval_metrics['mean_residual']:.6f}")
+        print(f"  • RMSE: {eval_metrics['rmse_residual']:.6f}")
+        print(f"  • 95th percentile: {eval_metrics['residual_95th']:.6f}")
+    
     print("\n" + "=" * 70)
     
     return True
 
 
 def main():
-    """Main function"""
-    if len(sys.argv) < 2:
-        print("Usage: python test_with_ply.py <path_to_ply_file>")
-        print("\nSearching for point_cloud.ply in test folder...")
+    """Main function with support for single-file and two-file evaluation modes."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description='Test conformal parameterization with point cloud files.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  Single file mode (train and evaluate on same data):
+    python test_with_ply.py point_cloud.ply
+    python test_with_ply.py workspace_pointcloud_1.npy
+    
+  Two-file mode (train on first, evaluate on second):
+    python test_with_ply.py workspace_pointcloud_1.npy --eval workspace_pointcloud_2.npy
+    python test_with_ply.py train.ply --eval test.ply
+    
+Supported formats: .ply, .npy
+        """
+    )
+    parser.add_argument('training_file', nargs='?', default=None,
+                        help='Path to training point cloud file (.ply or .npy)')
+    parser.add_argument('--eval', '-e', dest='eval_file', default=None,
+                        help='Path to evaluation point cloud file (.ply or .npy)')
+    
+    args = parser.parse_args()
+    
+    # Determine training file
+    if args.training_file is None:
+        print("No training file specified.")
+        print("Searching for point_cloud.ply or workspace_pointcloud_1.npy in test folder...")
         
-        # Look in test folder (same directory as this script)
         test_dir = os.path.dirname(os.path.abspath(__file__))
-        ply_file = os.path.join(test_dir, "point_cloud.ply")
         
-        if os.path.exists(ply_file):
-            print(f"Found: {ply_file}")
-        else:
-            print(f"\nPLY file not found in: {test_dir}")
+        # Check for common file names
+        candidates = [
+            os.path.join(test_dir, "point_cloud.ply"),
+            os.path.join(test_dir, "workspace_pointcloud_1.npy"),
+            os.path.join(test_dir, "pointcloud.ply"),
+            os.path.join(test_dir, "pointcloud.npy"),
+        ]
+        
+        training_file = None
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                training_file = candidate
+                print(f"Found: {training_file}")
+                break
+        
+        if training_file is None:
+            print(f"\nNo point cloud file found in: {test_dir}")
             print("\nPlease either:")
-            print(f"  1. Copy your PLY file to: {test_dir}")
-            print("  2. Or specify path: python test_with_ply.py <path_to_ply_file>")
+            print(f"  1. Copy your point cloud file to: {test_dir}")
+            print("  2. Or specify path: python test_with_ply.py <path_to_file>")
+            print("\nFor two-file evaluation:")
+            print("  python test_with_ply.py train.npy --eval eval.npy")
             sys.exit(1)
     else:
-        ply_file = sys.argv[1]
+        training_file = args.training_file
+    
+    eval_file = args.eval_file
+    
+    # Print mode info
+    if eval_file:
+        print("\n" + "=" * 70)
+        print("  TWO-FILE EVALUATION MODE")
+        print("=" * 70)
+        print(f"  Training file:   {training_file}")
+        print(f"  Evaluation file: {eval_file}")
+        print("=" * 70 + "\n")
+    else:
+        print("\n" + "=" * 70)
+        print("  SINGLE-FILE MODE")
+        print("=" * 70)
+        print(f"  Point cloud: {training_file}")
+        print("  (Use --eval <file> to evaluate on a second point cloud)")
+        print("=" * 70 + "\n")
     
     try:
-        success = test_parameterization(ply_file)
+        success = test_parameterization(training_file, eval_file)
         sys.exit(0 if success else 1)
     except Exception as e:
         print(f"\nError during testing: {e}")
