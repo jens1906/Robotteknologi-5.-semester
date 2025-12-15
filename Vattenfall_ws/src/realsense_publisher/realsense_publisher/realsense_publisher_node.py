@@ -12,7 +12,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 import cv2 as cv
 import os
 
@@ -23,7 +23,7 @@ class TestImagePublisher(Node):
         
         # Declare parameters - use absolute paths
         home = os.path.expanduser('~')
-        base_path = f'{home}/Documents/GitHub/Robotteknologi-5.-semester/Vattenfall_ws/src/corrosion_detection/Saved_data/capture_20251128_132546'
+        base_path = f'{home}/Documents/GitHub/Robotteknologi-5.-semester/Vattenfall_ws/src/corrosion_detection/Saved_data/capture_20251213_115829'
         self.declare_parameter('test_image_path', f'{base_path}/color.png')
         self.declare_parameter('test_depth_path', f'{base_path}/depth.npy')
         
@@ -38,6 +38,10 @@ class TestImagePublisher(Node):
         # Publishers - same topics as real wrapper
         self.color_pub = self.create_publisher(Image, '/camera/color/image_raw', image_qos)
         self.depth_pub = self.create_publisher(Image, '/camera/aligned_depth_to_color/image_raw', image_qos)
+        
+        # Compressed publishers for UI compatibility
+        self.color_compressed_pub = self.create_publisher(CompressedImage, '/camera/color/image_raw/compressed', image_qos)
+        self.depth_compressed_pub = self.create_publisher(CompressedImage, '/camera/aligned_depth_to_color/image_raw/compressedDepth', image_qos)
         
         # Load test images
         test_image_path = self.get_parameter('test_image_path').get_parameter_value().string_value
@@ -91,14 +95,32 @@ class TestImagePublisher(Node):
         msg.data = img.tobytes()
         return msg
 
+    def numpy_to_compressed_image_msg(self, img, format='jpeg'):
+        """Convert numpy array to CompressedImage message."""
+        msg = CompressedImage()
+        msg.format = format
+        if format == 'jpeg':
+            # Encode as JPEG for color images
+            success, encoded = cv.imencode('.jpg', img, [cv.IMWRITE_JPEG_QUALITY, 90])
+        elif format == 'png':
+            # Encode as PNG for depth (16-bit preservation)
+            success, encoded = cv.imencode('.png', img, [cv.IMWRITE_PNG_COMPRESSION, 3])
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+        
+        if success:
+            msg.data = encoded.tobytes()
+        return msg
+
     def publish_test_frames(self):
         """Publish test images (matching real camera format)."""
-        # Publish as RGB8 (same as wrapper) and MONO16
+        # Synchronized timestamps
+        timestamp = self.get_clock().now().to_msg()
+        
+        # Publish raw images (for corrosion_detection)
         color_msg = self.numpy_to_image_msg(self.test_image, 'rgb8')
         depth_msg = self.numpy_to_image_msg(self.test_depth, 'mono16')
         
-        # Synchronized timestamps
-        timestamp = self.get_clock().now().to_msg()
         color_msg.header.stamp = timestamp
         depth_msg.header.stamp = timestamp
         color_msg.header.frame_id = 'camera_color_optical_frame'
@@ -106,6 +128,21 @@ class TestImagePublisher(Node):
 
         self.color_pub.publish(color_msg)
         self.depth_pub.publish(depth_msg)
+        
+        # Publish compressed images (for UI)
+        # Convert RGB back to BGR for JPEG encoding
+        color_bgr = cv.cvtColor(self.test_image, cv.COLOR_RGB2BGR)
+        color_compressed = self.numpy_to_compressed_image_msg(color_bgr, format='jpeg')
+        color_compressed.header.stamp = timestamp
+        color_compressed.header.frame_id = 'camera_color_optical_frame'
+        
+        # For depth, use PNG to preserve 16-bit data
+        depth_compressed = self.numpy_to_compressed_image_msg(self.test_depth, format='png')
+        depth_compressed.header.stamp = timestamp
+        depth_compressed.header.frame_id = 'camera_depth_optical_frame'
+        
+        self.color_compressed_pub.publish(color_compressed)
+        self.depth_compressed_pub.publish(depth_compressed)
 
 
 def main(args=None):
