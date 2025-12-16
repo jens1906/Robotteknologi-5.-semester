@@ -2,10 +2,10 @@ Session,Dimension,Weight,Rating,Product,Overall_Workload
 s1,Mental Demand,3.0,20.0,60.0,
 s1,Physical Demand,1.0,10.0,10.0,
 s1,Temporal Demand,1.0,5.0,5.0,
-s1,Performance,4.0,85.0,340.0,
+s1,Performance,4.0,15.0,60.0,
 s1,Effort,5.0,15.0,75.0,
 s1,Frustration,1.0,10.0,10.0,
-s1,Overall_Workload,,,,33.333333333333336
+s1,Overall_Workload,,,,14.666666666666666
 s2,Mental Demand,3.0,60.0,180.0,
 s2,Physical Demand,0.0,5.0,0.0,
 s2,Temporal Demand,4.0,5.0,20.0,
