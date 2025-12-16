@@ -65,8 +65,8 @@ class CorrosionDetector(Node):
         # Original xyz is 0.200, 0.218, -0.250 in metres and is from URDF
         T_world_to_base = np.array([
             [-1.000, -0.000,  0.000,  0.200],
-            [-0.000,  0.000, -1.000,  0.218],
-            [-0.000, -1.000, -0.000,  -0.275],
+            [-0.000,  0.000, -1.000,  0.240],
+            [-0.000, -1.000, -0.000,  -0.240],
             [ 0.000,  0.000,  0.000,  1.000]
         ])
         
@@ -461,7 +461,7 @@ class CorrosionDetector(Node):
             self.corrosion_tool_size.publish(msg)
 
             if saveImages:
-                self.save_data(color_image, depth_image, xyz_data, xyz_offset)
+                self.save_data(color_image, self.median_filter_depth(depth_image, kernel_size=9), xyz_data, xyz_offset)
         else:
             if printlogger: self.get_logger().info(f'Corrosion detection is already running, wait for ROBODK to complete {self.corrosion_accepted} {self.running_status}')
 
@@ -688,43 +688,70 @@ class CorrosionDetector(Node):
             import matplotlib.pyplot as plt
             from mpl_toolkits.mplot3d import Axes3D
             
-            fig = plt.figure(figsize=(15, 5))
+            fig = plt.figure(figsize=(20, 5))
             
-            # 3D scatter plot
-            ax1 = fig.add_subplot(131, projection='3d')
+            # 1. Thresholded WITHOUT adjustments or cleaning (raw HSV threshold)
+            ax1 = fig.add_subplot(141)
+            thresholded_raw = self.threshold_corrosion(color_image)
+            thresh_gray = cv.cvtColor(thresholded_raw, cv.COLOR_BGR2GRAY)
+            # Create overlay image
+            overlay_raw = color_image.copy()
+            overlay_raw[thresh_gray > 0] = [0, 255, 0]  # Green mask
+            ax1.imshow(cv.cvtColor(overlay_raw, cv.COLOR_BGR2RGB))
+            ax1.set_title('Thresholded image without UI adjustments or cleaning')
+            ax1.axis('off')
+            
+            # 2. Thresholded WITH adjustments AND cleaning (as used in actual processing)
+            ax2 = fig.add_subplot(142)
+            thresholded_adjusted = self.threshold_corrosion(color_image)
+            thresh_gray_adjusted = cv.cvtColor(thresholded_adjusted, cv.COLOR_BGR2GRAY)
+            # Apply UI adjustments
+            combined_mask = cv.bitwise_or(thresh_gray_adjusted, self.ui_corrosion_add)
+            combined_mask = cv.bitwise_and(combined_mask, cv.bitwise_not(self.ui_corrosion_remove))
+            # Apply cleaning (erosion→dilation→erosion) - same as used in edge detection
+            cleaned_mask = self.clean_image(cv.merge([combined_mask, combined_mask, combined_mask]))
+            cleaned_gray = cv.cvtColor(cleaned_mask, cv.COLOR_BGR2GRAY)
+            # Create overlay image
+            overlay_adjusted = color_image.copy()
+            overlay_adjusted[cleaned_gray > 0] = [0, 255, 0]  # Green mask
+            ax2.imshow(cv.cvtColor(overlay_adjusted, cv.COLOR_BGR2RGB))
+            ax2.set_title('Thresholded image with UI adjustments and dilation')
+            ax2.axis('off')
+            
+            # 3. 3D Corrosion area only
+            ax3 = fig.add_subplot(143, projection='3d')
             if len(xyz_corrosion) > 0:
-                ax1.scatter(xyz_corrosion[:, 0], xyz_corrosion[:, 1], xyz_corrosion[:, 2], 
+                ax3.scatter(xyz_corrosion[:, 0], xyz_corrosion[:, 1], xyz_corrosion[:, 2], 
                            c='red', marker='.', s=1, label='Corrosion Area')
+            ax3.set_xlabel('X (mm)')
+            ax3.set_ylabel('Y (mm)')
+            ax3.set_zlabel('Z (mm)')
+            ax3.set_title('3D Corrosion Area')
+            ax3.view_init(elev=15, azim=-80)  # Adjust viewing angle (elevation, azimuth in degrees)
+            ax3.legend()
+            
+            # 4. 3D Workspace area only
+            ax4 = fig.add_subplot(144, projection='3d')
             if len(xyz_workspace) > 0:
-                ax1.scatter(xyz_workspace[:, 0], xyz_workspace[:, 1], xyz_workspace[:, 2], 
+                ax4.scatter(xyz_workspace[:, 0], xyz_workspace[:, 1], xyz_workspace[:, 2], 
                            c='blue', marker='.', s=0.5, alpha=0.3, label='Workspace')
-            ax1.set_xlabel('X (mm)')
-            ax1.set_ylabel('Y (mm)')
-            ax1.set_zlabel('Z (mm)')
-            ax1.set_title('3D Point Cloud (World Frame)')
-            ax1.legend()
+            ax4.set_xlabel('X (mm)')
+            ax4.set_ylabel('Y (mm)')
+            ax4.set_zlabel('Z (mm)')
+            ax4.set_title('3D Workspace Area')
+            ax4.view_init(elev=15, azim=-80)  # Same viewing angle as first plot
+            ax4.legend()
             
-            # Top view (XY plane)
-            ax2 = fig.add_subplot(132)
-            if len(xyz_corrosion) > 0:
-                ax2.scatter(xyz_corrosion[:, 0], xyz_corrosion[:, 1], c='red', marker='.', s=1, label='Corrosion')
-            if len(xyz_workspace) > 0:
-                ax2.scatter(xyz_workspace[:, 0], xyz_workspace[:, 1], c='blue', marker='.', s=0.5, alpha=0.3, label='Workspace')
-            ax2.set_xlabel('X (mm)')
-            ax2.set_ylabel('Y (mm)')
-            ax2.set_title('Top View (XY Plane)')
-            ax2.axis('equal')
-            ax2.legend()
-            ax2.grid(True)
-            
-            # Original 2D detection
-            ax3 = fig.add_subplot(133)
-            ax3.imshow(cv.cvtColor(color_image, cv.COLOR_BGR2RGB))
-            if hasattr(self, 'scatter_data_original') and len(self.scatter_data_original) > 0:
-                ax3.scatter(self.scatter_data_original[:, 0], self.scatter_data_original[:, 1], 
-                           c='red', marker='.', s=1, alpha=0.5)
-            ax3.set_title('2D Detection (Camera View)')
-            ax3.axis('off')
+            # Share the same axis limits between the two 3D plots
+            # This makes zooming in ax4 also zoom ax3
+            ax3.sharex(ax4)
+            ax3.sharey(ax4)
+            # Note: sharez doesn't work well for 3D plots, so we manually sync z limits
+            if len(xyz_corrosion) > 0 and len(xyz_workspace) > 0:
+                all_z = np.concatenate([xyz_corrosion[:, 2], xyz_workspace[:, 2]])
+                z_min, z_max = all_z.min(), all_z.max()
+                ax3.set_zlim(z_min, z_max)
+                ax4.set_zlim(z_min, z_max)
             
             plt.tight_layout()
             
@@ -738,7 +765,7 @@ class CorrosionDetector(Node):
                 self.get_logger().info(f'  Z range: [{xyz_corrosion[:, 2].min():.1f}, {xyz_corrosion[:, 2].max():.1f}] mm')
             
             plt.show(block=False)
-            plt.pause(200)
+            plt.pause(2000)
             plt.close(fig)
             
         except ImportError:
