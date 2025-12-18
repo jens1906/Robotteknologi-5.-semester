@@ -175,8 +175,6 @@ Run Userinterface
   ros2 run user_interface user_interface_node
 ```
 
-## 🔌 ROS2 Topics & Services
-
 ## 👥 Contributors
 This project was developed by a group of students from Aalborg University, as part of the 5th semester in the Robot technologi bachalor.  
 - André Vester Magnusson
