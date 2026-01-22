@@ -98,18 +98,23 @@ class TestImagePublisher(Node):
     def numpy_to_compressed_image_msg(self, img, format='jpeg'):
         """Convert numpy array to CompressedImage message."""
         msg = CompressedImage()
-        msg.format = format
         if format == 'jpeg':
+            msg.format = 'jpeg'
             # Encode as JPEG for color images
             success, encoded = cv.imencode('.jpg', img, [cv.IMWRITE_JPEG_QUALITY, 90])
+            if success:
+                msg.data = encoded.tobytes()
         elif format == 'png':
-            # Encode as PNG for depth (16-bit preservation)
+            msg.format = 'png; compressedDepth'
+            # Encode as PNG for depth (16-bit preservation) with CompressedDepth header
             success, encoded = cv.imencode('.png', img, [cv.IMWRITE_PNG_COMPRESSION, 3])
+            if success:
+                # Add 12-byte CompressedDepth header: 8 bytes format + 4 bytes quantization
+                header = b'png \x00\x00\x00\x00\x00\x00\x00\x00'  # 12 bytes total
+                msg.data = header + encoded.tobytes()
         else:
             raise ValueError(f"Unsupported format: {format}")
         
-        if success:
-            msg.data = encoded.tobytes()
         return msg
 
     def publish_test_frames(self):
